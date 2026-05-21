@@ -1,0 +1,5 @@
+// known_failures.bsh
+//
+// The previously tracked Node-EQ gaps have been resolved.
+//
+// Kept as a placeholder so compare-based workflows still have a stable path.

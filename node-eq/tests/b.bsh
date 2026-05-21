@@ -1,0 +1,5 @@
+import def from './b_dep'
+import {cmd} from './b_dep'
+
+$(...cmd).run()
+$(...def).run()

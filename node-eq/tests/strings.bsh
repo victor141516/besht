@@ -1,0 +1,61 @@
+let a = "hello"
+let b = " world"
+let c = a + b
+console.log(c)
+
+let n = 42
+console.log("count: " + n)
+console.log("value: " + n + " end")
+
+let name = "Alice"
+console.log(`Hello, ${name}!`)
+console.log(`name length would be a string: ${name}`)
+
+let prefix = "pre_"
+let suffix = "_suf"
+let combined = prefix + name + suffix
+console.log(combined)
+
+let s = "  trim me  "
+let trimmed = s.trim()
+console.log(trimmed)
+
+let upper = trimmed.toUpperCase()
+console.log(upper)
+
+let lower = upper.toLowerCase()
+console.log(lower)
+
+let msg = "Hello World"
+if (msg.includes("Hello") == 1) {
+    console.log("includes Hello: yes")
+}
+
+if (msg.startsWith("Hello") == 1) {
+    console.log("startsWith Hello: yes")
+}
+
+if (msg.endsWith("World") == 1) {
+    console.log("endsWith World: yes")
+}
+
+let idx = msg.indexOf("World")
+console.log(`indexOf World: ${idx}`)
+
+let sliced = msg.slice(6, 11)
+console.log(`slice(6,11): ${sliced}`)
+
+let replaced = msg.replace("Hello", "Hi")
+console.log(`replace: ${replaced}`)
+
+let allReplaced = "aababc".replaceAll("a", "X")
+console.log(`replaceAll: ${allReplaced}`)
+
+let empty = ""
+let withVal = empty + "filled"
+console.log(withVal)
+
+let numStr = "42"
+let num = to_int(numStr)
+let doubled = num * 2
+console.log(`doubled: ${doubled}`)

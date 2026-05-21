@@ -1,0 +1,22 @@
+const nums = [1, 2, 3, 4];
+
+const doubled = nums.map(n => n * 2);
+console.log(doubled.join(","));
+
+const big = nums.filter(n => n >= 3);
+console.log(big.join("|"));
+
+const total = nums.reduce((acc, n) => acc + n, 0);
+console.log(total);
+
+const product = nums.reduce((acc, n) => {
+  return acc * n;
+}, 1);
+console.log(product);
+
+const words = ["apple", "banana", "apple", "orange", "banana", "apple"];
+const counts = words.reduce((acc, word) => {
+  acc[word] = (acc[word] || 0) + 1;
+  return acc;
+}, {});
+console.log(counts);

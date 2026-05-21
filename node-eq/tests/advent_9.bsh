@@ -1,0 +1,81 @@
+type Board = string
+type Moves = string
+type Result = 'fail' | 'crash' | 'success'
+type Position = [number, number]
+type Cell = '@' | '#' | '*'
+type Direction = 'U' | 'D' | 'L' | 'R'
+
+function moveReno(board: Board, moves: Moves): Result {
+  class Game {
+    readonly matrix: Cell[][]
+    currentPos: Position
+
+    private static Deltas: Record<Direction, [number, number]> = {
+      U: [-1, 0],
+      D: [1, 0],
+      L: [0, -1],
+      R: [0, 1]
+    }
+
+    static splitBoard(board: Board): Cell[][] {
+      return board
+        .split('\n')
+        .slice(1, -1)
+        .map(e => e.split('')) as Cell[][]
+    }
+
+    static findCellPosition(matrix: Cell[][], cellToFind: Cell): Position {
+      const rowI = matrix.findIndex(row => row.includes(cellToFind))
+      const colI = rowI === -1 ? -1 : matrix[rowI].indexOf(cellToFind)
+      return [rowI, colI]
+    }
+
+    constructor(board: Board) {
+      this.matrix = Game.splitBoard(board)
+      this.currentPos = Game.findCellPosition(this.matrix, '@')
+    }
+
+    private moveCur(delta: [number, number]) {
+      this.currentPos = [
+        this.currentPos[0] + delta[0],
+        this.currentPos[1] + delta[1]
+      ]
+    }
+
+    moveDirection(direction: Direction) {
+      this.moveCur(Game.Deltas[direction])
+    }
+
+    getNextPosition(direction: Direction): Position {
+      const [dr, dc] = Game.Deltas[direction]
+      return [this.currentPos[0] + dr, this.currentPos[1] + dc]
+    }
+
+    getCellAt(pos: Position): Cell | undefined {
+      const [r, c] = pos
+      return this.matrix[r]?.[c]
+    }
+  }
+
+  const game = new Game(board)
+  let result: Result = 'fail'
+
+  for (const move of moves.split('') as Direction[]) {
+    const nextPos = game.getNextPosition(move)
+    const cell = game.getCellAt(nextPos)
+
+    if (cell === undefined || cell === '#') {
+      result = 'crash'
+      break
+    }
+
+    game.moveDirection(move)
+
+    if (cell === '*') {
+      result = 'success'
+      break
+    }
+  }
+
+  return result
+}

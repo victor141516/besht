@@ -1,0 +1,13 @@
+class C {
+  static methodA() {
+    C.methodB()
+    console.log('a')
+  }
+
+  static methodB() {
+    console.log('b')
+  }
+}
+
+C.methodA()
+C.methodB()

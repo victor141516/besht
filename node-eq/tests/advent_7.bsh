@@ -1,0 +1,41 @@
+function drawTree(height: number, ornament: string, frequency: number): string {
+  let asteriskCount = 0
+  return Array.from({ length: height })
+    .map((_, i) => {
+      return `${' '.repeat(height - i - 1)}${'*'.repeat(i * 2 + 1)}`
+    })
+    .join('\n')
+    .concat('\n' + ' '.repeat(height - 1) + '#')
+    .split('')
+    .map((e, i) => {
+      if (e !== '*') return e
+      if (++asteriskCount % frequency !== 0) return e
+
+      return ornament
+    })
+    .join('')
+}
+
+
+console.log(drawTree(5, 'o', 2) === 
+`    *
+   o*o
+  *o*o*
+ o*o*o*o
+*o*o*o*o*
+    #`)
+
+
+console.log(drawTree(3, '@', 3)===
+`  *
+ *@*
+*@**@
+  #`)
+
+
+console.log(drawTree(4, '+', 1)===
+`   +
+  +++
+ +++++
++++++++
+   #`)

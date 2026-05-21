@@ -1,0 +1,52 @@
+// formerly_known_failures.bsh — items that were tracked as gaps, now resolved.
+
+// Template literal expressions (not just ${var})
+let a = 3
+let b = 4
+console.log(`sum=${a + b}`)
+
+let name = "alice"
+console.log(`upper=${name.toUpperCase()}`)
+
+let items = ["x", "y", "z"]
+console.log(`count=${items.length}`)
+
+// Boolean-to-string coercion
+let flag = true
+let flagStr = "flag: " + flag
+console.log(flagStr)
+
+let off = false
+console.log("off: " + off)
+
+// Boolean methods in string/template context
+let msg = "Hello World"
+let hasHello = msg.includes("Hello")
+console.log(`includes: ${hasHello}`)
+
+let startsH = msg.startsWith("Hello")
+console.log(`starts: ${startsH}`)
+
+let endsD = msg.endsWith("World")
+console.log(`ends: ${endsD}`)
+
+// Ternary operator
+let x = 10
+let y = 3
+let bigger = x > y ? x : y
+let label = x > 5 ? "big" : "small"
+console.log(`bigger=${bigger}`)
+console.log(`label=${label}`)
+
+// Number methods
+let n = 42
+console.log(n.toString())
+
+let pi = 3.14159
+console.log(pi.toFixed(2))
+
+// Compound assignment operators
+let count = 10
+count += 5
+count -= 3
+console.log(`count=${count}`)

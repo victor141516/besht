@@ -1,0 +1,117 @@
+#!/usr/bin/env bun
+/**
+ * run-bsh — execute a .bsh file in the Bun/TypeScript runtime.
+ *
+ * Usage:  bun run-bsh <file.bsh> [script args...]
+ *         ./run-bsh <file.bsh> [script args...]
+ *
+ * The runtime globals ($, env, to_str, …) are injected before the file runs.
+ * declare statements in the file are TypeScript no-ops and ignored by Bun.
+ */
+
+import { writeFileSync, unlinkSync, readFileSync, existsSync } from "node:fs"
+import { join, resolve, dirname, basename, extname, relative } from "node:path"
+import { spawnSync } from "node:child_process"
+
+const target = process.argv[2]
+if (!target) {
+  console.error("Usage: run-bsh <file.bsh> [script args...]")
+  process.exit(1)
+}
+const scriptArgs = process.argv.slice(3)
+
+const absTarget = resolve(target)
+const runtimePath = resolve(dirname(import.meta.path), "runtime.ts")
+const tempFiles: string[] = []
+const materialized = new Map<string, string>()
+
+function collectArgSchema(code: string): { options: string[]; flags: string[] } {
+  const options = new Set<string>()
+  const flags = new Set<string>()
+  const re = /args\.(option|flag)\(\s*(["'])([^"']+)\2\s*(?:,\s*(["'])([^"']+)\4\s*)?\)/g
+  for (const match of code.matchAll(re)) {
+    const target = match[1] === "option" ? options : flags
+    target.add(`--${match[3]}`)
+    if (match[5]) target.add(`-${match[5]}`)
+  }
+  return { options: [...options], flags: [...flags] }
+}
+
+function stripDeclares(code: string): string {
+  return code
+    .replace(/^declare\s+class\s+[\s\S]*?\n\}/gm, "")
+    .replace(/^declare\s+(?:function|const|type|namespace|var|interface)[^\n]*/gm, "")
+    .replace(/^\s*\n/gm, "\n")
+    .trimStart()
+}
+
+function resolveBshImport(source: string, fromFile: string): string | null {
+  if (!source.startsWith("./") && !source.startsWith("../")) return null
+  const base = resolve(dirname(fromFile), source)
+  if (extname(base) === ".bsh" && existsSync(base)) return base
+  if (extname(base) === "" && existsSync(`${base}.bsh`)) return `${base}.bsh`
+  return null
+}
+
+function importSource(fromWrapper: string, toWrapper: string): string {
+  let rel = relative(dirname(fromWrapper), toWrapper).replaceAll("\\", "/")
+  if (!rel.startsWith("./") && !rel.startsWith("../")) rel = `./${rel}`
+  return rel
+}
+
+function materialize(file: string): string {
+  const absFile = resolve(file)
+  const existing = materialized.get(absFile)
+  if (existing) return existing
+
+  const tmpFile = join(dirname(absFile), `.besht_${basename(absFile, ".bsh")}_${process.pid}_${Date.now()}_${materialized.size}.ts`)
+  materialized.set(absFile, tmpFile)
+  tempFiles.push(tmpFile)
+
+  let stripped = stripDeclares(readFileSync(absFile, "utf8"))
+  const schema = collectArgSchema(stripped)
+  stripped = stripped.replace(/(import\s+(?:[^'";]+?\s+from\s+)?)(['"])(\.{1,2}\/[^'"]+)(\2)/g, (match, prefix, quote, source, suffix) => {
+    const dep = resolveBshImport(source, absFile)
+    if (!dep) return match
+    return `${prefix}${quote}${importSource(tmpFile, materialize(dep))}${suffix}`
+  })
+
+  const wrapper = `
+import {
+  $, args, env, to_str, to_int, String, Number, exit,
+  file_exists, is_dir, is_readable, is_writable, is_executable,
+  is_empty, is_set,
+  len, head, tail, append, contains, concat, range,
+  Command,
+} from ${JSON.stringify(runtimePath)};
+
+const _runtime = {
+  $, args, env, to_str, to_int, String, Number, exit,
+  file_exists, is_dir, is_readable, is_writable, is_executable,
+  is_empty, is_set,
+  len, head, tail, append, contains, concat, range,
+  Command,
+};
+Object.assign(globalThis, _runtime);
+args.configure(${JSON.stringify(schema.options)}, ${JSON.stringify(schema.flags)});
+
+${stripped}
+`.trimStart()
+
+  writeFileSync(tmpFile, wrapper, "utf8")
+  return tmpFile
+}
+
+let exitCode = 0
+try {
+  const result = spawnSync("bun", ["run", materialize(absTarget), ...scriptArgs], {
+    stdio: "inherit",
+    env: { ...process.env },
+  })
+  exitCode = result.status ?? 0
+} finally {
+  for (const file of tempFiles.reverse()) {
+    try { unlinkSync(file) } catch {}
+  }
+}
+process.exit(exitCode)

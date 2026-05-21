@@ -1,0 +1,154 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/victor141516/besht/internal/codegen"
+)
+
+const usage = `besht — TypeScript-flavored shell compiler
+
+Usage:
+  besht <file.bsh>                    Compile and print to stdout
+  besht <file.bsh> -o <out.sh>        Compile to single file
+  besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
+  besht --check <file.bsh>            Type-check and validate imports only (no output)
+  besht --strict <file.bsh>           Validate types during checking/compile
+  besht --version                     Print version
+
+Flags:
+  -o <path>    Output file (default: stdout) or output directory (with --split)
+  --split      Compile each .bsh file to its own .sh file; imports become 'source' calls
+  --opt-no-add-binaries-check   Omit the runtime POSIX self-check from compiled output
+  --opt-no-source-map            Omit # besht:source:line:col sourcemap from compiled output
+  --opt-resolve-ts-imports       Resolve extensionless imports to .ts when .bsh is absent
+  --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
+  --check      Type-check and validate imports only; do not generate output
+  --strict     Enable compile-time type validation
+  --version    Show version and exit
+  -h, --help   Show this message
+`
+
+const version = "0.1.0"
+
+func main() {
+	args := os.Args[1:]
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
+		fmt.Print(usage)
+		os.Exit(0)
+	}
+	if args[0] == "--version" {
+		fmt.Println("besht", version)
+		os.Exit(0)
+	}
+
+	var inputFile string
+	var outputPath string
+	checkOnly := false
+	strict := false
+	splitMode := false
+	noCheck := false
+	noSourceMap := false
+	resolveTSImports := false
+	allowExternalShellImports := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--check":
+			checkOnly = true
+		case "--split":
+			splitMode = true
+		case "--strict":
+			strict = true
+		case "--opt-no-add-binaries-check":
+			noCheck = true
+		case "--opt-no-source-map":
+			noSourceMap = true
+		case "--opt-resolve-ts-imports":
+			resolveTSImports = true
+		case "--opt-allow-external-shell-imports":
+			allowExternalShellImports = true
+		case "-o":
+			i++
+			if i >= len(args) {
+				fatal("-o requires a path argument")
+			}
+			outputPath = args[i]
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				fatal("unknown flag: %s", args[i])
+			}
+			if inputFile != "" {
+				fatal("multiple input files not supported; use import statements")
+			}
+			inputFile = args[i]
+		}
+	}
+
+	if inputFile == "" {
+		fatal("no input file specified\n\n%s", usage)
+	}
+
+	if !strings.HasSuffix(inputFile, ".bsh") {
+		fmt.Fprintf(os.Stderr, "warning: input file %q does not have .bsh extension\n", inputFile)
+	}
+
+	opts := codegen.Options{NoCheck: noCheck, Strict: strict, NoSourceMap: noSourceMap, ResolveTsImports: resolveTSImports, AllowExternalShellImports: allowExternalShellImports}
+
+	if checkOnly {
+		runCheck(inputFile, opts)
+		return
+	}
+
+	if splitMode {
+		if outputPath == "" {
+			fatal("--split requires -o <output-directory>")
+		}
+		runCompileSplit(inputFile, outputPath, opts)
+		return
+	}
+
+	runCompileFile(inputFile, outputPath, opts)
+}
+
+func runCheck(inputFile string, opts codegen.Options) {
+	if err := checkFile(inputFile, opts); err != nil {
+		fatal("%s", err)
+	}
+	fmt.Fprintf(os.Stderr, "%s: OK\n", inputFile)
+}
+
+func checkFile(inputFile string, opts codegen.Options) error {
+	return codegen.CheckFile(inputFile, opts)
+}
+
+func runCompileFile(inputFile, outputFile string, opts codegen.Options) {
+	out, err := codegen.CompileFile(inputFile, opts)
+	if err != nil {
+		fatal("%s", err)
+	}
+
+	if outputFile == "" {
+		fmt.Print(out)
+		return
+	}
+
+	if err := os.WriteFile(outputFile, []byte(out), 0755); err != nil {
+		fatal("cannot write %s: %s", outputFile, err)
+	}
+	fmt.Fprintf(os.Stderr, "wrote %s\n", outputFile)
+}
+
+func runCompileSplit(inputFile, outDir string, opts codegen.Options) {
+	if err := codegen.CompileFileSplit(inputFile, outDir, opts); err != nil {
+		fatal("%s", err)
+	}
+	fmt.Fprintf(os.Stderr, "wrote split output to %s\n", outDir)
+}
+
+func fatal(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "besht: error: "+format+"\n", args...)
+	os.Exit(1)
+}

@@ -1,0 +1,3 @@
+a() {
+    echo "from sh"
+}

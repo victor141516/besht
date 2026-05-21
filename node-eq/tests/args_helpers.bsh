@@ -1,0 +1,21 @@
+let all = args.argv()
+let first = args.positional(1) ?? "missing"
+let second = args.positional(2) ?? "missing"
+let third = args.positional(3) ?? "missing"
+let missingPos = args.positional(9) ?? "missing"
+let branch = args.option("branch", "b") ?? "main"
+let emptyOpt = args.option("empty") ?? "fallback"
+let missingOpt = args.option("missing") ?? "fallback"
+let dryRun = args.flag("dry-run", "d")
+let verbose = args.flag("verbose", "v")
+
+console.log(`argv: ${all.join("|")}`)
+console.log(`first: ${first}`)
+console.log(`second: '${second}'`)
+console.log(`third: ${third}`)
+console.log(`missing positional: ${missingPos}`)
+console.log(`branch: ${branch}`)
+console.log(`empty option: '${emptyOpt}'`)
+console.log(`missing option: ${missingOpt}`)
+console.log(`dry run: ${dryRun}`)
+console.log(`verbose: ${verbose}`)

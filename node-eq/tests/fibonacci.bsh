@@ -1,0 +1,28 @@
+function f(): void {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+  let previous = 0;
+  let current = 1;
+  let letterIndex = 0;
+
+  for (let i = 0; i < 8; i++) {
+    const fib = i === 0 ? 0 : current;
+
+    let letters = "";
+
+    for (let j = 0; j < fib; j++) {
+      letters += alphabet[letterIndex % alphabet.length];
+      letterIndex++;
+    }
+
+    console.log(`${fib} ${letters}`);
+
+    if (i > 0) {
+      const next = previous + current;
+      previous = current;
+      current = next;
+    }
+  }
+}
+
+f();

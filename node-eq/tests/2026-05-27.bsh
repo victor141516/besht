@@ -1,0 +1,3 @@
+import {a} from './2026-05-27_imp.sh' assert {type:'shell'}
+
+console.log(a())

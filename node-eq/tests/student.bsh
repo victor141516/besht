@@ -1,0 +1,50 @@
+type Student = {
+  name: string;
+  age: number;
+  subjects: string[];
+  scores: number[];
+  isActive: boolean;
+};
+
+function calculateAverage(scores: number[]): number {
+  let total = 0;
+
+  for (let i = 0; i < scores.length; i++) {
+    total = total + scores[i];
+  }
+
+  return total / scores.length;
+}
+
+function hasPassed(average: number): boolean {
+  return average >= 50;
+}
+
+function printStudentReport(student: Student): void {
+  const average = calculateAverage(student.scores);
+  const passed = hasPassed(average);
+
+  console.log("Student report");
+  console.log("--------------");
+  console.log("Name: " + student.name);
+  console.log("Age: " + student.age);
+  console.log("Active student: " + student.isActive);
+  console.log("Subjects: " + student.subjects.join(", "));
+  console.log("Average score: " + average.toString().substring(0, 5));
+
+  if (passed) {
+    console.log(student.name + " passed the course.");
+  } else {
+    console.log(student.name + " did not pass the course.");
+  }
+}
+
+const student: Student = {
+  name: "Laura",
+  age: 16,
+  subjects: ["Math", "English", "History"],
+  scores: [72, 65, 81],
+  isActive: true,
+};
+
+printStudentReport(student);

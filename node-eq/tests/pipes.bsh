@@ -1,0 +1,36 @@
+// pipes.bsh — tests pipeline and redirection features
+
+// Basic pipe
+let result = $("echo", "hello world")
+    .pipe($("tr", "a-z", "A-Z"))
+    .run()
+    .readStdout()
+console.log(result)
+
+// Pipe chain
+let words = $("printf", "one\ntwo\nthree")
+    .pipe($("sort"))
+    .run()
+    .readStdoutLines()
+
+for (let word of words) {
+    console.log(word)
+}
+
+// stderr null
+let silenced = $("echo", "quiet").stderr("null").run().readStdout()
+console.log(silenced)
+
+// exitCode of failing command
+let failing = $("sh", "-c", "exit 42")
+failing.run()
+console.log(`code: ${to_str(failing.exitCode())}`)
+
+// clone and run twice
+let base = $("echo", "cloned")
+let c1 = base.clone()
+let c2 = base.clone()
+c1.run()
+c2.run()
+console.log(c1.readStdout())
+console.log(c2.readStdout())

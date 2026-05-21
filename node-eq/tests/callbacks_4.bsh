@@ -1,0 +1,15 @@
+const a = [0,1,2,3,4,5,6,7,8,9]
+console.log(a)
+
+const b = a.filter(e => e%2)
+console.log(b)
+
+const c = b.map(e => e-1)
+console.log(c)
+
+const d = c.reduce((acc, e) =>  ([...acc, '-> ' + '#'.repeat(e)]), [] as string[]).join('\n')
+console.log(`---\n${d}\n---`)
+
+const spaced = ["red apple", "green pear"]
+const preserved = spaced.reduce((acc, item) => [...acc, item + "!"], [] as string[]).join("|")
+console.log(preserved)

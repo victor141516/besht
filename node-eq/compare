@@ -1,0 +1,115 @@
+#!/usr/bin/env bun
+/**
+ * compare — run a .bsh file both ways and diff the output.
+ *
+ * Usage:  bun compare <file.bsh> [<file.bsh> ...] [-- script args...]
+ *         bun compare tests/*.bsh
+ *
+ * Exit code 0 = all matched, 1 = at least one mismatch.
+ */
+
+import { spawnSync } from "node:child_process"
+import { resolve, dirname, basename } from "node:path"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+
+const RESET = "\x1b[0m"
+const GREEN = "\x1b[32m"
+const RED   = "\x1b[31m"
+const BOLD  = "\x1b[1m"
+const DIM   = "\x1b[2m"
+
+const runnerPath = resolve(dirname(import.meta.path), "run-bsh")
+const compilerPath = resolve(dirname(import.meta.path), "..", "dist", "besht")
+
+function run(cmd: string, args: string[], env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; code: number } {
+  const r = spawnSync(cmd, args, {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+    maxBuffer: 10 * 1024 * 1024,
+  })
+  return {
+    stdout: r.stdout ?? "",
+    stderr: r.stderr ?? "",
+    code: r.status ?? 0,
+  }
+}
+
+function runViaShell(bshFile: string, scriptArgs: string[]): { stdout: string; code: number } {
+  const tmpDir = mkdtempSync(`${tmpdir()}/_besht_cmp_`)
+  const tmp = `${tmpDir}/${basename(bshFile, ".bsh")}.sh`
+  const compile = run(compilerPath, [bshFile])
+  if (compile.code !== 0) {
+    rmSync(tmpDir, { recursive: true, force: true })
+    return { stdout: `[COMPILE ERROR]\n${compile.stderr}`, code: compile.code }
+  }
+  writeFileSync(tmp, compile.stdout, { mode: 0o755 })
+  try {
+    const r = run("sh", [tmp, ...scriptArgs])
+    return { stdout: r.stdout, code: r.code }
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true })
+  }
+}
+
+function runViaBun(bshFile: string, scriptArgs: string[]): { stdout: string; code: number } {
+  const r = run("bun", [runnerPath, bshFile, ...scriptArgs])
+  return { stdout: r.stdout, code: r.code }
+}
+
+function diffLines(a: string, b: string): string | null {
+  const aLines = a.trimEnd().split("\n")
+  const bLines = b.trimEnd().split("\n")
+  const maxLen = Math.max(aLines.length, bLines.length)
+  const diffs: string[] = []
+  for (let i = 0; i < maxLen; i++) {
+    const la = aLines[i] ?? "<missing>"
+    const lb = bLines[i] ?? "<missing>"
+    if (la !== lb) {
+      diffs.push(`  line ${i + 1}:`)
+      diffs.push(`    ${RED}- sh:  ${la}${RESET}`)
+      diffs.push(`    ${GREEN}+ bun: ${lb}${RESET}`)
+    }
+  }
+  return diffs.length > 0 ? diffs.join("\n") : null
+}
+
+const separator = process.argv.indexOf("--", 2)
+const files = separator === -1 ? process.argv.slice(2) : process.argv.slice(2, separator)
+const scriptArgs = separator === -1 ? [] : process.argv.slice(separator + 1)
+if (files.length === 0) {
+  console.error("Usage: compare <file.bsh> [...] [-- script args...]")
+  process.exit(1)
+}
+
+let passed = 0
+let failed = 0
+
+for (const file of files) {
+  const abs = resolve(file)
+  const label = basename(abs)
+  process.stdout.write(`${DIM}testing${RESET} ${label} ... `)
+
+  const shell = runViaShell(abs, scriptArgs)
+  const bun_ = runViaBun(abs, scriptArgs)
+
+  const diff = diffLines(shell.stdout, bun_.stdout)
+
+  if (diff === null && shell.code === bun_.code) {
+    console.log(`${GREEN}${BOLD}PASS${RESET}`)
+    passed++
+  } else {
+    console.log(`${RED}${BOLD}FAIL${RESET}`)
+    failed++
+    if (diff) {
+      console.log(diff)
+    }
+    if (shell.code !== bun_.code) {
+      console.log(`  exit codes: sh=${shell.code} bun=${bun_.code}`)
+    }
+  }
+}
+
+console.log("")
+console.log(`${passed} passed, ${failed} failed`)
+process.exit(failed > 0 ? 1 : 0)

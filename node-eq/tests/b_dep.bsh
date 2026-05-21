@@ -1,0 +1,2 @@
+export const cmd = ['echo', 'named']
+export default ['echo', 'default']

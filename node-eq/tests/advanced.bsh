@@ -1,0 +1,54 @@
+function format_greeting(name: string, count: number): string {
+    let upper = name.toUpperCase()
+    let msg = "Hello, " + upper + "! Count=" + count
+    return msg
+}
+
+let g = format_greeting("alice", 3)
+console.log(g)
+
+function clamp(val: number, lo: number, hi: number): number {
+    let clamped = Math.min(Math.max(val, lo), hi)
+    return clamped
+}
+
+let c1 = clamp(5, 1, 10)
+let c2 = clamp(-3, 1, 10)
+let c3 = clamp(99, 1, 10)
+console.log(`clamp(5,1,10)=${c1}`)
+console.log(`clamp(-3,1,10)=${c2}`)
+console.log(`clamp(99,1,10)=${c3}`)
+
+let s = "Hello World"
+let trimmed = s.trim()
+let lower = trimmed.toLowerCase()
+let idx = lower.indexOf("world")
+console.log(`indexOf world in lower: ${idx}`)
+
+let a = 2
+let b = 3
+let sumf = a + b
+console.log(`2+3=${sumf}`)
+let diff = b - a
+console.log(`3-2=${diff}`)
+let prod = a * b
+console.log(`2*3=${prod}`)
+
+let r1 = Math.round(2.5)
+let r2 = Math.round(-2.5)
+console.log(`round(2.5)=${r1}`)
+console.log(`round(-2.5)=${r2}`)
+
+let combined = "pre-" + lower + "-post"
+console.log(combined)
+
+let user = $("printf", "testuser").run().readStdout()
+let welcome = "Welcome, " + user + "!"
+console.log(welcome)
+
+let x = 10
+let y = 3
+let bigger = x > y ? x : y
+let label = x > 5 ? "big" : "small"
+console.log(`bigger=${bigger}`)
+console.log(`label=${label}`)

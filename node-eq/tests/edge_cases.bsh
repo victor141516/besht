@@ -1,0 +1,50 @@
+let empty = ""
+let nonempty = "hello"
+console.log(`empty is: '${empty}'`)
+console.log(`nonempty: ${nonempty}`)
+
+let withSpaces = "hello world"
+let sliced = withSpaces.slice(6)
+console.log(`slice from 6: ${sliced}`)
+
+let repeated = "ab".repeat(3)
+console.log(`repeat: ${repeated}`)
+
+let padded = "42".padStart(5, "0")
+console.log(`padStart: ${padded}`)
+
+let padded2 = "hi".padEnd(5, ".")
+console.log(`padEnd: ${padded2}`)
+
+let s = "foo bar baz"
+let atIdx = s.at(4)
+console.log(`at(4): ${atIdx}`)
+
+let x = 10
+let y = 3
+let divInt = Math.floor(x / y)
+console.log(`floor(10/3)=${divInt}`)
+
+let neg = -5
+let absNeg = Math.abs(neg)
+console.log(`abs(-5)=${absNeg}`)
+
+let big = 1000000
+let small = 0
+let minVal = Math.min(big, small)
+console.log(`min(1000000,0)=${minVal}`)
+
+let concat3 = "a" + "b" + "c"
+console.log(`abc: ${concat3}`)
+
+let num1 = 100
+let num2 = 200
+let numStr = num1 + " and " + num2
+console.log(numStr)
+
+let trimBoth = "  spaces  ".trim()
+let trimStart = "  spaces  ".trimStart()
+let trimEnd = "  spaces  ".trimEnd()
+console.log(`trim: '${trimBoth}'`)
+console.log(`trimStart: '${trimStart}'`)
+console.log(`trimEnd: '${trimEnd}'`)

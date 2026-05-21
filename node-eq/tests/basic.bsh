@@ -1,0 +1,32 @@
+let name = "world"
+let greeting = `Hello, ${name}!`
+console.log(greeting);
+
+let user = $("whoami").run().readStdout()
+console.log(`user: ${user}`)
+
+let a = 3
+let b = 4
+let sum = a + b
+console.log(`sum: ${sum}`)
+
+for (let i = 0; i < 3; i++) {
+    console.log(`i=${i}`)
+}
+
+let s = "  hello world  "
+let trimmed = s.trim()
+console.log(trimmed)
+let upper = trimmed.toUpperCase()
+console.log(upper)
+
+let port = env("BESHT_TEST_PORT", "9000")
+console.log(`port: ${port}`)
+
+let ecmd = $("true")
+ecmd.run()
+let ec = ecmd.exitCode()
+console.log(`exit: ${ec}`)
+
+let piped = $("printf", "hello world").pipe($("tr", "a-z", "A-Z")).run().readStdout()
+console.log(piped)

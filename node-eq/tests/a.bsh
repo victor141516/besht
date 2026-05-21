@@ -1,0 +1,263 @@
+// String stress-test cases for besht compiler
+
+const s01 = "simple double quoted string"
+const s02 = 'simple single quoted string'
+const s03 = "contains 'single quotes' safely"
+const s04 = 'contains "double quotes" safely'
+const s05 = "escaped double quote: \"hello\""
+const s06 = 'escaped single quote: \'hello\''
+const s07 = "backslash path: C:\\Users\\Victor\\Documents\\file.txt"
+const s08 = "newline escape: first line\nsecond line"
+const s09 = "tab escape:\tbetween words"
+const s10 = "carriage return:\rtest"
+const s11 = "literal dollar sign: $"
+const s12 = "looks like BAS variable: A$"
+const s13 = "looks like BAS string variable: NAME$ = \"Victor\""
+const s14 = "looks like BAS print: PRINT \"HELLO\""
+const s15 = "looks like BAS input: INPUT A$"
+const s16 = "looks like BAS goto: GOTO 100"
+const s17 = "looks like BAS line number: 10 PRINT \"HI\""
+const s18 = "looks like comment: REM this is not a comment"
+const s19 = "looks like comment too: ' this is not a TS comment inside string"
+const s20 = "operators: + - * / = <> <= >= AND OR NOT"
+const s21 = "parentheses and commas: FUNC(A$, 1, \"x\")"
+const s22 = "colon separated BAS statements: LET A=1: PRINT A"
+const s23 = "semicolon and comma print hints: PRINT A B, C"
+const s24 = "`backticks inside double quotes`"
+const s25 = 'backticks inside single quotes: `hello ${name}`'
+const s26 = `template string without interpolation`
+const s27 = `template with interpolation: ${s01}`
+const s28 = `template with expression: ${1 + 2 + 3}`
+const s29 = `template containing quotes: "double" and 'single'`
+const s30 = `template containing BAS: PRINT "A$ = ${s12}"`
+const s31 = "fake interpolation in normal string: ${notInterpolated}"
+const s32 = "\\n is two characters, not a newline"
+const s33 = "unicode escape: \u0041 \u00F1"
+const s34 = "emoji and unicode: 🧪 café año €"
+const s35 = "empty next:"
+const s36 = ""
+const s37 = "spaces only:     "
+const s38 = "tricky chars: []{}()<>.,:!?@#%^&*_+=|~"
+const s39 = "SQL-ish: SELECT * FROM users WHERE name = 'Alice'"
+const s40 = "JSON-ish: {\"name\":\"Victor\",\"ok\":true,\"count\":3}"
+const s41 = "BAS array-ish: DIM A$(10)"
+const s42 = "BAS function-ish: MID$(A$, 1, 3)"
+const s43 = "BAS concat-ish: A$ + B$"
+const s44 = "quote soup: \"'\"'\""
+const s45 = 'quote soup reversed: \'"\'"'
+const s46 = `multi-line template:
+line one
+line two
+PRINT "still string"
+END`
+const s47 = String.raw`raw-looking path: C:\temp\new\file.txt`
+const s48 = String.raw`raw-looking escapes: \n \t \" \' \u0041`
+const s49 = "not a closing statement: END"
+const s50 = "not a label: start:"
+
+console.log(s01)
+console.log(s02)
+console.log(s03)
+console.log(s04)
+console.log(s05)
+console.log(s06)
+console.log(s07)
+console.log(s08)
+console.log(s09)
+console.log(s10)
+console.log(s11)
+console.log(s12)
+console.log(s13)
+console.log(s14)
+console.log(s15)
+console.log(s16)
+console.log(s17)
+console.log(s18)
+console.log(s19)
+console.log(s20)
+console.log(s21)
+console.log(s22)
+console.log(s23)
+console.log(s24)
+console.log(s25)
+console.log(s26)
+console.log(s27)
+console.log(s28)
+console.log(s29)
+console.log(s30)
+console.log(s31)
+console.log(s32)
+console.log(s33)
+console.log(s34)
+console.log(s35)
+console.log(s36)
+console.log(s37)
+console.log(s38)
+console.log(s39)
+console.log(s40)
+console.log(s41)
+console.log(s42)
+console.log(s43)
+console.log(s44)
+console.log(s45)
+console.log(s46)
+console.log(s47)
+console.log(s48)
+console.log(s49)
+console.log(s50)
+
+// Simple TypeScript feature/API examples
+let nameText = "Victor"
+let greeting = "Hello, " + nameText
+greeting = greeting + "!"
+
+let count = 3
+count = count + 1
+count += 2
+count--
+
+let price = 12.5
+let quantity = 4
+let total = price * quantity
+let rounded = Math.round(total)
+let fixed = total.toFixed(2)
+
+let parsedInt = Number.parseInt("42", 10)
+let parsedFloat = Number.parseFloat("3.1415")
+let finiteCheck = Number.isFinite(parsedFloat)
+let integerCheck = Number.isInteger(parsedInt)
+
+let upper = greeting.toUpperCase()
+let lower = greeting.toLowerCase()
+let includesVictor = greeting.includes("Victor")
+let replaced = greeting.replace("Victor", "Compiler")
+let sliced = greeting.slice(0, 5)
+
+let items: string[] = []
+items.push("alpha")
+items.push("beta")
+items.push("gamma")
+let firstItem = items[0]
+let itemCount = items.length
+items[1] = "BETA"
+
+let numbers: number[] = [1, 2, 3]
+numbers.push(4)
+let sum = numbers[0] + numbers[1] + numbers[2] + numbers[3]
+
+let user = {
+  id: 1,
+  name: "Victor",
+  active: true
+}
+
+user.name = "Compiler Tester"
+let userLabel = user.name + "#" + String(user.id)
+
+if (user.active) {
+  userLabel = userLabel + " active"
+} else {
+  userLabel = userLabel + " inactive"
+}
+
+let score = 87
+let grade = ""
+
+if (score >= 90) {
+  grade = "A"
+} else if (score >= 80) {
+  grade = "B"
+} else if (score >= 70) {
+  grade = "C"
+} else {
+  grade = "D"
+}
+
+let loopText = ""
+for (let i = 0; i < 5; i++) {
+  loopText = loopText + String(i)
+}
+
+let index = 0
+while (index < 3) {
+  loopText = loopText + "-"
+  index++
+}
+
+let mode = "dev"
+let message = ""
+
+switch (mode) {
+  case "dev":
+    message = "development"
+    break
+  case "prod":
+    message = "production"
+    break
+  default:
+    message = "unknown"
+    break
+}
+
+function add(a: number, b: number): number {
+  return a + b
+}
+
+function makeLabel(prefix: string, value: number): string {
+  return prefix + ": " + String(value)
+}
+
+let added = add(10, 20)
+let label = makeLabel("result", added)
+
+let maybeValue: string | null = "present"
+let safeValue = maybeValue === null ? "missing" : maybeValue
+
+let tuple: [string, number] = ["age", 30]
+let tupleText = tuple[0] + "=" + String(tuple[1])
+
+let flag = true
+let negated = !flag
+let combined = flag && finiteCheck
+let either = negated || integerCheck
+
+let finalOutput =
+  greeting +
+  " | " +
+  userLabel +
+  " | " +
+  grade +
+  " | " +
+  message +
+  " | " +
+  label
+
+console.log(`greeting: ${greeting}`)
+console.log(`count: ${count}`)
+console.log(`total: ${total}`)
+console.log(`rounded: ${rounded}`)
+console.log(`fixed: ${fixed}`)
+console.log(`parsedInt: ${parsedInt}`)
+console.log(`parsedFloat: ${parsedFloat}`)
+console.log(`finiteCheck: ${finiteCheck}`)
+console.log(`integerCheck: ${integerCheck}`)
+console.log(`upper: ${upper}`)
+console.log(`lower: ${lower}`)
+console.log(`includesVictor: ${includesVictor}`)
+console.log(`replaced: ${replaced}`)
+console.log(`sliced: ${sliced}`)
+console.log(`firstItem: ${firstItem}`)
+console.log(`itemCount: ${itemCount}`)
+console.log(`sum: ${sum}`)
+console.log(`userLabel: ${userLabel}`)
+console.log(`grade: ${grade}`)
+console.log(`loopText: ${loopText}`)
+console.log(`message: ${message}`)
+console.log(`added: ${added}`)
+console.log(`label: ${label}`)
+console.log(`safeValue: ${safeValue}`)
+console.log(`tupleText: ${tupleText}`)
+console.log(`negated: ${negated}`)
+console.log(`combined: ${combined}`)
+console.log(`either: ${either}`)
+console.log(`finalOutput: ${finalOutput}`)

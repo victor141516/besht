@@ -1,0 +1,55 @@
+let a = 3
+let b = 10
+let mn = Math.min(a, b)
+let mx = Math.max(a, b)
+console.log(`min(3,10)=${mn}`)
+console.log(`max(3,10)=${mx}`)
+
+let r1 = Math.round(3.7)
+let r2 = Math.round(3.2)
+let r3 = Math.round(3.5)
+let r4 = Math.round(-2.5)
+let r5 = Math.round(-2.7)
+console.log(`round(3.7)=${r1}`)
+console.log(`round(3.2)=${r2}`)
+console.log(`round(3.5)=${r3}`)
+console.log(`round(-2.5)=${r4}`)
+console.log(`round(-2.7)=${r5}`)
+
+let f1 = Math.floor(3.9)
+let f2 = Math.floor(3.1)
+let f3 = Math.floor(-1.5)
+console.log(`floor(3.9)=${f1}`)
+console.log(`floor(3.1)=${f2}`)
+console.log(`floor(-1.5)=${f3}`)
+
+let c1 = Math.ceil(3.1)
+let c2 = Math.ceil(3.9)
+let c3 = Math.ceil(-1.5)
+console.log(`ceil(3.1)=${c1}`)
+console.log(`ceil(3.9)=${c2}`)
+console.log(`ceil(-1.5)=${c3}`)
+
+let abs1 = Math.abs(-5)
+let abs2 = Math.abs(5)
+let abs3 = Math.abs(-3.7)
+console.log(`abs(-5)=${abs1}`)
+console.log(`abs(5)=${abs2}`)
+console.log(`abs(-3.7)=${abs3}`)
+
+let p = Math.pow(2, 8)
+console.log(`pow(2,8)=${p}`)
+
+let sq = Math.sqrt(16)
+console.log(`sqrt(16)=${sq}`)
+
+let minFloat = Math.min(1.5, 2.5)
+let maxFloat = Math.max(1.5, 2.5)
+console.log(`min(1.5,2.5)=${minFloat}`)
+console.log(`max(1.5,2.5)=${maxFloat}`)
+
+let n = 42
+console.log(n.toString())
+
+let pi = 3.14159
+console.log(pi.toFixed(2))

@@ -1,0 +1,73 @@
+// nullish_coalescing.bsh — future coverage for TypeScript ?? semantics.
+
+let missing = undefined
+let nothing = null
+let text = "value"
+let empty = ""
+let zero = 0
+let nope = false
+
+console.log(`undefined fallback: ${missing ?? "fallback"}`)
+console.log(`null fallback: ${nothing ?? "fallback"}`)
+console.log(`string preserved: ${text ?? "fallback"}`)
+console.log(`empty string preserved: '${empty ?? "fallback"}'`)
+console.log(`zero preserved: ${zero ?? 99}`)
+console.log(`false preserved: ${nope ?? true}`)
+
+let first = missing ?? nothing ?? "third"
+let second = nothing ?? text ?? "third"
+let third = text ?? missing ?? "third"
+console.log(`chain first: ${first}`)
+console.log(`chain second: ${second}`)
+console.log(`chain third: ${third}`)
+
+let groupedLeft = (missing ?? "left") + "!"
+let groupedRight = missing ?? ("right" + "!")
+console.log(`grouped left: ${groupedLeft}`)
+console.log(`grouped right: ${groupedRight}`)
+
+let ternaryFallback = missing ?? (zero == 0 ? "zero" : "not-zero")
+let ternaryPreserved = text ?? (zero == 0 ? "zero" : "not-zero")
+console.log(`ternary fallback: ${ternaryFallback}`)
+console.log(`ternary preserved: ${ternaryPreserved}`)
+
+let mathFallback = missing ?? (zero + 7)
+let mathPreserved = zero ?? 7
+console.log(`math fallback: ${mathFallback}`)
+console.log(`math preserved: ${mathPreserved}`)
+
+let list = ["alpha", "", "gamma"]
+let firstItem = list[0] ?? "missing"
+let emptyItem = list[1] ?? "missing"
+let missingItem = list[9] ?? "missing"
+console.log(`list first: ${firstItem}`)
+console.log(`list empty: '${emptyItem}'`)
+console.log(`list missing: ${missingItem}`)
+
+let user = {
+    name: "Ada",
+    emptyName: "",
+    count: 0,
+    active: false,
+    absent: undefined
+}
+console.log(`object name: ${user.name ?? "unknown"}`)
+console.log(`object empty: '${user.emptyName ?? "unknown"}'`)
+console.log(`object zero: ${user.count ?? 42}`)
+console.log(`object false: ${user.active ?? true}`)
+console.log(`object undefined: ${user.absent ?? "unknown"}`)
+
+function maybeName(enabled: boolean): string | undefined {
+    if (enabled) return "enabled"
+    return undefined
+}
+
+console.log(`function present: ${maybeName(true) ?? "disabled"}`)
+console.log(`function missing: ${maybeName(false) ?? "disabled"}`)
+
+let literalFallback = undefined ?? "literal"
+let nestedFallback = (undefined ?? null) ?? (missing ?? "nested")
+let nestedPreserved = (undefined ?? "kept") ?? "fallback"
+console.log(`literal fallback: ${literalFallback}`)
+console.log(`nested fallback: ${nestedFallback}`)
+console.log(`nested preserved: ${nestedPreserved}`)

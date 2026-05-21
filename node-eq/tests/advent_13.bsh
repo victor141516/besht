@@ -1,0 +1,64 @@
+type Factory = string[]
+type Result = 'completed' | 'broken' | 'loop'
+type Cell = '>' | '<' | '^' | 'v' | '.'
+
+function runFactory(factory: Factory): Result {
+  const matrix: Cell[][] = factory.map(e => e.split('') as Cell[])
+
+  let currentPos = [0, 0]
+  const visitedCells = new Set<string>()
+  while (true) {
+    const currentCell = matrix[currentPos[0]][currentPos[1]]
+    if (currentCell === '.') return 'completed'
+    
+    if (currentCell === '<') {
+      currentPos = [currentPos[0], currentPos[1] - 1]
+    } else if (currentCell === '>') {
+      currentPos = [currentPos[0], currentPos[1] + 1]
+    } else if (currentCell === '^') {
+      currentPos = [currentPos[0] - 1, currentPos[1]]
+    } else if (currentCell === 'v') {
+      currentPos = [currentPos[0] + 1, currentPos[1]]
+    }
+
+    if (currentPos[0] < 0 || currentPos[0] > matrix.length - 1) return 'broken'
+    if (currentPos[1] < 0 || currentPos[1] > matrix[0].length - 1) return 'broken'
+
+    const visitedCell = `${currentPos[0]},${currentPos[1]}`
+    if (visitedCells.has(visitedCell)) return 'loop'
+    else visitedCells.add(visitedCell)
+  }
+}
+
+
+console.log('completed' === runFactory([
+  '>>.'
+]))
+
+console.log('broken' === runFactory([
+  '>>>'
+]))
+
+console.log('loop' === runFactory([
+  '>><'
+]))
+
+console.log('completed' === runFactory([
+  '>>v',
+  '..<'
+]))
+
+console.log('broken' === runFactory([
+  '>>v',
+  '<<<'
+]))
+
+console.log('completed' === runFactory([
+  '>v.',
+  '^..'
+]))
+
+console.log('loop' === runFactory([
+  'v.',
+  '^.'
+]))

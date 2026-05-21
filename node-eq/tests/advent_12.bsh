@@ -1,0 +1,47 @@
+type Resultt = 0 | 1 | 2;
+
+function elfBattle(elf1: string, elf2: string): Resultt {
+  let hp1 = 3;
+  let hp2 = 3;
+
+  const rounds = Math.min(elf1.length, elf2.length);
+
+  for (let i = 0; i < rounds; i++) {
+    const m1 = elf1[i];
+    const m2 = elf2[i];
+
+    let dmgTo1 = 0;
+    let dmgTo2 = 0;
+
+    // Daño que Elfo 1 hace a Elfo 2
+    if (m1 === "F") dmgTo2 += 2;
+    else if (m1 === "A" && m2 !== "B") dmgTo2 += 1; // B bloquea A
+
+    // Daño que Elfo 2 hace a Elfo 1
+    if (m2 === "F") dmgTo1 += 2;
+    else if (m2 === "A" && m1 !== "B") dmgTo1 += 1;
+
+    // Resolución simultánea
+    hp1 -= dmgTo1;
+    hp2 -= dmgTo2;
+
+    // La batalla termina inmediatamente si alguien llega a 0 o menos
+    if (hp1 <= 0 || hp2 <= 0) break;
+  }
+
+  if (hp1 <= 0 && hp2 <= 0) return 0; // ambos caen a la vez
+  if (hp1 <= 0) return 2;
+  if (hp2 <= 0) return 1;
+
+  // Si nadie cayó, gana el de más vida o empate
+  if (hp1 > hp2) return 1;
+  if (hp2 > hp1) return 2;
+  return 0;
+}
+
+console.log(elfBattle('A', 'B'))
+console.log(elfBattle('F', 'B'))
+console.log(elfBattle('AAB', 'BBA'))
+console.log(elfBattle('AFA', 'BBA'))
+console.log(elfBattle('AFAB', 'BBAF'))
+console.log(elfBattle('AA', 'FF'))

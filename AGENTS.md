@@ -1,0 +1,915 @@
+# AGENTS.md
+
+Guidance for AI coding agents working on the **besht** compiler codebase.
+
+## Branch Workflow
+
+Every new feature or fix follows this branch workflow:
+
+1. **Create a branch** from `master` before making any changes. Name it descriptively (e.g. `feat/object-params`, `fix/join-separator`).
+2. **Apply changes** on that branch.
+3. **Test before committing** — run `make build` and `make test` (or relevant node-eq compare tests). Only if those succeed, create a commit on the branch.
+4. **When the feature/fix is finished**, ask the user for confirmation before merging the branch to `master`. Only merge after explicit approval.
+5. **If the user requests a different task** while the current branch is still in progress (feature not yet finished):
+   - Tell the user that the current changes are **not finished** and will not be applied when switching to the new task.
+   - Ask whether they want to merge the current branch as-is despite being incomplete, or discard/keep it for later.
+   - Once resolved, checkout `master` and create a new branch from there for the new task.
+
+This workflow is mandatory. Never commit directly on `master`. Never merge without user confirmation. Never switch tasks without informing the user about unfinished work on the current branch.
+
+## Future Ideas Workflow
+
+When a user mentions something that would be a good future improvement but isn't being implemented now, ask whether they want to add it to `todo.md`. When asking, include the **exact text** that would be written, so the user can review and adjust it before it's saved. Example:
+
+> That's a good idea for later. Would you like me to add this to `todo.md`?
+>
+> **Proposed entry:**
+>
+> ```
+> ## Compound assignment operators (+=, -=, *=)
+> TypeScript supports i += 1. These would desugar to i = i + 1 in besht.
+> ```
+>
+> Should I add it?
+
+---
+
+## Type Checking Policy
+
+**Besht has no type checking — not at compile time, not at runtime. This is by design.**
+
+- Type annotations (`let x: string = "hi"`, `function f(a: number): string`) are **completely ignored** by the compiler
+- They exist only so users can write TypeScript-compatible syntax and get editor support (autocomplete, type hints) via `declare` statements and `.d.bsh` files
+- The compiler never errors on type mismatches
+- The `internal/checker/checker.go` file exists but only collects function signatures — it performs no validation
+
+Type checking is opt-in via `--strict` and must never be runtime type checking.
+
+---
+
+## MANDATORY: Keep This File Updated
+
+**You must update AGENTS.md, SKILL.md, and README.md as part of every task — without waiting for the user to ask.**
+
+This is not optional and does not require a prompt. Any time you add, change, rename, or remove something in the compiler or language, update the affected sections in all three files before marking the task complete. The rule applies to:
+
+- User-facing changes: new syntax, new builtins, new methods, renamed/removed keywords, new CLI flags, changed compilation behavior, new output formats
+- Internal changes that affect how agents should work on this codebase: architecture shifts, new pitfalls, changed Go APIs, new test patterns
+
+**Do not wait until the end of a session.** Update the docs in the same commit as the code change. A stale AGENTS.md, SKILL.md, or README.md is a bug.
+
+### What to update and where
+
+| Changed                                        | Update                                                                                    |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Language syntax (new keyword, builtin, method) | AGENTS.md Syntax Reference + SKILL.md + README.md                                         |
+| CLI flag added/renamed                         | AGENTS.md Commands + CLI Flags table + SKILL.md Compile section + README.md CLI reference |
+| Compilation behavior changed                   | AGENTS.md Key Design Decisions + Pitfalls + README.md                                     |
+| Architecture changed                           | AGENTS.md Architecture section                                                            |
+| New pitfall discovered                         | AGENTS.md Common Pitfalls                                                                 |
+
+---
+
+## Project Overview
+
+**besht** is a TypeScript-flavored language that compiles to POSIX sh. It provides compile-time types, structured control flow, module imports, and a safe command-execution model over raw shell scripting. The compiler is written in Go.
+
+Source files use `.bsh` extension. The compiler produces a single `.sh` file (POSIX sh, no bashisms).
+
+**Design principle:** The user never writes shell syntax. All external command invocation goes through `$()` command expressions. The compiler controls all quoting and argument passing.
+
+**TypeScript-to-shell translation directive:** Prefer translating TypeScript constructs into reusable lower-level compiler transformations, then implement library APIs as compositions of those transformations. Do not add one-off special emitters for individual APIs when a generic construct can model them. For example, implement callback transformation generically, then express `Array.prototype.reduce` through the callback transformation plus reduce semantics, rather than hard-coding a bespoke reduce-only implementation.
+
+## Commands
+
+```bash
+# Build the compiler
+make build                        # → dist/besht
+
+# Run all tests
+make test
+
+# Coverage report (terminal)
+make cover
+
+# Coverage report (HTML)
+make cover-html && open coverage.html
+
+# Compile a .bsh file
+go run ./cmd/besht/ <file.bsh>
+go run ./cmd/besht/ <file.bsh> -o out.sh
+go run ./cmd/besht/ --check <file.bsh>
+go run ./cmd/besht/ --check --strict <file.bsh>
+
+# Split mode — one .sh per .bsh, imports become source calls
+go run ./cmd/besht/ <file.bsh> --split -o <outdir/>
+
+# Omit the runtime POSIX self-check from compiled output
+go run ./cmd/besht/ <file.bsh> --opt-no-add-binaries-check
+
+# Opt in to extensionless .ts import fallback when .bsh is absent
+go run ./cmd/besht/ <file.bsh> --opt-resolve-ts-imports
+
+# Allow explicit .sh imports outside the compiler root
+go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
+```
+
+### CLI Flags
+
+| Flag                          | Description                                                           |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `-o <path>`                   | Output file or directory (required with `--split`)                    |
+| `--split`                     | Compile each `.bsh` to its own `.sh`; imports become `. source` calls |
+| `--check`                     | Type-check and validate imports only, no output                       |
+| `--strict`                    | Enable compile-time type validation                                   |
+| `--opt-no-add-binaries-check` | Omit the runtime POSIX utility self-check block                       |
+| `--opt-no-source-map`          | Omit `# besht:file:line:col` sourcemap from compiled output              |
+| `--opt-resolve-ts-imports`     | Let extensionless imports fall back to `.ts` only when `.bsh` is absent |
+| `--opt-allow-external-shell-imports` | Allow explicit `.sh` imports outside the compiler root          |
+| `--version`                   | Print version                                                         |
+
+### `--opt-*` flags
+
+All flags that change how code is transformed or what is emitted share the `--opt-` prefix. Currently:
+
+| Flag                          | Effect                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| `--opt-no-add-binaries-check` | Do not emit the `_r=$(printf ...)` runtime check at the top of compiled scripts |
+| `--opt-no-source-map`          | Do not emit `# besht:file:line:col` source-map comments in compiled output     |
+| `--opt-resolve-ts-imports`     | Resolve extensionless imports to `.bsh` first, then `.ts` if `.bsh` is absent |
+| `--opt-allow-external-shell-imports` | Permit explicit `.sh` imports outside the compiler root; `.bsh` imports remain root-confined |
+
+Pass via `codegen.Options{NoCheck: true, NoSourceMap: true, ResolveTsImports: true, AllowExternalShellImports: true}` in Go code.
+
+## Architecture
+
+```
+cmd/besht/
+└── main.go              # CLI entry point: flags, dispatch to codegen.CompileFile
+
+internal/
+├── ast/
+│   └── ast.go           # All AST node types (Pos, Type, Statement, Expression, ClassDecl)
+│                        # No logic — pure data structures
+├── lexer/
+│   ├── token.go         # TokenType enum + keywords map + Token struct
+│   └── lexer.go         # Hand-written lexer; TokDollar for $() expressions
+├── parser/
+│   └── parser.go        # Recursive descent parser → AST
+│                        # parseCmdExpr() handles $() command expressions
+├── checker/
+│   └── checker.go       # Type checker + scope resolver; walks AST, annotates types
+│                        # FnSig, Scope, Checker structs; RegisterFn for cross-module sigs
+│                        # checkCommandMethod() routes .pipe()/.run()/.readStdoutLines() etc.
+└── codegen/
+    ├── codegen.go       # Generator: AST → POSIX sh string
+    │                    # genCmdPipeline/genCmdChain build shell pipelines
+    │                    # shellQuote() single-quotes all command args safely
+    └── modules.go       # Multi-file compilation: Compiler, load(), emit(), emitSplit()
+                         # Import resolution, module name qualification, dep ordering
+                         # rewriteFnCalls() AST pass qualifies imported fn names
+                         # CompileFileSplit() → per-file .sh with source + include guards
+```
+
+**Compilation pipeline:**
+
+```
+.bsh source
+  → Lexer  (lexer.Tokenize)
+  → Parser (parser.Parse)
+  → Checker (checker.Check)              ← registers cross-module fn sigs first
+  → Command Analysis pass                ← assigns identities to $() calls, tracks
+  │                                         run/text/lines/exitCode usage per object,
+  │                                         emits warnings for unrun commands,
+  │                                         errors for double-run without clone()
+  → collectObjectTypes() pre-pass        ← populates objPropTypeMap for object property
+  │                                         type resolution inside function bodies
+  → rewriteFnCalls() AST pass            ← qualifies imported/local Besht fn call names
+  → Shell import collection              ← validates explicit .sh imports and source/copy plan
+  → Codegen (codegen.CompileFile)        ← bundled mode: single .sh output
+          or (codegen.CompileFileSplit)   ← split mode: one .sh per .bsh
+```
+
+**Split mode output structure:**
+
+- Entry point `.sh`: `#!/bin/sh`, sets `_BESHT_ROOT`, then `. "$_BESHT_ROOT"/'lib/x.sh'` per Besht or copied shell import
+- Library `.sh`: include guard (`[ -n "$_BESHT_LOADED_..." ] && return 0`), then source lines, then function definitions
+- Explicit imported `.sh` files are copied as raw shell dependencies and sourced with `_BESHT_SHELL_LOADED_...` guards
+- `_BESHT_ROOT` is set once by the entry point; all sourced files reuse it for their own sub-sources
+
+## Key Design Decisions
+
+### No Raw Shell — `$()` Command Expressions
+
+The user never writes shell code directly. All external commands go through:
+
+```ts
+$("git", "log", "--oneline", "-5");
+$("curl", "-sf", url).pipe($("jq", ".name"));
+$("make", "build").stderr("null");
+```
+
+The compiler single-quotes every literal argument in the output. Single-quote escaping handles embedded `'` characters automatically (`'it'"'"'s alive'`). Variable references are passed unquoted as `$var`. This prevents shell injection and gives the compiler full control over quoting strategy.
+
+The `shell { }` syntax has been **removed**. There is no escape hatch to raw shell.
+
+### Command Object Model (lazy pipeline)
+
+`$()` always returns a **Command object** — a lazy pipeline description that produces **no shell code** at the point of declaration. Execution only happens when `.run()` is called on the object.
+
+**Lifecycle:**
+
+```ts
+// 1. Declaration — no shell code emitted yet
+let cmd = $("cat", "/etc/passwd").pipe($("grep", "root")).stderr("null");
+
+// 2. Building — still no shell code; methods return the same Command
+let cmd2 = $("make", "build").stdout("/tmp/out.log").stderr("&1");
+
+// 3. Execution — .run() emits the actual shell pipeline
+cmd.run(); // returns the same Command object (self) for chaining
+
+// 4. Inspection — only valid after .run(); compiler tracks usage
+let out = cmd.readStdout(); // captured stdout (same shell var on every call)
+let rows = cmd.readStdoutLines(); // same as readStdout(), split by newline
+let code = cmd.exitCode(); // captured exit code
+
+// Chain style also works:
+let result = $("whoami").run().readStdout();
+```
+
+**What the compiler emits depends on what is used:**
+
+| What the user does                               | What the compiler emits                                |
+| ------------------------------------------------ | ------------------------------------------------------ |
+| Command declared but `.run()` never called       | Nothing — plus a compile-time **warning** on that line |
+| `.run()` called, `.readStdout()`/`.readStdoutLines()` never used | Bare shell command, no variable                        |
+| `.run()` called, `.readStdout()` used                  | `_varname=$(cmd …)` captures stdout                    |
+| `.run()` called, `.exitCode()` used              | Command runs, `_varname_exit=$?` captures exit code    |
+| Both `.readStdout()` and `.exitCode()` used            | Both captured                                          |
+
+The captured variable name is derived from the **besht variable name** for readability. `let result = $("whoami")` where `result.run()` is later called generates `result=$(whoami)`. The same variable is reused for every `.readStdout()` call — no duplication.
+
+**Single-run enforcement:**
+
+Each Command object may only have `.run()` called once. Calling `.run()` a second time on the same object is a **compile error**. To run the same pipeline again, use `.clone()` which returns a fresh, un-run copy of the pipeline.
+
+```ts
+let cmd = $("whoami");
+cmd.run();
+cmd.run(); // ← compile error: "cmd already run on line N; use cmd.clone()"
+cmd.clone().run(); // ← correct
+```
+
+The compiler assigns each `$()` call a unique identity during the semantic analysis pass, tracks which variables hold that identity (alias analysis), and reports an error if `.run()` is seen twice on the same identity.
+
+**No auto-run:** `$()` as a bare statement (with no `.run()`) emits nothing and produces a warning. There is no implicit execution. The user must always call `.run()` explicitly.
+
+**Output philosophy:** Generated shell should be readable and minimal. Side-effect-only commands (`cmd.run()` with no `.readStdout()`/`.readStdoutLines()`/`.exitCode()`) compile to a bare shell command with no variable. Capture variables are only emitted when the corresponding method is actually used. Helper code, metadata, array/object metadata, runtime checks, and other shell boilerplate should only be emitted when the compiled program uses functionality that requires it. For example, if an array operation needs metadata, do not emit that metadata for programs that never use that operation. String runtime helpers (`_bst_starts_with`, `_bst_ends_with`, `_bst_includes`) are emitted only when generated shell calls the corresponding one-argument string method; two-argument string search methods use inline `awk`, and list `.includes()` uses `grep -qxF` without emitting `_bst_includes`. This unused-feature elision is best effort and must never break correctness. All boilerplate is opt-out via `--opt-*` flags.
+
+### Variable Name Mangling
+
+### Variable Name Mangling
+
+Shell has no scoping. Besht mangles all locals inside functions:
+
+- Function params: `_<qualFnName>_<paramName>` (e.g. `_main__greet_name`)
+- Local `let` vars inside functions: `_<fnName>_<varName>` (e.g. `_greet_result`)
+- Top-level vars: no mangling (plain name)
+- Loop vars and catch vars: same mangling rules as locals
+
+`codegen.Generator.paramMap` tracks name→mangled-name within each function scope. `rewriteVarRefs()` applies the mapping inside string literals.
+
+### Module Naming
+
+Module names derive from the file path relative to the entry file's directory:
+
+- Entry file `examples/main.bsh` → root = `examples/`
+- Imported `examples/lib/log.bsh` → module name `lib/log`
+- Qualified function prefix: `lib__log` (slashes → `__`, hyphens → `_`)
+- Function `info` in `lib/log` → shell function `lib__log__info`
+
+The `rewriteFnCalls()` AST pass in `modules.go` walks the entire program AST before codegen and rewrites all `FnCallExpr.Name` fields for imported and locally-defined functions to their qualified names.
+
+### Return Values
+
+- Functions returning `string`/`number`/`list<T>`: emit `printf '%s'` to stdout; callers capture with `$(fn args)`
+- Void functions: no capture; callers emit bare `fn args`
+- Functions returning `status`: exit code via `$?`
+
+### Types at Runtime
+
+| Besht type | Shell representation                                              |
+| ---------- | ----------------------------------------------------------------- |
+| `string`   | shell string                                                      |
+| `number`   | shell string containing digits; arithmetic via `$((...))`         |
+| `boolean`  | `1` (true) / `0` (false); tested with `[ "$x" = 1 ]`              |
+| `list<T>`  | newline-delimited string; nested list rows use unit-separator-packed lines |
+| `Set<T>`   | newline-delimited unique string values for membership checks               |
+| `status`   | exit code captured as `$?`                                        |
+| `command`  | lazy pipeline description; no shell code until `.run()` is called |
+
+### POSIX Compliance Invariants
+
+- No `local` keyword (not POSIX)
+- No bash arrays (`arr=()`)
+- No `[[` double brackets
+- No `$'...'` quoting
+- No `{1..10}` brace expansion
+- Arithmetic: `$(( expr ))` only
+- Test: `[ ]` only (single bracket)
+- All literal command args single-quoted in output
+
+## Test Layout
+
+```
+internal/lexer/lexer_test.go       # Token types, keywords, errors, position tracking
+internal/parser/parser_test.go     # Every AST node type; error recovery
+internal/checker/checker_test.go   # Type checking, scope, all builtins
+internal/codegen/codegen_test.go   # Unit: AST → sh output patterns (uses Generate())
+internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh output
+```
+
+Tests use `go test ./...`. Coverage target: `make cover`. Current coverage: ~75%.
+
+## Syntax Reference (current)
+
+```ts
+// Variable declaration — type annotations optional everywhere
+let name: string = "Alice"          // plain literal — " and ' produce no interpolation
+let also: string = 'Alice'          // same — both quote styles are plain literals
+let tmpl: string = `Hello ${name}!` // template literal — ${var} interpolation
+let pattern: string = r"^foo-[0-9]+$"  // raw string — always single-quoted in sh output
+let rawpath: string = String.raw`C:\temp\new\file.txt` // tagged raw template — same as r"..."
+let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // escape sequences
+let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
+let count: number = 42
+let price: number = 3.14          // float literal — compiled to awk arithmetic
+let flag: boolean = true
+let files: list<string> = ["a.txt", "b.txt"]
+let rows: string[][] = [["a", "b"], ["c", "d"]]
+let seen = new Set<string>()
+
+// Union and tuple types (annotations only — ignored by compiler)
+let maybeValue: string | null = "present"
+let nothing = null
+let tuple: [string, number] = ["age", 30]
+const [tupleName, tupleAge] = tuple
+let absent = undefined
+
+// Without type annotations — identical behavior
+let city = "Paris"
+let items = ["x", "y"]
+
+// Array types — all three forms compile identically to list<T>
+let a: string[] = ["a", "b"]
+let b: Array<string> = ["c", "d"]
+let c: list<string> = ["e", "f"]
+let matrix: string[][] = rows.map(row => row.join("").split("") as string[])
+let indexes: number[] = Array.from({ length: 3 }) // [0, 1, 2]
+let selected: string[] = Array.of("a", "b") // ["a", "b"]
+
+// Constants (compile-time immutability)
+const MAX: number = 100
+const APP: string = "myapp"
+
+// Reassignment
+count = count + 1
+count += 2
+
+// Postfix increment/decrement (statement position only)
+count++
+count--
+
+// Prefix increment/decrement (expression position)
+let next = ++count
+let prev = --count
+
+// Logical operators
+let active: boolean = true && !false
+let either: boolean = active || false
+let negated: boolean = !active
+let fallback: string = maybeValue ?? "default" // nullish only; preserves "", 0, false
+
+// Strict equality (same as == / != — no type distinction in shell)
+let same: boolean = x === y
+let diff: boolean = x !== y
+let sameBlock: boolean = output === `a
+b` // multiline-safe string equality
+
+// Ternary
+let bigger: number = a > b ? a : b
+
+// Environment variables
+let home: string = env("HOME")
+let port: string = env("PORT", "8080")
+
+// Script arguments
+let argv: string[] = args.argv()
+let input: string = args.positional(1) ?? "-"
+let branchArg: string = args.option("branch", "b") ?? "main"
+let dryRun: boolean = args.flag("dry-run", "d")
+
+// Type conversion
+let s: string = to_str(count)
+let n: number = to_int(s)
+
+// String() is an alias for to_str()
+let label: string = "check:" + name
+let msg: string = `Hello, ${name}!`  // template literal for interpolation
+let sum: string = `sum=${a + b}`
+let sum: string = `sum=${a + b}`     // full expressions inside ${...}
+
+// Number builtins
+let pi: number = Number.parseInt("42", 10)
+let pf: number = Number.parseFloat("3.14")
+let fin: boolean = Number.isFinite(pf)
+let isInt: boolean = Number.isInteger(pi)
+let safe: boolean = Number.isSafeInteger(pi)
+let nan: boolean = Number.isNaN(pi) // always false for current besht values
+let maxSafe: number = Number.MAX_SAFE_INTEGER
+let minSafe: number = Number.MIN_SAFE_INTEGER
+let eps: number = Number.EPSILON
+
+// Functions
+function greet(name: string): string {
+    return "Hello, ${name}!"
+}
+
+// Exported function
+export function info(msg: string) {
+    $("printf", "[INFO] %s\\n", msg).stderr("&1").run()
+}
+
+// If/else — parens required around condition; bodies can be braced or a single statement
+if (count > 0) {
+    $("echo", "pos").run()
+} else if (count == 0) {
+    $("echo", "zero").run()
+} else {
+    $("echo", "neg").run()
+}
+if (count < 0) return "negative"
+else console.log("non-negative")
+
+// Switch/case — compiles to shell case/esac
+switch (mode) {
+    case "dev":
+        message = "development"
+        break
+    case "prod":
+        message = "production"
+        break
+    default:
+        message = "unknown"
+        break
+}
+
+// While — parens required
+while (count > 0) {
+    count = count - 1
+}
+while (count > 0) count--
+
+// C-style for loop (TypeScript syntax)
+for (let i: number = 0; i < 10; i++) {
+    $("echo", to_str(i)).run()
+}
+for (let i: number = 0; i < 10; i++) total += i
+
+// Bare init (no let) — i implicitly declared in loop scope
+for (i = 0; i < 10; i++) {
+    $("echo", to_str(i)).run()
+}
+
+// For range — iterate integers
+for (i in range(1, 10)) {
+    $("echo", to_str(i)).run()
+}
+for (i in range(1, 10)) total += i
+
+// For list
+for (f in files) {
+    $("echo", f).run()
+}
+for (f in files) $("echo", f).run()
+
+// For-of alias
+for (f of files) {
+    $("echo", f).run()
+}
+
+// For-of alias with declaration
+for (let f of files) {
+    $("echo", f).run()
+}
+
+// Break and continue
+for (f in files) {
+    if (is_empty(f)) { continue }
+    if (f == "stop") { break }
+    $("echo", f).run()
+}
+
+// List indexing (0-based)
+let first: string = files[0]
+let item: string = files[i]
+let cell: string = matrix[row][col]
+let maybeCell: string | undefined = matrix[row]?.[col]
+let width: number = matrix[0].length
+
+// List index assignment
+items[1] = "BETA"
+
+// Empty list
+let empty: string[] = []
+
+// Object literals — compile to per-property shell variables
+let user = {
+    id: 1,
+    name: "Victor",
+    active: true
+}
+
+// Property access and assignment
+let userName: string = user.name
+user.name = "Compiler Tester"
+
+// Computed property access and assignment (dynamic keys)
+let key: string = "name"
+let val: string = user[key]         // reads _obj_user_${key}
+user[key] = "Updated"              // writes _obj_user_${key}
+
+// Classes — constructors, instance properties/methods, new, this
+class User {
+    name: string
+    age: number
+
+    constructor(name: string, age: number) {
+        this.name = name
+        this.age = age
+    }
+
+    greet(): string {
+        return "Hello, " + this.name
+    }
+}
+
+let u = new User("Alice", 30)
+console.log(u.greet())
+console.log(u.name)
+u.name = "Bob"
+
+// Static properties and methods
+class MathUtils {
+    static PI: number = 3.14159
+    static round(n: number): number {
+        return Math.round(n)
+    }
+}
+console.log(MathUtils.PI)
+console.log(MathUtils.round(2.7))
+
+class Game {
+    readonly matrix: string[][]
+    private static Deltas: Record<string, [number, number]> = { U: [-1, 0] }
+}
+
+// console.log() and console.error() builtins
+console.log("Hello, " + name)
+console.error("Something went wrong")
+
+// $() creates a lazy Command object — no shell code until .run() is called
+// Declaring a command without ever calling .run() → warning + no code emitted
+
+// Side-effect commands: .run() emits bare shell, no capture variable
+$("chmod", "+x", "script.sh").run()
+$("git", "add", ".").run()
+
+// Capture stdout: .run() followed by .readStdout() → compiler emits capture variable
+let userCmd = $("whoami")
+userCmd.run()
+let user: string = userCmd.readStdout()      // reads from captured var
+
+// Chain style (same result):
+let branch = $("git", "rev-parse", "--abbrev-ref", "HEAD").run().readStdout()
+
+// Spread command arguments
+let args: list<string> = ["-n", "hello"]
+$("echo", ...args).run()
+
+// Capture as lines: .run() + .readStdoutLines()
+let logCmd = $("git", "log", "--oneline", "-20")
+logCmd.run()
+let log_lines: list<string> = logCmd.readStdoutLines()
+
+// Pipeline — built lazily before run()
+let result: string = $("cat", "/etc/passwd")
+    .pipe($("grep", "root"))
+    .pipe($("cut", "-d:", "-f1"))
+    .run()
+    .readStdout()
+
+// Redirect — still lazy until .run()
+$("make", "build").stdout("/tmp/build.log").run()
+$("echo", "more").stdout("/tmp/out.txt", "append").run()
+$("make", "build").stderr("null").run()     // 2>/dev/null
+$("make", "build").stderr("&1").run()       // 2>&1
+let errors = $("make").run().readStderr()  // stderr only
+$("make", "build").env("CI", "1").run()     // CI=1 make build
+let root = $("pwd").workdir("/").run().readStdout() // run one command from /
+$("make", "test").workdir("/repo/app").run() // parent script cwd is unchanged
+
+// Spread a list into command arguments
+let args: list<string> = ["-n", "hello"]
+$("echo", ...args).run()
+
+// exitCode — captured only when used
+let makeCmd = $("make", "build")
+makeCmd.run()
+let code = makeCmd.exitCode()   // 0 or non-zero
+
+// clone() — to run the same pipeline more than once
+let cmd = $("whoami")
+cmd.run()
+cmd.run()           // ← COMPILE ERROR: already run; use clone()
+cmd.clone().run()   // ← correct
+
+// Try/catch
+try {
+    $("rsync", "-az", src, dest).run()
+} catch (code: status) {
+    console.log("failed: " + to_str(code))
+    exit(1)
+}
+
+// Error propagation
+function read_file(path: string): string {
+    let content = $("cat", path).run().readStdout()?
+    return content
+}
+
+// Math object methods
+let mn: number = Math.min(a, b)     // → awk comparison
+let mx: number = Math.max(a, b)
+let r: number = Math.round(3.7)     // → awk int(_x + 0.5)
+let fl: number = Math.floor(3.9)    // → awk
+let cl: number = Math.ceil(3.1)     // → awk
+let tr: number = Math.trunc(3.9)    // → awk
+let ab: number = Math.abs(-5)       // → awk
+let sg: number = Math.sign(-5)      // → awk
+let pw: number = Math.pow(2, 8)     // → awk ^ operator
+let sq: number = Math.sqrt(16)      // → awk sqrt()
+let ns: string = count.toString()
+let fixed: string = price.toFixed(2)
+
+// Negative numbers
+let neg: number = -42
+let negf: number = -1.5
+
+// String methods
+let trimmed: string = name.trim()
+let upper: string = name.toUpperCase()
+let lower: string = name.toLowerCase()
+let parts: list<string> = name.split(",")
+let chars: list<string> = name.split("")
+let r: string = name.replace("old", "new")
+let ra: string = name.replaceAll("a", "b")
+let slen: number = name.length
+let sw: boolean = name.startsWith("Hello")
+let swFrom: boolean = name.startsWith("World", 7)
+let ew: boolean = name.endsWith("!")
+let ewLen: boolean = name.endsWith("Hello", 5)
+let has: boolean = name.includes("World") // emits _bst_includes helper only when this one-arg string helper is used
+let hasFrom: boolean = name.includes("World", 4)
+let last: number = name.lastIndexOf("l")
+let lastFrom: number = name.lastIndexOf("l", 8)
+let firstFrom: number = name.indexOf("l", 3)
+let sub: string = name.slice(0, 5)
+let sub2: string = name.substring(0, 5)
+let ch: string = name.charAt(1)
+
+// List methods
+let pushed: list<string> = files.push("new.txt")
+let prepended: list<string> = files.unshift("first.txt")
+let popped: list<string> = files.pop()
+let joined: string = files.join(", ")
+let merged: list<string> = files.concat(other)
+let rev: list<string> = files.reverse()
+let copied: list<string> = [...files, "extra"]
+let indexes: number[] = Array.from({ length: 3 })
+let selected: string[] = Array.of("a", "b")
+let mapped: list<string> = files.map(f => f + ".bak")
+let labeled: list<string> = files.map((f, i) => i.toString() + ":" + f)
+let classified: list<string> = files.map((f, i) => {
+    if (i == 0) return "first:" + f
+    return "next:" + f
+})
+let filtered: list<string> = files.filter(f => f.endsWith(".txt"))
+let foundIndex: number = files.findIndex(f => f == "b.txt")
+let reduced: number = nums.reduce((acc, n) => acc + n, 0)
+let lines: string = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("\n")
+let counts = words.reduce((acc, word) => {
+    acc[word] = (acc[word] || 0) + 1
+    return acc
+}, {})
+let sliced: list<string> = files.slice(1, 3)
+let found: boolean = files.includes("a.txt") // list membership via grep -qxF; does not emit _bst_includes
+let idx: number = files.indexOf("b.txt")
+let lastIdx: number = files.lastIndexOf("b.txt")
+let flen: number = files.length
+
+// Set<T> collections — newline-backed, no runtime type checks
+let visited = new Set<string>()
+visited.add("0,0")
+let wasSeen: boolean = visited.has("0,0")
+
+// Imports
+import def from "./lib/log"
+import { info, error, cmd } from "./lib/log"
+import { legacy_log } from "./legacy.sh" assert { type: "shell" }
+$(...cmd).run()
+$(...def).run()
+legacy_log("from shell")
+// Mixed command-name spread is rejected: $(...cmd, "extra")
+
+// Declaration file
+declare function external_name(name: string): string
+
+// Type aliases and interfaces — parsed and silently ignored
+type Status = "active" | "inactive"
+type Result<T> = { ok: true; value: T } | { ok: false; error: string }
+interface Config { host: string; port: number }
+export type Callback = (data: string) => void
+export interface Repository { findById(id: number): Result<string> }
+
+// Iterate command output
+for (line in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
+    $("echo", line).run()
+}
+```
+
+## Adding a New Builtin
+
+Builtins are compile-time functions with no runtime overhead. To add one:
+
+1. Add name to `IsBuiltin()` in `ast/ast.go`
+2. Add case in `checkBuiltinCall()` in `checker/checker.go`
+3. Add case in `genBuiltinCapture()` (value position) in `codegen/codegen.go`
+4. If usable as a statement, add case in `genBuiltinStmt()` in `codegen/codegen.go`
+5. If usable as a condition, add case in `genBuiltinCondition()` in `codegen/codegen.go`
+
+## Adding a New Command Method
+
+Command methods chain on `command` type values. With the lazy Command model:
+
+1. Add case in `checkCommandMethod()` in `checker/checker.go` — specify arg count and return type
+2. If the method is a **terminal** (causes execution or capture): handle in the Command Analysis pass so it's accounted for in the emit decision
+3. Add case in `genCmdChain()` in `codegen/codegen.go` — emit the shell equivalent
+4. If the method records a capture (like `.readStdout()` or `.exitCode()`), codegen reads from the pre-assigned capture variable, not from a new `$(...)` subshell
+
+## Known Semantic Differences from TypeScript
+
+**Booleans are stored as `1`/`0` in shell variables.** In string contexts besht now renders them as `true`/`false`, but condition generation still relies on `1`/`0`.
+
+**`includes()`, `startsWith()`, `endsWith()` still drive conditions via `1`/`0`, but string contexts now render them as `true`/`false`.**
+
+**Float literals use awk for arithmetic.** `3.7 + 1.2` → `$(awk -v _a=3.7 -v _b=1.2 'BEGIN{print _a + _b}')`. `$((...))` is integer-only in POSIX sh.
+
+**`Number.isNaN()` is always false for currently representable besht values.** Besht has no NaN runtime sentinel, so the API exists for JS-compatible syntax but can't observe NaN.
+
+---
+
+## Common Pitfalls for Agents
+
+**Never emit `local` in generated shell output.** Not POSIX. Use `_fn_varname` mangling instead.
+
+**`rewriteFnCalls()` runs before codegen.** When adding new expression types that contain function calls, add a case to `rewriteStmt()`/`rewriteExpr()` in `modules.go` so the pass descends into them.
+
+**`rewriteVarRefs()` must be called on `TemplateLit` values only.** Only template literals (`` `...${var}...` ``) contain `${...}` references that need var-name rewriting. Plain `StringLit` and `RawStringLit` are emitted as single-quoted sh and contain no shell expansions. Do NOT call `rewriteVarRefs()` on plain string values.
+
+**`paramMap` is per-function scope.** Saved/restored on function entry/exit in both `genFnDecl` and `genModuleFnDecl`. Loop vars and catch vars must be registered into `paramMap` and cleaned up.
+
+**`genCmdChain()` is recursive.** It walks `.pipe().pipe().stdout()` chains by recursing on the receiver. The base case is `*ast.CmdExpr`. Terminal methods must handle any redirect string accumulated from inner calls.
+
+**`r"..."` raw strings always compile to single-quoted sh.** Use for regex patterns, AWK programs, sed expressions, grep patterns — anything containing `$`, `^`, `[`, `\` that should be literal.
+
+**`\$` in regular strings produces a literal dollar sign.** `"price \$5"` → `"price \$5"` in sh (POSIX: `\$` in double-quotes is literal). Do NOT rely on `$` alone being literal — use `\$` explicitly.
+
+**Compile-time warning for `-`-prefixed string literals in `$()` args.** If a string literal starting with `-` containing special characters (`$`, `^`, `[`, `]`, etc.) is passed as a `$()` argument, the compiler warns and suggests `r"..."` or adding `-e`/`--` before it. Suppressed when the preceding argument is `-e` or `--`.
+
+**Runtime POSIX self-check.** Every compiled script emits a `_r=$(printf 'hello:world' | grep -F 'hello' | sed ...)` pipeline at the top of the preamble that verifies `grep`, `sed`, and `printf` work correctly end-to-end. If the result is wrong the script exits immediately. Omit with `--opt-no-add-binaries-check` at compile time.
+
+**`string.repeat(n)` uses awk.** The old `printf '%0.s'` approach emitted nothing. The correct implementation loops in awk: `awk -v _s=STR -v _n=N 'BEGIN{r=""; for(i=0;i<_n;i++) r=r _s; printf "%s",r}'`.
+
+**`Math.round()` matches JS semantics: `floor(x+0.5)`.** This rounds half toward +∞ (so `round(-2.5) = -2`). The naïve `int(x + 0.5)` is wrong for negatives. The correct awk formula is `_y=_x+0.5; print int(_y)-((_y<int(_y))?1:0)`.
+
+**`inferReceiverType()` is recursive.** It handles `BinaryExpr`, `MethodCallExpr`, and literal nodes — not just `IdentExpr`. This is required so chained `+` concatenations like `("a" + x) + "!" + n` correctly infer string type at every level.
+
+**`strInner()` always uses `${var}` notation.** When extracting the inner content of a double-quoted string like `"$a"` for concatenation, `strInner` returns `${a}` not `$a`. This prevents `"$a" + "bc"` from producing `"$abc"` (wrong variable name). Never revert this to `$var`.
+
+**`genArgs()` applies `ensureArgSafe()` to all generated args.** Any `$(...)` expression is automatically wrapped in `"$(...)"` when passed as an argument to a command, `console.log`, or a function call. This prevents word-splitting of multi-word command output.
+
+**`shellQuote()` single-quotes literal args only.** Values starting with `$` are passed raw as variable references. Complex expressions that happen to start with `$` skip quoting — be aware.
+
+**`escapeForDoubleQuote()` handles shell-active characters in string literals.** When emitting a double-quoted sh string, backtick `` ` ``, `$(`, and bare `$WORD`/`$1` (not inside `${...}`) must be escaped as `` \` ``, `\$(`, and `\$WORD`. The `${besht_var}` interpolation form is intentional and must be left intact. `\$` (already escaped by the lexer for literal dollars) must also be left as-is. Any new string emission path must call `escapeForDoubleQuote()` before wrapping in `"..."`.
+
+**`cmdArgQuote()` must not double-quote already-quoted values.** `RawStringLit` emits a single-quoted string from `genExprRHS` (e.g. `'s/foo/bar/'`). If `cmdArgQuote` then calls `shellQuote()` on that value again, it produces malformed shell like `'''s/foo/bar/'''`. The fix: `cmdArgQuote` short-circuits on values that already start and end with `'`. Values starting with `$` are passed raw as variable references. Complex expressions that happen to start with `$` skip quoting — be aware.
+
+**Command `.env(name, value)` prefixes one command invocation only.** It emits `NAME=value command ...` inside the generated pipeline and does not mutate the parent shell environment.
+
+**Command `.workdir(path)` changes cwd for one command or pipeline only.** It wraps the generated command in a subshell-style `cd path && ...` expression so subsequent statements keep the parent shell cwd. Keep redirects inside the workdir wrapper when generating command text.
+
+**`command` objects do not auto-coerce.** Unlike the old model, `command` no longer coerces to `string` on assignment. You must explicitly call `.run()` then `.readStdout()` to get a string. The Command Analysis pass enforces this.
+
+**`run()` returns `self`, not `void`.** This enables chaining: `$("whoami").run().readStdout()`. Do not declare `.run()` as returning `void` anywhere in the compiler — it returns the same `Command` identity.
+
+**The Command Analysis pass runs before codegen.** It assigns a unique identity (integer) to every `CmdExpr` node in the AST, traces which variable names hold each identity through assignments, and for each identity records: which line `run()` was called (if any), and whether `.readStdout()`, `.readStdoutLines()`, `.readStderr()`, or `.exitCode()` are used. Codegen then uses this map to decide what shell code to emit for each command. If a command has no `run()` call, emit nothing and warn. If it has `run()` plus `.readStdout()` usage, emit `varname=$(...)`. If it has `run()` but no capture methods, emit a bare shell command.
+
+**Module generator vs plain generator.** `moduleGenerator` embeds `Generator`. When adding new statement types, add a case to `genModuleTopStmt()` if they can contain function calls that need qualification.
+
+**Checker cross-module signatures and values.** `Compiler.load()` builds a `globalSigs` map of exported signatures and a `globalVars` map for exported top-level values. When adding new exported constructs, register them there.
+
+**Object literals compile to per-property shell variables.** `let user = { id: 1, name: "Victor" }` emits `_obj_user_id=1` and `_obj_user_name="Victor"`. Property access `user.name` reads `_obj_user_name`. Property assignment `user.name = "X"` writes `_obj_user_name="X"`. Since shell variables are global, these `_obj_*` variables are accessible inside functions. When an object is passed as a function parameter, `genProperty` uses `objPropTypeMap` (populated by `collectObjectTypes` pre-pass) to resolve the original `_obj_` prefix directly — no copying needed. Inside a function, `student.name` emits `$_obj_student_name` (using the original top-level variable name, not the mangled parameter name).
+
+**Classes use compiler-managed instance slots.** `let u = new User("Alice")` stores `u='u'`, calls `User__constructor "$u" ...`, and writes instance fields as `_obj_u_name`. `this.prop` inside constructors and methods uses tightly controlled `eval` to construct `_obj_${slot}_${prop}` names; user values must flow through temporary shell variables, never interpolated directly into the eval string. Static properties use `_class_<Class>_<prop>` and static/instance methods compile to `<Class>__<method>` shell functions. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored.
+
+**Static object maps use object backing.** `static Deltas: Record<string, [number, number]> = { U: [-1, 0] }` emits `_obj__class_Class_Deltas_U` storage, and `Class.Deltas[key]` lowers to computed object access. `Record<K, V>` is annotation-only; it guides compiler inference but adds no runtime type checking.
+
+**Class methods that mutate `this` must be void.** Value-returning methods are invoked through command substitution (`$(Class__method "$slot")`), which runs in a subshell. Any `this.prop = value` mutation inside that subshell is lost, so codegen rejects non-void methods that assign to `this` properties. Constructors are exempt because they are called directly.
+
+**`String.raw\`...\`` compiles identically to `r"..."`.** Backslashes are literal — no escape sequence processing. Use for Windows paths, regex, or any string containing `\`.
+
+**Optional string search positions are normalized in awk.** `indexOf`/`includes`/`startsWith` position, `lastIndexOf` position, and `endsWith` length must use `awkArg()` plus awk-side `int()` truncation and clamping. Do not strip quotes into shell arithmetic for these arguments.
+
+**Escape sequences in double-quoted strings.** `\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `\uXXXX` are processed by the lexer into their actual characters. Single-quoted strings do NOT process escapes — they are always literal.
+
+**Postfix `++` and `--` are statement-only; prefix updates are expressions.** `count++` and `count--` compile to assignment statements. Prefix `++count` and `--count` are supported in expression position and return the updated numeric value. They must resolve through `paramMap` like other variable reads/writes.
+
+**Arrow callbacks support both expression-bodied and block-bodied forms.** Direct list `.map(x => expr)`, `.map((x, i) => { return expr })`, `.filter((x, i) => truthyExpr)`, and `.reduce((acc, cur) => { ... }, init)` callbacks are supported. `.map()` callbacks may take `(item)` or `(item, index)` and block-bodied `return` emits one mapped value then continues the callback loop; supported block statements are `return`, `if`/`else`, and assignments. Do not splice generic expression statements into map callback shell source — reject unsupported statements instead of treating expression values as commands. `.filter()` uses JavaScript-style truthiness and may take the same optional index parameter. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. Arrows are not general function values, cannot be stored in variables, and should be treated as side-effect-free (except in `reduce` block bodies where `return acc` is used). Callback params are temporarily added to `paramMap` via `withCallbackParams()` and restored after body generation; never emit `local`.
+
+**`Array.from({ length })` is narrow by design.** It only supports an object literal with a numeric `length` field (including shorthand `{ length }`) and emits a zero-based numeric list. Do not broaden it to arbitrary iterables or mapper callbacks without adding parser/checker/codegen coverage and docs.
+
+**Type assertions are erased.** `expr as Type` exists for TypeScript-compatible syntax and compiler type inference only. It emits the inner expression unchanged. This is especially useful for empty list accumulators such as `[] as string[]`.
+
+**Tuple/list destructuring declarations are lowered to index reads.** `const [dr, dc] = pair` evaluates `pair` once into a temp and assigns each name from one-based shell line extraction. Element type inference comes from the list/tuple annotation when available.
+
+**List literal spread is generic.** `[...items, extra]` expands the existing newline-delimited list and appends normal elements. It is used by reduce list accumulators and should remain a list literal transformation, not a reduce-specific special case.
+
+**`list.findIndex(callback)` returns a zero-based number or `-1`.** It uses the same one-argument arrow callback machinery as `filter`; keep callback params in `paramMap` and avoid pipeline loops when mutations must persist.
+
+**For-of list expression loops run in the current shell.** `for (const move of moves.split("") as string[])` uses a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist.
+
+**Optional element access is currently lowered to normal indexing.** `matrix[r]?.[c]` compiles like `matrix[r][c]`; out-of-range extraction yields an empty value, which is how `undefined` is represented for equality checks. Do not claim full JavaScript optional chaining semantics.
+
+**String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the entry-file POSIX self-check block behavior. List `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
+
+**`list.join(sep)` uses awk, not `paste -sd`.** Multi-character separators (like `", "`) require awk since `paste -sd` only uses the first character of the delimiter. The generated code: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
+
+**AWK `OFMT="%.17g"` is set in all arithmetic BEGIN blocks.** This matches JavaScript double-precision output for division results (e.g., `72.66666666666667` instead of `72.6667`).
+
+**`collectObjectTypes` pre-pass runs before codegen.** It walks the AST to populate `objPropTypeMap` (mapping `"varName.propName"` → type) so that `genProperty` and `inferReceiverType` can resolve object property types even inside function bodies. Without this pre-pass, functions defined before object literals would have empty `objPropTypeMap` entries.
+
+**`fnParamTypes` tracks function parameter types during codegen.** Set in `genFnDecl`/`genModuleFnDecl` from `param.Type` annotations. Used by `inferReceiverType` to determine that a function parameter like `scores: number[]` is a list, enabling `scores.length` and `scores[i]` to work correctly.
+
+**`||` and `&&` in value position return actual values (JS semantics), not booleans.** `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. This is different from condition position (used in `if`/`while`) which returns 1/0. The implementation uses a subshell with `_l=temp` capture to test the left side, then returns the appropriate value.
+
+**`??` uses an internal nullish sentinel, not shell default expansion.** Do not lower it to `${var:-fallback}` because empty string, `0`, and `false` must be preserved. Only `null`, `undefined`, missing `args` values, and missing indexes in nullish-left position should trigger the fallback.
+
+**`args.*` helpers parse script arguments in generated POSIX sh.** `args.argv()` returns positional args only, `args.positional(n)` returns a 1-based positional value or nullish, `args.option(long, short?)` supports `--long=value`, `--long value`, and optional `-s value`, and `args.flag(long, short?)` returns boolean `1`/`0`. Keep defaults outside helpers via `??`.
+
+**`--` stops args option parsing.** After `--`, values that look like options or flags are positional. For example, `script --branch=dev -- -d file` has `args.flag("dry-run", "d") == false` and positional args `-d`, `file`.
+
+**Equality conditions bind operands before comparing.** `genBinaryCondition()` must assign both sides to temporary variables and compare `[ "$_bst_left" = "$_bst_right" ]` / `!=`. Direct `[ $(fn) = "multi\nline" ]` breaks POSIX `[ ]` argument parsing when strings contain spaces or newlines.
+
+**`reduce()` emits a heredoc-based while loop, not a pipe.** Using `printf | while read` would create a subshell, causing `_obj_*` variable mutations inside the loop to be lost. The heredoc `while read; do ...; done << EOF` pattern runs in the current shell context. The accumulator variable name is passed as an override to `withCallbackParams()` so `acc` resolves to the result variable name inside the callback.
+
+**Computed property access uses `eval` with `\${_obj_varName_${key}}` for reading.** The outer shell expands `${key}` to the key value before eval runs. The `\${_obj_varName_` is an escaped `${` that eval interprets as a variable reference. For writing, `eval "_obj_varName_${key}=$value"` uses the outer shell's `${key}` expansion to construct the full variable name.
+
+**Computed object keys are validated before eval.** Dynamic keys must match `[A-Za-z0-9_]+`. Generated code stores the key and value in temporary variables, rejects unsafe keys, and assigns through escaped temp-var references.
+
+**`console.log` for objects prints multi-line format matching bun.** Dynamic-key objects iterate `_objkeys_*` at runtime; static-key objects use known fields. The output format is `{ key: value, }` with one property per line. Boolean properties (where `objPropTypeMap` indicates `TypeBoolean`) are displayed as `true`/`false`; numeric and string values are displayed as-is.
+
+**`return acc` inside a reduce callback with object accumulator is a no-op.** Object mutations are applied via property assignments that persist across iterations. The `genReturn` function consults the scoped `reduceReturns` stack, skips `return acc`, and rejects returning a different value from an object-accumulator callback.
+
+## Adding a New Language Feature
+
+1. **Token**: add `TokXxx` to `token.go`, add keyword string to `keywords` map if keyword-based
+2. **AST node**: add struct to `ast.go` implementing `Statement` or `Expression`
+3. **Parser**: add parse function, wire into `parseStatement()` or `parsePrimary()`
+4. **Checker**: add case in `checkStmt()` or `checkExpr()`; validate types, update scope
+5. **Codegen**: add case in `genStmt()` or `genExprRHS()`; handle `paramMap`/`rewriteVarRefs` if needed
+6. **Module rewrite pass**: add cases to `rewriteStmt()`/`rewriteExpr()` in `modules.go` if the new node contains function calls
+7. **Tests**: add lexer test, parser test, checker test (valid + error), codegen unit test, integration test
+8. **Examples**: update `examples/healthcheck/` if the feature is user-visible
+9. **README**: update syntax reference
+10. **SKILL.md**: update `skills/besht-scripting/SKILL.md`
+11. **AGENTS.md**: update this file (Syntax Reference, Types, Architecture, Pitfalls)
+
+**`Set<T>` is a compiler-backed membership collection.** `new Set<T>()` initializes an empty newline-delimited set, `.has(value)` emits a POSIX `grep -qxF` membership test, and `.add(value)` mutates the set with an `awk` uniqueness filter. Type parameters are annotations only; do not add runtime type checks.
+
+**Nested lists are encoded as packed rows.** When `.map()` returns a list, each row is packed with ASCII unit separator (`\037`) so the outer list remains newline-delimited. `matrix[row]` decodes one row, `matrix[row][col]` indexes into it, and `.length` on a decoded row counts row items. Keep this generic; do not special-case fixtures.
+
+**Blockless `if`/`else` bodies are parsed as one-statement blocks.** `if (cond) return x` and `else expr` should produce the same AST shape as braced single-statement blocks.
+
+**Import value exports, shell imports, and .ts fallback.** `export const name = expr` and `export default expr` are module-level value exports. Module codegen qualifies exported values as `<module>__<name>` and default exports as `<module>__default`; imported values are mapped through `moduleGenerator.importVarMap` into `paramMap` so normal identifier and command-spread generation uses the qualified shell variable. Imported value types must also be seeded into `varTypeMap` for both the source import name and qualified shell name so non-strict codegen dispatches imported list/boolean methods and formatting correctly. Keep extensionless import resolution `.bsh`-first. Only `codegen.Options.ResolveTsImports` / `--opt-resolve-ts-imports` may fall back to `.ts`, and `.d.bsh` imports remain declaration-only. Explicit `.sh` imports require named imports plus `assert { type: "shell" }`; default shell imports are rejected, shell files are not parsed for exports, and checker registration treats imported shell functions as unchecked varargs returning `string`. `--check` uses the module compiler path so import validation matches compilation. By default shell imports must stay inside the compiler root; `codegen.Options.AllowExternalShellImports` / `--opt-allow-external-shell-imports` permits explicit `.sh` imports outside that root without relaxing `.bsh` module imports. Bundled output sources the resolved shell file with a guard, while split output copies in-root raw shell dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths. External opt-in shell imports in split output are sourced from their original absolute path instead of copied outside the output root. Shell import guard variables are generated from unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
