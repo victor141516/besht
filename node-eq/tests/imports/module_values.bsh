@@ -1,0 +1,5 @@
+import def from './module_values_dep'
+import {cmd} from './module_values_dep'
+
+$(...cmd).run()
+$(...def).run()

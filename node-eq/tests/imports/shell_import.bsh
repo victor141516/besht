@@ -1,0 +1,3 @@
+import {a} from './shell_import_impl.sh' assert {type:'shell'}
+
+console.log(a())
