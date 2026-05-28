@@ -29,8 +29,6 @@ besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to
 besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
 ```
 
-Generated shell keeps runtime boilerplate minimal: string helpers for one-argument `includes()`, `startsWith()`, and `endsWith()` are emitted only when used; list `.includes()` uses `grep -qxF` membership and does not emit the string `_bst_includes` helper.
-
 ## Variable Declarations
 
 Types are optional. Use `let` for mutable variables, `const` for immutable ones. Pass `--strict` to validate annotations.
@@ -73,7 +71,7 @@ let msg: string = `Hello, ${name}!`; // preferred when interpolation is needed
 let bigger = a > b ? a : b;
 ```
 
-Raw strings (`r"..."`) are always emitted single-quoted in sh. Use them for regex patterns, AWK programs, sed expressions — anything with `$`, `^`, `[`, `\` that must be literal. `String.raw\`...\`` is identical to `r"..."`.
+Use raw strings (`r"..."`) for regex patterns, AWK programs, sed expressions, Windows paths, or any text containing `$`, `^`, `[`, or `\` that must stay literal. `String.raw\`...\`` is identical to `r"..."`.
 
 Escape sequences in double-quoted strings: `\n` (newline), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (double quote), `\'` (single quote), `\uXXXX` (unicode). Single-quoted strings do NOT process escapes.
 
@@ -131,7 +129,7 @@ count = count + 1;
 
 ## Type Aliases and Interfaces
 
-`type` and `interface` declarations are parsed and silently ignored — no shell code is emitted:
+`type` and `interface` declarations are accepted for TypeScript-compatible syntax and editor support:
 
 ```ts
 type Status = "active" | "inactive"
@@ -204,7 +202,7 @@ let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).joi
 
 ## String and List Search
 
-One-argument string `s.includes(x)`, `s.startsWith(x)`, and `s.endsWith(x)` compile through tiny `_bst_*` helper functions that are included only when generated shell calls them. Two-argument string search methods use inline `awk`. List `items.includes(x)` is different from string `.includes()`: it checks newline-delimited membership with `grep -qxF` and does not require `_bst_includes`.
+Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Lists also support `items.includes(x)` for exact item membership.
 
 ## Sets and Nested Lists
 
@@ -236,16 +234,16 @@ user[key] = "Updated"
 
 // Dynamic keys must contain only letters, numbers, and _
 
-// Objects work as function parameters — property access uses global _obj_* variables
+// Objects work as function parameters
 function printUser(u) {
-    console.log(u.name) // reads _obj_user_name directly
+    console.log(u.name)
 }
 printUser(user)
 ```
 
 ## Classes
 
-Classes support constructors, instance properties/methods, `new`, `this`, and static properties/methods. They compile to POSIX sh functions and `_obj_<slot>_<prop>` / `_class_<Class>_<prop>` variables. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored. Inheritance, getters/setters, decorators, and abstract classes are not supported.
+Classes support constructors, instance properties/methods, `new`, `this`, and static properties/methods. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored. Inheritance, getters/setters, decorators, and abstract classes are not supported.
 
 ```ts
 class User {
@@ -275,7 +273,7 @@ class Game {
 }
 ```
 
-Methods that mutate `this` must be void methods. Constructors can set fields, but value-returning methods cannot assign to `this.prop` because shell command substitution would lose those writes.
+Methods that mutate `this` must be void methods. Constructors can set fields, but value-returning methods cannot assign to `this.prop`.
 
 ## Number Builtins
 
@@ -503,7 +501,7 @@ function read_config(path: string): string {
 
 ## Built-in File Tests
 
-These compile to inline POSIX `[ ]` tests:
+Available file and string tests:
 
 ```ts
 if (file_exists(path)) { ... }
@@ -552,7 +550,7 @@ $(...defaultCmd).run();
 // Mixed command-name spread is rejected: use $(...cmd) as the whole command vector.
 ```
 
-Named imports can reference exported functions, classes, and exported top-level values. Imported value annotations/inferred types are available to non-strict codegen, so imported lists dispatch list methods like `.join()` and `.length`. Default values use `export default <expr>` and `import name from "./module"`. By default extensionless imports resolve only to `.bsh`; pass `--opt-resolve-ts-imports` to use `.ts` when `.bsh` is absent. With `--split -o build/`, each `.bsh` or opt-in `.ts` module becomes its own `.sh` that sources its dependencies at runtime.
+Named imports can reference exported functions, classes, and exported top-level values. Default values use `export default <expr>` and `import name from "./module"`. By default extensionless imports resolve only to `.bsh`; pass `--opt-resolve-ts-imports` to use `.ts` when `.bsh` is absent. With `--split -o build/`, each `.bsh` or opt-in `.ts` module is compiled separately.
 
 Existing POSIX shell files can be imported only with named imports and an assertion:
 
@@ -561,7 +559,7 @@ import { legacy_log } from "./legacy.sh" assert { type: "shell" };
 legacy_log("from besht");
 ```
 
-Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Default shell imports are rejected. Besht does not parse shell exports; imported shell functions are unchecked varargs and return `string` in value position. `--check` validates imports with the same module resolver as compilation. By default shell imports must stay inside the compiler root; pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root. Bundled output sources the resolved `.sh` file with a guard. Split output copies in-root `.sh` dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths; external opt-in shell imports are sourced from their original absolute path. Shell import guards use unique relative shell paths, so similarly named files such as `a-b.sh` and `a_b.sh` do not collide.
+Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Default shell imports are rejected. Imported shell functions are unchecked varargs and return `string` in value position. `--check` validates imports. By default shell imports must stay inside the compiler root; pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root.
 
 ## Comments
 
@@ -573,7 +571,7 @@ Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Defau
 
 ## Float Literals and Math
 
-Float (decimal) literals are supported natively. All `Math.*` methods use `awk` internally and support decimals.
+Float (decimal) literals are supported. `Math.*` methods support decimals.
 
 ```ts
 let price: number = 3.14;
@@ -612,7 +610,7 @@ files.lastIndexOf("a"); // 2
 Array.of("a", "b"); // ["a", "b"]
 ```
 
-Note: booleans still evaluate as `1`/`0` for shell conditions, but string contexts now render `true`/`false`.
+Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions.
 
 ## Operators
 
@@ -684,17 +682,13 @@ let lines: number = to_int(raw); // string → number
 ## Type Rules
 
 - `$()` returns `command`; call `.run().readStdout()` or `.run().readStdoutLines()` to read output
-- `boolean` values are `1`/`0` at runtime; use in `if`/`while` conditions directly
-- `list<T>` compiles to newline-delimited strings; iterated with `for`
+- `boolean` values work directly in `if`/`while` conditions and render as `true`/`false` in string contexts
+- `list<T>` values can be indexed, joined, and iterated with `for`
 - `status` type holds exit codes; only usable in `catch` clauses
-- String and number are coercible to each other (shell convention)
-- Boolean renders as `true`/`false` in string contexts, but still uses `1`/`0` for shell conditions
+- String and number values can be converted with `String()`, `to_str()`, and `to_int()`
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
-- `===`/`!==` are aliases for `==`/`!=` (no type distinction in shell)
-- Object literals compile to per-property shell variables (`_obj_<name>_<prop>`)
-- Classes use compiler-managed instance slot IDs (`let u = new User()` stores `u='u'`) and class/static shell symbols
-- Object property access inside functions resolves to the original `_obj_*` variables (shell globals)
+- `===`/`!==` are aliases for `==`/`!=`
+- Objects and classes support the operations described above; unsupported TypeScript features are listed in their sections
 - `String.raw\`...\`` is identical to `r"..."` — backslashes are literal
-- `list.join(sep)` uses awk (not `paste -sd`) to support multi-character separators
-- AWK arithmetic uses `OFMT="%.17g"` for JavaScript-compatible float precision
+- `list.join(sep)` supports multi-character separators

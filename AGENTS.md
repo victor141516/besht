@@ -51,6 +51,8 @@ Type checking is opt-in via `--strict` and must never be runtime type checking.
 
 **You must update AGENTS.md, SKILL.md, and README.md as part of every task — without waiting for the user to ask.**
 
+`skills/besht-scripting/SKILL.md` is for people who want to use Besht. Keep it limited to user-facing language syntax, compiler commands, flags, and practical scripting examples. Do not put compiler implementation details, internal architecture, test layout, node-eq instructions, agent workflow rules, or contributor-only pitfalls in the skill file. Put those details in this `AGENTS.md` instead.
+
 This is not optional and does not require a prompt. Any time you add, change, rename, or remove something in the compiler or language, update the affected sections in all three files before marking the task complete. The rule applies to:
 
 - User-facing changes: new syntax, new builtins, new methods, renamed/removed keywords, new CLI flags, changed compilation behavior, new output formats
@@ -66,6 +68,7 @@ This is not optional and does not require a prompt. Any time you add, change, re
 | CLI flag added/renamed                         | AGENTS.md Commands + CLI Flags table + SKILL.md Compile section + README.md CLI reference |
 | Compilation behavior changed                   | AGENTS.md Key Design Decisions + Pitfalls + README.md                                     |
 | Architecture changed                           | AGENTS.md Architecture section                                                            |
+| Test layout or test workflow changed           | AGENTS.md Commands + Test Layout                                                          |
 | New pitfall discovered                         | AGENTS.md Common Pitfalls                                                                 |
 
 ---
@@ -88,6 +91,9 @@ make build                        # → dist/besht
 
 # Run all tests
 make test
+
+# Run node-eq parity fixtures
+bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)
 
 # Coverage report (terminal)
 make cover
@@ -329,6 +335,8 @@ internal/checker/checker_test.go   # Type checking, scope, all builtins
 internal/codegen/codegen_test.go   # Unit: AST → sh output patterns (uses Generate())
 internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh output
 ```
+
+`node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.
 
 Tests use `go test ./...`. Coverage target: `make cover`. Current coverage: ~75%.
 

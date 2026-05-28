@@ -844,6 +844,9 @@ besht --help                        Show usage
 # Run all tests
 make test
 
+# Run node-eq parity fixtures
+bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)
+
 # Run with coverage report (terminal)
 make cover
 

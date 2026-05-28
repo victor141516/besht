@@ -3,7 +3,7 @@
  * compare — run a .bsh file both ways and diff the output.
  *
  * Usage:  bun compare <file.bsh> [<file.bsh> ...] [-- script args...]
- *         bun compare tests/*.bsh
+ *         bun compare $(rg --files -g '*.bsh' tests | sort)
  *
  * Exit code 0 = all matched, 1 = at least one mismatch.
  */
