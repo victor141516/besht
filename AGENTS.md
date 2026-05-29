@@ -523,7 +523,10 @@ for (f in files) {
 let first: string = files[0]
 let item: string = files[i]
 let cell: string = matrix[row][col]
-let maybeCell: string | undefined = matrix[row]?.[col]
+let maybeName: string = user?.name ?? "anonymous"
+let maybeItem: string = items?.[i] ?? "fallback"
+let maybeCell: string = matrix?.[row]?.[col] ?? "missing"
+let maybeTrimmed: string = maybeText?.trim() ?? ""
 let width: number = matrix[0].length
 
 // List index assignment
@@ -868,7 +871,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **For-of list expression loops run in the current shell.** `for (const move of moves.split("") as string[])` uses a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist.
 
-**Optional element access is currently lowered to normal indexing.** `matrix[r]?.[c]` compiles like `matrix[r][c]`; out-of-range extraction yields an empty value, which is how `undefined` is represented for equality checks. Do not claim full JavaScript optional chaining semantics.
+**Optional chaining uses flags on existing postfix AST nodes.** `IndexExpr`, `PropertyExpr`, and `MethodCallExpr` have `Optional bool`; keep all AST walkers descending into their receivers, indexes, and arguments. Codegen emits POSIX shell that stores the receiver once, compares it with `_BESHT_NULLISH_SENTINEL`, and returns that same sentinel on short-circuit so `??` can distinguish nullish from `""`, `0`, and `false`. Optional chaining guards nullish receivers only; do not add runtime shape/type checks. General `fn?.()`, `obj.method?.()`, and optional assignment targets remain unsupported.
 
 **String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the entry-file POSIX self-check block behavior. List `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
 

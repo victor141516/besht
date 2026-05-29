@@ -215,10 +215,10 @@ let matrix: string[][] = ["ab", "cd"].map(row => row.split("") as string[])
 console.log(matrix[0][1])
 console.log(matrix[0].length)
 const [row, col] = [0, 1]
-console.log(matrix[row]?.[col])
+console.log(matrix?.[row]?.[col] ?? "missing")
 ```
 
-`Set<T>` has `new Set<T>()`, `.has(value)`, and mutating `.add(value)`. Type parameters are annotations only. Nested list rows are preserved through `.map()` when the callback returns a list, and `split("")` splits a string into characters. Tuple/list destructuring declarations evaluate the source once and assign each name from list indexes. Optional element access currently lowers to normal indexing; out-of-range indexes produce the same empty value used for `undefined`.
+`Set<T>` has `new Set<T>()`, `.has(value)`, and mutating `.add(value)`. Type parameters are annotations only. Nested list rows are preserved through `.map()` when the callback returns a list, and `split("")` splits a string into characters. Tuple/list destructuring declarations evaluate the source once and assign each name from list indexes. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains; it short-circuits only on `null`/`undefined` and composes with `??`. General `fn?.()`, `obj.method?.()`, and optional assignment targets are not supported.
 
 ## Objects
 
@@ -349,6 +349,16 @@ $("grep", "-v", r"^sha256").run()
 $("grep", "-E", r"HOP-[0-9]{4,5}").run()
 $("sed", r"s/foo/bar/g").run()
 ```
+
+## Optional Chaining
+
+```ts
+let name = user?.name ?? "anonymous"
+let item = items?.[i] ?? "fallback"
+let trimmed = maybeText?.trim() ?? ""
+```
+
+Optional chaining returns a nullish value when the receiver is `null` or `undefined`; `??` can then provide a fallback without treating `""`, `0`, or `false` as missing.
 
 ## Functions
 

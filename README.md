@@ -95,7 +95,7 @@ Files use the `.bsh` extension.
 - TypeScript-only class modifiers such as `private`, `public`, `protected`, and `readonly` are accepted and ignored.
 - `Record<K, V>` annotations are accepted for object-map style code; they are annotations only and add no runtime type checks.
 - Tuple destructuring declarations such as `const [x, y] = pair` are supported for list/tuple values.
-- `null` and `undefined` are accepted for TypeScript-compatible syntax; `??` falls back only for nullish values and preserves `""`, `0`, and `false`. Optional element access `matrix[r]?.[c]` is lowered to normal indexing.
+- `null` and `undefined` are accepted for TypeScript-compatible syntax; `??` falls back only for nullish values and preserves `""`, `0`, and `false`. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains.
 - `$()` calls support list spreading with `...args`; spreading an entire command vector must use sole-argument form `$(...cmd)`.
 - `.d.bsh` files are declaration-only and never emit shell output.
 - Extensionless imports resolve to `.bsh` by default. Pass `--opt-resolve-ts-imports` to fall back to `.ts` only when the `.bsh` file is absent. Explicit named `.sh` imports require `assert { type: "shell" }` and source existing shell functions. Shell imports must resolve inside the compiler root unless `--opt-allow-external-shell-imports` is passed.
@@ -208,6 +208,19 @@ console.log(empty ?? "fallback")   // empty string
 console.log(zero ?? 99)               // 0
 console.log(nope ?? true)             // false
 ```
+
+### Optional chaining
+
+Optional chaining short-circuits when the receiver is `null` or `undefined`, returns a nullish value, and composes with `??`. Empty strings, `0`, and `false` are preserved.
+
+```ts
+let name = user?.name ?? "anonymous"
+let item = items?.[i] ?? "fallback"
+let cell = matrix?.[row]?.[col] ?? "missing"
+let trimmed = maybeText?.trim() ?? ""
+```
+
+Optional chaining only guards nullish receivers. It does not add runtime type checking or validate object shapes. General optional function calls (`fn?.()`), optional method-value calls (`obj.method?.()`), and optional-chain assignment targets (`obj?.prop = value`) are not supported.
 
 ### Functions
 
@@ -532,7 +545,7 @@ l.length; // number
 matrix[0][1]; // nested indexing
 matrix[0].length; // row length
 const [row, col] = [1, 2]; // tuple/list destructuring
-let maybe = matrix[row]?.[col]; // empty value when out of range
+let maybe = matrix?.[row]?.[col] ?? "missing"
 ```
 
 ### Sets
