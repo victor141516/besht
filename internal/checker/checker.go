@@ -1891,6 +1891,14 @@ func (c *Checker) checkTernary(e *ast.TernaryExpr) (*ast.Type, error) {
 	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("ternary branches must have compatible types, got %s and %s", thenType, elseType)}
 }
 
+func optionalNullishReceiver(expr ast.Expression) bool {
+	switch expr.(type) {
+	case *ast.UndefinedLit, *ast.NullLit:
+		return true
+	}
+	return false
+}
+
 func (c *Checker) checkProperty(e *ast.PropertyExpr) (*ast.Type, error) {
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 		if pt, ok := c.classProps[ident.Name+"."+e.Property]; ok {
@@ -1905,7 +1913,7 @@ func (c *Checker) checkProperty(e *ast.PropertyExpr) (*ast.Type, error) {
 	case "length":
 		return &ast.Type{Kind: ast.TypeNumber}, nil
 	}
-	if recvType.Kind == ast.TypeObject {
+	if recvType.Kind == ast.TypeObject || (e.Optional && optionalNullishReceiver(e.Receiver)) {
 		return &ast.Type{Kind: ast.TypeString}, nil
 	}
 	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no property %q", recvType, e.Property)}
@@ -1932,6 +1940,16 @@ func (c *Checker) checkIndexExpr(e *ast.IndexExpr) (*ast.Type, error) {
 		}
 		if exprType.Elem != nil {
 			return exprType.Elem, nil
+		}
+		return &ast.Type{Kind: ast.TypeString}, nil
+	}
+	if e.Optional && optionalNullishReceiver(e.Expr) {
+		indexType, err := c.checkExpr(e.Index)
+		if err != nil {
+			return nil, err
+		}
+		if indexType.Kind != ast.TypeNumber {
+			return nil, &CheckError{Pos: e.Pos, Message: "list index must be int"}
 		}
 		return &ast.Type{Kind: ast.TypeString}, nil
 	}

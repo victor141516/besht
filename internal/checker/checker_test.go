@@ -56,6 +56,29 @@ func TestChecker_LetDeclValid(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b"]`)
 }
 
+func TestChecker_OptionalChaining(t *testing.T) {
+	mustCheck(t, `let user = { name: "Ada" }
+let a: string = user?.name
+let name: string = user?.name ?? "anonymous"
+let items: string[] = ["a", "b"]
+let b: string = items?.[0]
+let item: string = items?.[1] ?? "fallback"
+let c: string = undefined?.name
+let d: string = undefined?.[0]
+let e: string = " Ada "?.trim()`)
+}
+
+func TestChecker_OptionalChainingChecksSubexpressions(t *testing.T) {
+	expectError(t, `let items: string[] = ["a"]
+let value = items?.[missing]`, "undefined variable")
+}
+
+func TestChecker_OptionalChainingRejectsInvalidKnownShapes(t *testing.T) {
+	expectError(t, `let items: string[] = ["a"]
+let value = items?.bogus`, "has no property")
+	expectError(t, `let value = undefined?.["bad"]`, "list index must be int")
+}
+
 func TestChecker_NullishCoalescing(t *testing.T) {
 	mustCheck(t, `let value: string = undefined ?? "fallback"`)
 	mustCheck(t, `let value: string = null ?? "fallback"`)
