@@ -1698,11 +1698,18 @@ func (g *Generator) genExit(s *ast.ExitStmt) error {
 }
 
 func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
-	switch e := s.Expr.(type) {
+	stmtExpr := unwrapAsExpr(s.Expr)
+	switch e := stmtExpr.(type) {
 	case *ast.CmdExpr:
 		// Bare $() as a statement with no .run() — emit nothing (warning already issued)
 		return nil
 	case *ast.MethodCallExpr:
+		if e.Optional {
+			if className, ok := g.receiverClassName(e.Receiver); ok {
+				return g.genOptionalClassMethodStmt(className, e)
+			}
+			return g.genDiscardExprStmt(s.Expr)
+		}
 		if className, ok := g.receiverClassName(e.Receiver); ok {
 			return g.genClassMethodStmt(className, e)
 		}
@@ -1744,6 +1751,9 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 			g.line(formatCmdForBare(pipeline, redirect))
 			return nil
 		}
+		if containsOptionalChainExpr(s.Expr) {
+			return g.genDiscardExprStmt(s.Expr)
+		}
 		val, err := g.genExprValue(s.Expr)
 		if err != nil {
 			return err
@@ -1783,12 +1793,97 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 		}
 		return nil
 	}
+	if containsOptionalChainExpr(s.Expr) {
+		return g.genDiscardExprStmt(s.Expr)
+	}
 	val, err := g.genExprValue(s.Expr)
 	if err != nil {
 		return err
 	}
 	if val != "" {
 		g.line(val)
+	}
+	return nil
+}
+
+func unwrapAsExpr(expr ast.Expression) ast.Expression {
+	for {
+		asExpr, ok := expr.(*ast.AsExpr)
+		if !ok {
+			return expr
+		}
+		expr = asExpr.Expr
+	}
+}
+
+func containsOptionalChainExpr(expr ast.Expression) bool {
+	switch e := expr.(type) {
+	case *ast.PropertyExpr:
+		return e.Optional || containsOptionalChainExpr(e.Receiver)
+	case *ast.IndexExpr:
+		return e.Optional || containsOptionalChainExpr(e.Expr) || containsOptionalChainExpr(e.Index)
+	case *ast.MethodCallExpr:
+		if e.Optional || containsOptionalChainExpr(e.Receiver) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if containsOptionalChainExpr(arg) {
+				return true
+			}
+		}
+	case *ast.BinaryExpr:
+		return containsOptionalChainExpr(e.Left) || containsOptionalChainExpr(e.Right)
+	case *ast.TernaryExpr:
+		return containsOptionalChainExpr(e.Condition) || containsOptionalChainExpr(e.Then) || containsOptionalChainExpr(e.Else)
+	case *ast.UnaryExpr:
+		return containsOptionalChainExpr(e.Expr)
+	case *ast.PropagateExpr:
+		return containsOptionalChainExpr(e.Expr)
+	case *ast.SpreadExpr:
+		return containsOptionalChainExpr(e.Expr)
+	case *ast.AsExpr:
+		return containsOptionalChainExpr(e.Expr)
+	case *ast.ListLit:
+		for _, elem := range e.Elements {
+			if containsOptionalChainExpr(elem) {
+				return true
+			}
+		}
+	case *ast.ObjectLit:
+		for _, field := range e.Fields {
+			if containsOptionalChainExpr(field.Value) {
+				return true
+			}
+		}
+	case *ast.TemplateLit:
+		for _, expr := range e.Exprs {
+			if containsOptionalChainExpr(expr) {
+				return true
+			}
+		}
+	case *ast.FnCallExpr:
+		for _, arg := range e.Args {
+			if containsOptionalChainExpr(arg) {
+				return true
+			}
+		}
+	case *ast.BuiltinCallExpr:
+		for _, arg := range e.Args {
+			if containsOptionalChainExpr(arg) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (g *Generator) genDiscardExprStmt(expr ast.Expression) error {
+	val, err := g.genExprValue(expr)
+	if err != nil {
+		return err
+	}
+	if val != "" {
+		g.line(": " + ensureArgSafe(val))
 	}
 	return nil
 }
@@ -1964,12 +2059,21 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 	case *ast.PropagateExpr:
 		return g.genPropagateRHS(e)
 	case *ast.IndexExpr:
+		if e.Optional {
+			return g.genOptionalIndexExpr(e)
+		}
 		return g.genIndexExpr(e)
 	case *ast.MethodCallExpr:
+		if e.Optional {
+			return g.genOptionalMethodCall(e)
+		}
 		return g.genMethodCall(e)
 	case *ast.ArrowExpr:
 		return "", fmt.Errorf("arrow expressions can only be used as list callbacks")
 	case *ast.PropertyExpr:
+		if e.Optional {
+			return g.genOptionalProperty(e)
+		}
 		return g.genProperty(e)
 	case *ast.SpreadExpr:
 		return g.genExprValue(e.Expr)
@@ -1985,9 +2089,126 @@ func (g *Generator) genExprValue(expr ast.Expression) (string, error) {
 
 func (g *Generator) genNullishValue(expr ast.Expression) (string, error) {
 	if idx, ok := expr.(*ast.IndexExpr); ok {
+		if idx.Optional {
+			return g.genOptionalIndexExpr(idx)
+		}
 		return g.genNullishIndexExpr(idx)
 	}
 	return g.genExprValue(expr)
+}
+
+func isNullishLiteral(expr ast.Expression) bool {
+	switch expr.(type) {
+	case *ast.UndefinedLit, *ast.NullLit:
+		return true
+	}
+	return false
+}
+
+func nullishAwareTruthyCondition(val string) string {
+	return fmt.Sprintf("{ _bst_cond=%s; [ \"$_bst_cond\" != \"$%s\" ] && [ -n \"$_bst_cond\" ] && [ \"$_bst_cond\" != 0 ]; }", val, nullishSentinelVar)
+}
+
+func (g *Generator) withTempReceiver(name string, pos ast.Pos, receiver ast.Expression, fn func(ast.Expression) (string, error)) (string, error) {
+	recvType := g.inferReceiverType(receiver)
+	oldType, hadOldType := g.varTypeMap[name]
+	oldClass, hadOldClass := g.varClassMap[name]
+	oldParam, hadOldParam := g.paramMap[name]
+	g.paramMap[name] = name
+	if recvType != nil {
+		g.varTypeMap[name] = recvType
+	}
+	if className, ok := g.receiverClassName(receiver); ok {
+		g.varClassMap[name] = className
+	}
+	defer func() {
+		if hadOldParam {
+			g.paramMap[name] = oldParam
+		} else {
+			delete(g.paramMap, name)
+		}
+		if hadOldType {
+			g.varTypeMap[name] = oldType
+		} else {
+			delete(g.varTypeMap, name)
+		}
+		if hadOldClass {
+			g.varClassMap[name] = oldClass
+		} else {
+			delete(g.varClassMap, name)
+		}
+	}()
+	return fn(&ast.IdentExpr{Pos: pos, Name: name})
+}
+
+func (g *Generator) genOptionalShell(pos ast.Pos, receiver ast.Expression, body func(tmpName string) (string, error)) (string, error) {
+	g.requireRuntimeHelper("nullish")
+	recv, err := g.genNullishValue(receiver)
+	if err != nil {
+		return "", err
+	}
+	tmpName := fmt.Sprintf("_bst_opt_recv_%d_%d", pos.Line, pos.Column)
+	outName := fmt.Sprintf("_bst_opt_out_%d_%d", pos.Line, pos.Column)
+	val, err := body(tmpName)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ]; then printf '%%s' \"$%s\"; else %s=%s; printf '%%s' \"$%s\"; fi)", tmpName, recv, tmpName, nullishSentinelVar, nullishSentinelVar, outName, val, outName), nil
+}
+
+func (g *Generator) genOptionalProperty(e *ast.PropertyExpr) (string, error) {
+	return g.genOptionalShell(e.Pos, e.Receiver, func(tmpName string) (string, error) {
+		if isNullishLiteral(e.Receiver) && e.Property != "length" {
+			return `""`, nil
+		}
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && e.Property != "length" {
+			varName := g.resolveVarName(ident.Name)
+			_, hasObjectType := g.varTypeMap[varName]
+			_, hasAlias := g.objAliasMap[ident.Name]
+			_, hasClass := g.varClassMap[varName]
+			if hasObjectType || hasAlias || hasClass {
+				clone := *e
+				clone.Optional = false
+				clone.Receiver = ident
+				return g.genProperty(&clone)
+			}
+			return fmt.Sprintf("\"$%s\"", objectPropVar(varName, e.Property)), nil
+		}
+		return g.withTempReceiver(tmpName, e.Pos, e.Receiver, func(recv ast.Expression) (string, error) {
+			clone := *e
+			clone.Optional = false
+			clone.Receiver = recv
+			return g.genProperty(&clone)
+		})
+	})
+}
+
+func (g *Generator) genOptionalIndexExpr(e *ast.IndexExpr) (string, error) {
+	return g.genOptionalShell(e.Pos, e.Expr, func(tmpName string) (string, error) {
+		recvType := g.inferReceiverType(e.Expr)
+		if recvType != nil && recvType.Kind == ast.TypeObject {
+			clone := *e
+			clone.Optional = false
+			return g.genComputedPropertyAccess(&clone)
+		}
+		return g.withTempReceiver(tmpName, e.Pos, e.Expr, func(recv ast.Expression) (string, error) {
+			clone := *e
+			clone.Optional = false
+			clone.Expr = recv
+			return g.genNullishIndexExpr(&clone)
+		})
+	})
+}
+
+func (g *Generator) genOptionalMethodCall(e *ast.MethodCallExpr) (string, error) {
+	return g.genOptionalShell(e.Pos, e.Receiver, func(tmpName string) (string, error) {
+		return g.withTempReceiver(tmpName, e.Pos, e.Receiver, func(recv ast.Expression) (string, error) {
+			clone := *e
+			clone.Optional = false
+			clone.Receiver = recv
+			return g.genMethodCall(&clone)
+		})
+	})
 }
 
 func (g *Generator) genListLiteral(e *ast.ListLit) (string, error) {
@@ -3063,26 +3284,57 @@ func (g *Generator) genClassMethodCall(className string, e *ast.MethodCallExpr) 
 }
 
 func (g *Generator) genClassMethodStmt(className string, e *ast.MethodCallExpr) error {
-	args, err := g.genFnArgs(e.Args)
+	line, err := g.classMethodStmtLine(className, e)
 	if err != nil {
 		return err
+	}
+	g.line(line)
+	return nil
+}
+
+func (g *Generator) classMethodStmtLine(className string, e *ast.MethodCallExpr) (string, error) {
+	args, err := g.genFnArgs(e.Args)
+	if err != nil {
+		return "", err
 	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 		if classDecl := g.classMap[g.resolveClassName(ident.Name)]; classDecl != nil {
 			if len(args) == 0 {
-				g.line(classMethodName(classDecl.Name, e.Method))
-			} else {
-				g.line(fmt.Sprintf("%s %s", classMethodName(classDecl.Name, e.Method), strings.Join(args, " ")))
+				return classMethodName(classDecl.Name, e.Method), nil
 			}
-			return nil
+			return fmt.Sprintf("%s %s", classMethodName(classDecl.Name, e.Method), strings.Join(args, " ")), nil
 		}
 	}
 	recv, err := g.genExprValue(e.Receiver)
 	if err != nil {
-		return err
+		return "", err
 	}
 	callArgs := append([]string{recv}, args...)
-	g.line(fmt.Sprintf("%s %s", classMethodName(className, e.Method), strings.Join(callArgs, " ")))
+	return fmt.Sprintf("%s %s", classMethodName(className, e.Method), strings.Join(callArgs, " ")), nil
+}
+
+func (g *Generator) genOptionalClassMethodStmt(className string, e *ast.MethodCallExpr) error {
+	g.requireRuntimeHelper("nullish")
+	recv, err := g.genNullishValue(e.Receiver)
+	if err != nil {
+		return err
+	}
+	tmpName := fmt.Sprintf("_bst_opt_recv_%d_%d", e.Pos.Line, e.Pos.Column)
+	line, err := g.withTempReceiver(tmpName, e.Pos, e.Receiver, func(recvExpr ast.Expression) (string, error) {
+		clone := *e
+		clone.Optional = false
+		clone.Receiver = recvExpr
+		return g.classMethodStmtLine(className, &clone)
+	})
+	if err != nil {
+		return err
+	}
+	g.line(fmt.Sprintf("%s=%s", tmpName, recv))
+	g.line(fmt.Sprintf("if [ \"$%s\" != \"$%s\" ]; then", tmpName, nullishSentinelVar))
+	g.push()
+	g.line(line)
+	g.pop()
+	g.line("fi")
 	return nil
 }
 
@@ -4005,13 +4257,35 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 		}
 		return truthyCondition(call), nil
 	case *ast.MethodCallExpr:
+		if e.Optional {
+			val, err := g.genExprValue(e)
+			if err != nil {
+				return "", err
+			}
+			return nullishAwareTruthyCondition(val), nil
+		}
 		return g.genMethodCondition(e)
 	case *ast.PropertyExpr:
+		if e.Optional {
+			val, err := g.genExprValue(e)
+			if err != nil {
+				return "", err
+			}
+			return nullishAwareTruthyCondition(val), nil
+		}
 		val, err := g.genProperty(e)
 		if err != nil {
 			return "", err
 		}
 		return truthyCondition(val), nil
+	case *ast.IndexExpr:
+		if e.Optional {
+			val, err := g.genExprValue(e)
+			if err != nil {
+				return "", err
+			}
+			return nullishAwareTruthyCondition(val), nil
+		}
 	}
 	val, err := g.genExprValue(expr)
 	if err != nil {

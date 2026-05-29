@@ -1,0 +1,27 @@
+let user = { name: "Ada" }
+let missing = undefined
+let key = "name"
+let items = ["", "beta"]
+let none = undefined
+let matrix = [["a", "b"], ["c", "d"]]
+let noMatrix = undefined
+let empty = ""
+let zero = 0
+let nope = false
+let maybeName = missing?.name
+
+console.log(user?.name ?? "anonymous")
+console.log(user?.[key] ?? "anonymous")
+console.log(missing?.name ?? "anonymous")
+console.log(items?.[1] ?? "fallback")
+console.log(items?.[0] ?? "fallback")
+console.log(none?.[0] ?? "fallback")
+console.log(matrix?.[1]?.[0] ?? "fallback")
+console.log(matrix[9]?.[0] ?? "fallback")
+console.log(noMatrix?.[0]?.[0] ?? "fallback")
+console.log("  Ada  "?.trim() ?? "fallback")
+console.log(missing?.trim() ?? "fallback")
+console.log(maybeName ?? "stored fallback")
+console.log(empty ?? "fallback")
+console.log(zero ?? 99)
+console.log(nope ?? true)

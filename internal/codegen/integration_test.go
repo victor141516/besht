@@ -1418,6 +1418,154 @@ console.log(s.lastIndexOf(""))`)
 	}
 }
 
+func TestIntegration_OptionalChainingRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { name: "Ada" }
+let missing = undefined
+let items = ["", "beta"]
+let none = undefined
+let matrix = [["a", "b"], ["c", "d"]]
+let noMatrix = undefined
+let empty = ""
+let zero = 0
+let nope = false
+console.log(user?.name ?? "anonymous")
+console.log(missing?.name ?? "anonymous")
+console.log(items?.[1] ?? "fallback")
+console.log(items?.[0] ?? "fallback")
+console.log(none?.[0] ?? "fallback")
+console.log(matrix?.[1]?.[0] ?? "fallback")
+console.log(matrix[9]?.[0] ?? "fallback")
+console.log(noMatrix?.[0]?.[0] ?? "fallback")
+console.log(empty ?? "fallback")
+console.log(zero ?? 99)
+console.log(nope ?? true)`)
+	want := "Ada\nanonymous\nbeta\n\nfallback\nc\nfallback\nfallback\n\n0\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_OptionalMethodCallRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let name = "  Ada  "
+let missing = undefined
+console.log(name?.trim() ?? "fallback")
+console.log(missing?.trim() ?? "fallback")`)
+	want := "Ada\nfallback\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_OptionalChainingConditionsAndClassMethodRuntime(t *testing.T) {
+	out := runCompiledShell(t, `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+    greet(): string { return "Hello, " + this.name }
+}
+let missing = undefined
+let text = "hello"
+let user = new User("Ada")
+if (missing?.name) console.log("bad")
+else console.log("missing property false")
+if (missing?.trim()) console.log("bad")
+else console.log("missing method false")
+if (text?.includes("ell")) console.log("method true")
+console.log(user?.greet() ?? "fallback")`)
+	want := "missing property false\nmissing method false\nmethod true\nHello, Ada\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_OptionalStatementDoesNotExecuteReturnedString(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "owned")
+	out := runCompiledShell(t, `let payload = "touch `+marker+`"
+payload?.trim()
+console.log("safe")`)
+	want := "safe\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("optional expression statement executed returned data and created %s", marker)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat marker: %v", err)
+	}
+}
+
+func TestIntegration_OptionalClassMethodStatementMutatesReceiver(t *testing.T) {
+	out := runCompiledShell(t, `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+    rename(name: string) { this.name = name }
+}
+let user = new User("Ada")
+user?.rename("Bob")
+console.log(user.name)`)
+	want := "Bob\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_NestedOptionalStatementDoesNotExecuteReturnedString(t *testing.T) {
+	dir := t.TempDir()
+	coalesceMarker := filepath.Join(dir, "coalesce")
+	concatMarker := filepath.Join(dir, "concat")
+	asMarker := filepath.Join(dir, "as")
+	out := runCompiledShell(t, `let coalescePayload = "touch `+coalesceMarker+`"
+let concatPayload = "touch `+concatMarker+`"
+let asPayload = "touch `+asMarker+`"
+coalescePayload?.trim() ?? ""
+concatPayload?.trim() + ""
+asPayload?.trim() as string
+console.log("safe")`)
+	want := "safe\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+	for _, marker := range []string{coalesceMarker, concatMarker, asMarker} {
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("optional expression statement executed returned data and created %s", marker)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat marker %s: %v", marker, err)
+		}
+	}
+}
+
+func TestIntegration_ChainedMethodOptionalStatementDoesNotExecuteReturnedString(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "chained")
+	out := runCompiledShell(t, `let payload = "touch `+marker+`"
+payload?.trim().trim()
+console.log("safe")`)
+	want := "safe\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("optional chained method statement executed returned data and created %s", marker)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat marker: %v", err)
+	}
+}
+
+func TestIntegration_OptionalClassMethodStatementAsExprMutatesReceiver(t *testing.T) {
+	out := runCompiledShell(t, `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+    rename(name: string) { this.name = name }
+}
+let user = new User("Ada")
+user?.rename("Bob") as string
+console.log(user.name)`)
+	want := "Bob\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StringSearchOptionalArgsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let s = "hello hello"
 console.log(s.indexOf("lo", 4))
