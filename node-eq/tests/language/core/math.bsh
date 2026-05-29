@@ -53,3 +53,9 @@ console.log(n.toString())
 
 let pi = 3.14159
 console.log(pi.toFixed(2))
+
+let tracked = Math.sqrt(4)
+tracked = 4
+console.log(`float tracking cleared: ${tracked + 2}`)
+tracked = Math.sqrt(9)
+console.log(`float tracking restored: ${tracked + 2}`)

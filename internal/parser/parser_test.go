@@ -779,6 +779,32 @@ func TestParser_BuiltinCalls(t *testing.T) {
 	}
 }
 
+func TestParser_BeshtConditionsCallShape(t *testing.T) {
+	prog := mustParse(t, `let ok: boolean = Besht.conditions.fileExists(path)`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	method, ok := decl.Value.(*ast.MethodCallExpr)
+	if !ok {
+		t.Fatalf("value: expected *ast.MethodCallExpr, got %T", decl.Value)
+	}
+	if method.Method != "fileExists" {
+		t.Fatalf("method: got %q, want fileExists", method.Method)
+	}
+	receiver, ok := method.Receiver.(*ast.PropertyExpr)
+	if !ok {
+		t.Fatalf("receiver: expected *ast.PropertyExpr, got %T", method.Receiver)
+	}
+	if receiver.Property != "conditions" {
+		t.Fatalf("receiver property: got %q, want conditions", receiver.Property)
+	}
+	ident, ok := receiver.Receiver.(*ast.IdentExpr)
+	if !ok {
+		t.Fatalf("receiver receiver: expected *ast.IdentExpr, got %T", receiver.Receiver)
+	}
+	if ident.Name != "Besht" {
+		t.Fatalf("receiver ident: got %q, want Besht", ident.Name)
+	}
+}
+
 func TestParser_ErrorMissingColon(t *testing.T) {
 	expectParseError(t, "let x string = 5")
 }
@@ -916,6 +942,28 @@ func TestParser_ClassMembersCanUseTypeKeywordNames(t *testing.T) {
 	}
 }
 
+func TestParser_ClassAccessors(t *testing.T) {
+	prog := mustParse(t, `class Circle {
+    radius: number
+    get area(): number { return this.radius * this.radius }
+    set area(value: number) { this.radius = value }
+    static get label(): string { return "circle" }
+}`)
+	cls := prog.Statements[0].(*ast.ClassDecl)
+	if len(cls.Accessors) != 3 {
+		t.Fatalf("expected 3 accessors, got %#v", cls.Accessors)
+	}
+	if cls.Accessors[0].Kind != ast.AccessorGet || cls.Accessors[0].Name != "area" || cls.Accessors[0].ReturnType == nil || cls.Accessors[0].ReturnType.Kind != ast.TypeNumber {
+		t.Fatalf("unexpected getter: %#v", cls.Accessors[0])
+	}
+	if cls.Accessors[1].Kind != ast.AccessorSet || cls.Accessors[1].Name != "area" || len(cls.Accessors[1].Params) != 1 || cls.Accessors[1].Params[0].Name != "value" {
+		t.Fatalf("unexpected setter: %#v", cls.Accessors[1])
+	}
+	if cls.Accessors[2].Kind != ast.AccessorGet || !cls.Accessors[2].IsStatic || cls.Accessors[2].Name != "label" {
+		t.Fatalf("unexpected static getter: %#v", cls.Accessors[2])
+	}
+}
+
 func TestParser_TypeScriptClassModifiersAndStaticRecord(t *testing.T) {
 	prog := mustParse(t, `function run() {
     class Game {
@@ -986,6 +1034,35 @@ func TestParser_OptionalChainingRejectsUnsupportedCalls(t *testing.T) {
 	expectParseError(t, `let b = obj.method?.()`)
 }
 
+func TestParser_ProcessAPIASTShape(t *testing.T) {
+	prog := mustParse(t, `let home = process.env.HOME
+process.exit(1)`)
+
+	decl := prog.Statements[0].(*ast.LetDecl)
+	home, ok := decl.Value.(*ast.PropertyExpr)
+	if !ok || home.Property != "HOME" {
+		t.Fatalf("expected process.env.HOME outer property, got %T %#v", decl.Value, decl.Value)
+	}
+	env, ok := home.Receiver.(*ast.PropertyExpr)
+	if !ok || env.Property != "env" {
+		t.Fatalf("expected process.env receiver property, got %T %#v", home.Receiver, home.Receiver)
+	}
+	process, ok := env.Receiver.(*ast.IdentExpr)
+	if !ok || process.Name != "process" {
+		t.Fatalf("expected process ident, got %T %#v", env.Receiver, env.Receiver)
+	}
+
+	stmt := prog.Statements[1].(*ast.ExprStmt)
+	call, ok := stmt.Expr.(*ast.MethodCallExpr)
+	if !ok || call.Method != "exit" || len(call.Args) != 1 {
+		t.Fatalf("expected process.exit(1) method call, got %T %#v", stmt.Expr, stmt.Expr)
+	}
+	receiver, ok := call.Receiver.(*ast.IdentExpr)
+	if !ok || receiver.Name != "process" {
+		t.Fatalf("expected process receiver, got %T %#v", call.Receiver, call.Receiver)
+	}
+}
+
 func TestParser_ListMapArrow(t *testing.T) {
 	prog := mustParse(t, `let items = ["a"]
 let mapped = items.map(x => x + "!")`)
@@ -1052,6 +1129,21 @@ func TestParser_ArrayOfParsesAsBuiltinCall(t *testing.T) {
 	}
 	if len(builtin.Args) != 3 {
 		t.Fatalf("args: got %d, want 3", len(builtin.Args))
+	}
+}
+
+func TestParser_ArrayIsArrayParsesAsBuiltinCall(t *testing.T) {
+	prog := mustParse(t, `let ok = Array.isArray(["a", "b"])`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	builtin, ok := decl.Value.(*ast.BuiltinCallExpr)
+	if !ok {
+		t.Fatalf("value: expected *ast.BuiltinCallExpr, got %T", decl.Value)
+	}
+	if builtin.Name != "Array.isArray" {
+		t.Fatalf("builtin name: got %q, want Array.isArray", builtin.Name)
+	}
+	if len(builtin.Args) != 1 {
+		t.Fatalf("args: got %d, want 1", len(builtin.Args))
 	}
 }
 

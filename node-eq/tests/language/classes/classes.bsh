@@ -18,6 +18,14 @@ class User {
   status(): string {
     return this.name + " is ready"
   }
+
+  get label(): string {
+    return this.name + " (" + this.age.toString() + ")"
+  }
+
+  set label(value: string) {
+    this.name = value
+  }
 }
 
 let u = new User("Alice", 30)
@@ -25,11 +33,18 @@ console.log(u.greet())
 console.log(u.name)
 u.name = "Bob"
 console.log(u.name)
+console.log(u.label)
+u.label = "Carol"
+console.log(u.label)
 console.log(u.isAdult())
 console.log(u.status())
 
 class MathUtils {
   static PI: number = 3.14159
+
+  static get label(): string {
+    return "math"
+  }
 
   static round(n: number): number {
     return Math.round(n)
@@ -37,4 +52,5 @@ class MathUtils {
 }
 
 console.log(MathUtils.PI)
+console.log(MathUtils.label)
 console.log(MathUtils.round(2.7))

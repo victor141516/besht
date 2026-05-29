@@ -60,6 +60,47 @@ console.log("Hello, " + name)
 	assertNotContains(t, main, `_BESHT_LOADED_`)
 }
 
+func TestSplit_EntryStdlibDeclarationAutoLoadedWithoutOutput(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "stdlib.d.bsh", `declare function externalName(name: string): string`)
+	path := writeFile(t, dir, "main.bsh", `let name: string = externalName("world")`)
+	outDir := filepath.Join(dir, "out")
+	if err := codegen.CompileFileSplit(path, outDir, codegen.Options{Strict: true}); err != nil {
+		t.Fatalf("strict CompileFileSplit with entry stdlib.d.bsh: %v", err)
+	}
+	files := make(map[string]string)
+	err := filepath.Walk(outDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(outDir, path)
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[rel] = string(content)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk output dir: %v", err)
+	}
+	if _, ok := files["main.sh"]; !ok {
+		t.Fatalf("main.sh not found; got: %v", files)
+	}
+	assertContains(t, files["main.sh"], `name=$(externalName 'world')`)
+	assertNotContains(t, files["main.sh"], `main__externalName`)
+	if _, ok := files["stdlib.sh"]; ok {
+		t.Fatal("stdlib.sh should not be emitted for stdlib.d.bsh")
+	}
+	if _, ok := files["stdlib.d.sh"]; ok {
+		t.Fatal("stdlib.d.sh should not be emitted for stdlib.d.bsh")
+	}
+	for name, content := range files {
+		assertNotContains(t, name, "stdlib")
+		assertNotContains(t, content, "stdlib")
+	}
+}
+
 func TestSplit_LibraryHasIncludeGuard(t *testing.T) {
 	files := compileSplit(t, map[string]string{
 		"lib/log.bsh": `export function info(msg: string) {

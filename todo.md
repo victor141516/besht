@@ -4,46 +4,32 @@ Items here are not scheduled. They were identified during development and saved 
 
 ---
 
-## Dedicated `.d.bsh` declaration files
+## Source maps
 
-Currently `declare` statements must be written inline inside `.bsh` files. A natural next step is supporting dedicated declaration files (`.d.bsh`) that contain only `declare` statements — similar to TypeScript's `.d.ts` files.
+Future enhancement: add richer source mapping for debugging beyond the current inline `# besht:file:line:col` source comments.
 
-These would be auto-discovered (e.g., a `stdlib.d.bsh` next to the entry point), or explicitly imported. The compiler would parse them for editor tooling but emit no code.
+---
+
+## Standard-library namespace and TypeScript-compatible builtins
+
+Move Besht-specific built-in functions toward a fake globally available standard-library object named `Besht`, grouped by functionality, while preferring TypeScript/JavaScript-standard APIs where they already exist.
+
+Requirements to preserve for later design:
+
+- Group Besht-only helpers under `Besht.<group>.*` with camelCase names. For example, condition helpers such as `file_exists(p)` should become something like `Besht.conditions.fileExists(p)`.
+- Prefer native list syntax and methods over new global list functions. Old global helpers remain supported for compatibility for now.
+- Keep generated POSIX sh as small and optimal as possible: these standard-looking APIs should compile to the same minimal inline tests, index reads, and list operations the compiler can already produce, not to a bulky runtime library.
+- Replace `to_str(value)` with TypeScript-style `value.toString()` and replace `to_int(value)` with `Number.parseInt(value)`.
+- Remaining: broader JS stdlib migration, other Besht namespace groups, eventual removal of old `env()` / `exit()` / condition-helper global names, eventual removal of old global list helpers, and the larger move away from `list<T>` terminology. The old names remain supported for now.
+
+Potential grouping sketch:
+
+- Standard TypeScript/JavaScript namespaces and methods for conversions and process access: `.toString()`, `Number.parseInt()`, `process.env`, and `process.exit()`.
 
 Implementation notes:
 
-- The `.d.bsh` extension is already handled by `resolveImportPath` — files with that suffix are loaded but not added to `c.modules`
-- A future step is auto-loading a `stdlib.d.bsh` from the same directory as the entry file
-- Another step is a `besht init` command that generates a `stdlib.d.bsh` with declarations for all built-in functions
-
----
-
-## Compile-time type checking (optional, strict mode)
-
-Type annotations are currently ignored entirely. A future `--strict` flag could enable compile-time type checking for users who want it.
-
-Design: the type checker already exists in `internal/checker/checker.go` (gutted to a no-op). It could be re-enabled under `--strict` by restoring the full check logic, while keeping the default behavior annotation-only.
-
----
-
-## Source maps
-
-Source comments like `# besht:file:line:col` are now emitted at statement boundaries. A future enhancement could add richer source mapping for debugging.
-
----
-
-## Mixed-type arithmetic: `awk` when a variable _might_ be float
-
-**Status: partial — detects float-producing expressions (Math.* calls, float literals) at compile time.**
-
-Variables produced by `Math.*` calls now trigger awk arithmetic. The gap: intermediate results that are stored in variables and then used in further arithmetic. Example:
-
-```ts
-let r = Math.round(2.7)   // r = 3 (integer result, but tracked as float-producing)
-let half = r / 2            // → awk (works correctly, produces 1.5)
-```
-
-This now works because the type tracker marks `r` as float-producing. The remaining gap: if a float-producing variable is reassigned to an integer value, the tracker doesn't update. For practical besht programs this is acceptable.
+- Parser/checker/codegen will need to recognize `Besht.*` and `process.*` as standard namespaces so module qualification does not rewrite them.
+- Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, and node-eq fixtures in sync.
 
 ---
 
@@ -53,11 +39,12 @@ This now works because the type tracker marks `r` as float-producing. The remain
 
 `Math.sqrt(2) * Math.sqrt(2)` produces `1.99999` in awk (limited precision) vs `2.0000000000000004` in JavaScript. This is a runtime precision difference, not a semantic error. The comparison tests accept this divergence.
 
+
 ---
 
 ## TypeScript class follow-ups
 
-**Status: phases 1 and 2 implemented on `feat/class-support`.** Basic classes now support constructors, instance properties, instance methods, `new`, `this`, static properties, and static methods. Remaining class-related work:
+**Status: phases 1 and 2 implemented on `feat/class-support`.** Basic classes now support constructors, instance properties, instance methods, `new`, `this`, static properties, static methods, and getters/setters. Remaining class-related work:
 
 ### Inheritance (`extends`)
 
@@ -80,18 +67,6 @@ class Dog extends Animal {
 
 Shell has no inheritance. Possible strategies include flattening parent fields into child constructors or introducing a vtable-like dispatch layer for overridden methods. This is the hardest class phase.
 
-### Getters and setters
-
-```ts
-class Circle {
-  radius: number
-  get area(): number { return Math.PI * this.radius * this.radius }
-  set area(a: number) { this.radius = Math.sqrt(a / Math.PI) }
-}
-```
-
-Getters/setters would compile to methods (`Circle__get_area`, `Circle__set_area`), with property access/assignment rewritten to calls.
-
 ### Abstract classes and interfaces
 
 ```ts
@@ -102,17 +77,6 @@ abstract class Shape {
 ```
 
 Abstract declarations would be ignored at runtime, with concrete methods compiling like normal class methods.
-
-### Access modifiers
-
-```ts
-class BankAccount {
-  private balance: number = 0
-  public deposit(amount: number) { this.balance += amount }
-}
-```
-
-`public`, `private`, and `protected` should be annotation-only and ignored by default. They may matter later under `--strict`.
 
 ### Decorators
 
@@ -168,7 +132,7 @@ Recommended phases:
 
 - **Number / Math:** consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
 - **String:** consider regex-dependent APIs like `match()` or `search()` after lower-risk string methods.
-- **Array / list:** add list-compatible APIs such as `toString()`, `Array.isArray()`, and related helpers.
+- **Array / list:** Consider related helpers when they map cleanly to current list representations without runtime shape metadata.
 - **Boolean:** decide whether `Boolean(value)` and `Boolean.prototype.toString()` are useful enough given booleans are stored as `1`/`0` and rendered as `true`/`false` in string contexts.
 - **Object:** add reliable object shape metadata first, then implement known-shape APIs like `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()`.
 - **Object copying:** evaluate `Object.assign()` and `Object.fromEntries()` after object alias/field metadata is reliable.
@@ -178,16 +142,16 @@ Implementation notes:
 
 - Static namespaces such as `Object`, `Array`, `Boolean`, and `JSON` need parser/codegen handling similar to the existing `Number.*` special case.
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
-- Callback-heavy APIs (`some`, `every`, `find`, `forEach`) should build on the reusable arrow callback lowering already used by `map`, `filter`, and `reduce`.
+- Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, and `reduce`; `forEach` remains future work.
 - Every added API needs checker, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.
 
 ---
 
 ## Arrow functions and callbacks
 
-**Status: partial — expression-bodied callbacks for `list.map()` and `list.filter()` are implemented, and `list.reduce()` supports expression-bodied and block-bodied two-parameter callbacks.**
+**Status: partial — expression-bodied callbacks for `list.map()`, `list.filter()`, `list.some()`, `list.every()`, `list.find()`, and `list.findIndex()` are implemented, and `list.reduce()` supports expression-bodied and block-bodied two-parameter callbacks.**
 
-Continue expanding JavaScript/TypeScript callback syntax so APIs such as `forEach()`, `some()`, `every()`, and `find()` can be implemented cleanly.
+Continue expanding JavaScript/TypeScript callback syntax so APIs such as `forEach()` and general callback values can be implemented cleanly.
 
 Design questions:
 
@@ -196,3 +160,23 @@ Design questions:
 - Whether callbacks can capture outer variables, and if so how mutations should behave.
 - How callback-returning APIs interact with newline-delimited list storage.
 - Whether callback support should be limited to compiler-known list methods before becoming a general function-value feature.
+
+---
+
+## JS-style standard library API surface
+
+Reshape Besht's built-in helper APIs into a more TypeScript/JavaScript-like standard library surface while keeping generated POSIX sh as small and optimal as possible.
+
+Proposed direction:
+
+- Expose grouped standard-library helpers through global objects instead of top-level snake_case builtins. For Besht-specific helpers, use a global `Besht` object with functionality-based groups and camelCase names, for example `Besht.conditions.fileExists(path)` instead of `file_exists(path)`.
+- Prefer existing array/list syntax and methods over standalone list helper functions. The compiler should keep lowering these forms to small shell output. Old global list helpers remain supported for compatibility for now.
+- Replace `to_str(value)` with TypeScript-style `value.toString()` and replace `to_int(value)` with `Number.parseInt(value)`.
+- Replace `env()` and `exit()` with TypeScript/Node-style `process.env` access and `process.exit(code)`.
+
+Open design questions:
+
+- Whether old builtin names remain as migration aliases, warnings, or are removed in one breaking change. -> For now they remain compatibility aliases; eventual removal is future work.
+- Whether `Besht.conditions` is the canonical namespace name, and how to group other non-JS-standard helpers. -> other non-JS-standard helpers should also be grouped. Analyse the list of helpers and decide the best names for other groups.
+- Whether `process.env.NAME` should support default values, and if so what syntax replaces `env("NAME", "default")`. -> Default values will use the more typescript-like `process.env.NAME ?? "default"`. The compiler should be smart and use the proper shell syntax when the default value is known at compile time.
+- Whether this is purely API syntax sugar over existing runtime representations, or if docs should also move from `list<T>` terminology toward `Array<T>`/`T[]` as the preferred user-facing type. -> Native list helper replacements are available and documented; the larger `list<T>` terminology removal remains future work.

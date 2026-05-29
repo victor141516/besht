@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/victor141516/besht/internal/codegen"
+	"github.com/victor141516/besht/internal/stdlib"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -55,6 +56,112 @@ func runCompiledShell(t *testing.T, src string, args ...string) string {
 		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
 	}
 	return string(output)
+}
+
+func runCompiledShellWithEnv(t *testing.T, src string, env []string, args ...string) (string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", src)
+	out := compileFile(t, path)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmdArgs := append([]string{shPath}, args...)
+	cmd := exec.Command("sh", cmdArgs...)
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
+func envWithout(keys ...string) []string {
+	drop := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		drop[key] = true
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		name := entry
+		if idx := strings.IndexByte(entry, '='); idx >= 0 {
+			name = entry[:idx]
+		}
+		if !drop[name] {
+			env = append(env, entry)
+		}
+	}
+	return env
+}
+
+func TestIntegration_ProcessEnvNullishUnsetAndEmptyRuntime(t *testing.T) {
+	src := `let value = process.env.BESHT_PROCESS_ENV_TEST ?? "fallback"
+console.log("[" + value + "]")`
+
+	unsetOut, err := runCompiledShellWithEnv(t, src, envWithout("BESHT_PROCESS_ENV_TEST"))
+	if err != nil {
+		t.Fatalf("run unset shell: %v\n%s", err, unsetOut)
+	}
+	if unsetOut != "[fallback]\n" {
+		t.Fatalf("unset output: got %q", unsetOut)
+	}
+
+	emptyOut, err := runCompiledShellWithEnv(t, src, append(envWithout("BESHT_PROCESS_ENV_TEST"), "BESHT_PROCESS_ENV_TEST="))
+	if err != nil {
+		t.Fatalf("run empty shell: %v\n%s", err, emptyOut)
+	}
+	if emptyOut != "[]\n" {
+		t.Fatalf("empty output: got %q", emptyOut)
+	}
+
+	setOut, err := runCompiledShellWithEnv(t, src, append(envWithout("BESHT_PROCESS_ENV_TEST"), "BESHT_PROCESS_ENV_TEST=value"))
+	if err != nil {
+		t.Fatalf("run set shell: %v\n%s", err, setOut)
+	}
+	if setOut != "[value]\n" {
+		t.Fatalf("set output: got %q", setOut)
+	}
+}
+
+func TestIntegration_ProcessExitRuntime(t *testing.T) {
+	out, err := runCompiledShellWithEnv(t, `process.exit(7)`, os.Environ())
+	if err == nil {
+		t.Fatalf("expected exit error, got nil output %q", out)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 7 {
+		t.Fatalf("exit code: got err=%v output=%q", err, out)
+	}
+}
+
+func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderStrictCheck(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "stdlib.d.bsh", stdlib.Declarations)
+	if !strings.Contains(stdlib.Declarations, "function isArray(value): boolean") {
+		t.Fatalf("generated stdlib should declare Array.isArray with an untyped value parameter")
+	}
+	mainPath := writeFile(t, dir, "main.bsh", `let path: string = env("HOME", "/tmp")
+let paths: string[] = [path]
+let argc: number = len(args.argv())
+let first: string = head(paths)
+let rest: string[] = tail(append(paths, "extra"))
+let both: string[] = concat(paths, rest)
+let hasHome: boolean = contains(both, path)
+let n: number = Number.parseInt("42", 10)
+let indexes: number[] = Array.from({ length: 3 })
+let indexesIsArray: boolean = Array.isArray(indexes)
+let stringIsArray: boolean = Array.isArray("not a list")
+let objectIsArray: boolean = Array.isArray({ value: "x" })
+let label: string = String(to_str(to_int("7")))
+let existsViaNamespace: boolean = Besht.conditions.fileExists(first)
+if (indexesIsArray || stringIsArray || objectIsArray || existsViaNamespace || file_exists(first) || is_dir(first) || is_readable(first) || is_writable(first) || is_executable(first) || is_empty(label) || is_set(label) || hasHome) {
+    for (i in range(0, n)) {
+        if (i == argc) break
+    }
+}
+exit(0)
+`)
+	if err := codegen.CheckFile(mainPath, codegen.Options{Strict: true}); err != nil {
+		t.Fatalf("strict check with generated stdlib: %v", err)
+	}
 }
 
 func TestIntegration_ImportedExportedValuesAndDefaultRuntime(t *testing.T) {
@@ -313,13 +420,13 @@ func TestIntegration_TryCatch(t *testing.T) {
     $("false").run()
 } catch (code: status) {
     $("echo", "error: " + to_str(code)).run()
-}
+	}
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `if ! (`)
+	assertContains(t, out, `_try_status_`)
 	assertContains(t, out, `set -e`)
 	assertContains(t, out, `false`)
-	assertContains(t, out, `$?`)
+	assertContains(t, out, `=$?`)
 }
 
 func TestIntegration_ImportSingleModule(t *testing.T) {
@@ -678,6 +785,50 @@ func TestIntegration_StrictModeOptional(t *testing.T) {
 	}
 }
 
+func TestIntegration_EntryStdlibDeclarationAutoLoadedForBundledCompile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "stdlib.d.bsh", `declare function externalName(name: string): string`)
+	path := writeFile(t, dir, "main.bsh", `let name: string = externalName("world")`)
+	out, err := codegen.CompileFile(path, codegen.Options{Strict: true})
+	if err != nil {
+		t.Fatalf("strict CompileFile with entry stdlib.d.bsh: %v", err)
+	}
+	assertContains(t, out, `name=$(externalName 'world')`)
+	assertNotContains(t, out, `main__externalName`)
+	assertNotContains(t, out, `stdlib`)
+}
+
+func TestIntegration_MissingEntryStdlibDeclarationIgnored(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let name: string = "world"`)
+	if _, err := codegen.CompileFile(path, codegen.Options{Strict: true}); err != nil {
+		t.Fatalf("strict CompileFile without stdlib.d.bsh: %v", err)
+	}
+}
+
+func TestIntegration_EntryStdlibDeclarationAutoLoadedForCheckFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "stdlib.d.bsh", `declare function externalName(name: string): string`)
+	path := writeFile(t, dir, "main.bsh", `let name: string = externalName("world")`)
+	if err := codegen.CheckFile(path, codegen.Options{Strict: true}); err != nil {
+		t.Fatalf("strict CheckFile with entry stdlib.d.bsh: %v", err)
+	}
+}
+
+func TestIntegration_ImportedModuleStdlibDeclarationNotAutoLoaded(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "lib/stdlib.d.bsh", `declare function libOnly(name: string): string`)
+	writeFile(t, dir, "lib/use.bsh", `export function callLibOnly(): string {
+    return libOnly("world")
+}`)
+	path := writeFile(t, dir, "main.bsh", `import { callLibOnly } from "./lib/use"
+let name: string = callLibOnly()`)
+	err := codegen.CheckFile(path, codegen.Options{Strict: true})
+	if err == nil || !strings.Contains(err.Error(), `undefined function "libOnly"`) {
+		t.Fatalf("strict CheckFile should not auto-load lib/stdlib.d.bsh, got %v", err)
+	}
+}
+
 func TestIntegration_DeclarationFileOmittedFromSplitSources(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "types.d.bsh", `declare function external(name: string): string`)
@@ -811,6 +962,27 @@ if (is_dir(p)) {
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `[ -d`)
+}
+
+func TestIntegration_BeshtConditionsWrapperInModule(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "checks.bsh", `export function check(path: string): boolean {
+    return Besht.conditions.fileExists(path)
+}`)
+	path := writeFile(t, dir, "main.bsh", `import { check } from "./checks"
+let ok: boolean = check("/tmp")
+if (Besht.conditions.isDir("/tmp")) {
+    $("echo", "dir").run()
+}
+`)
+	out, err := codegen.CompileFile(path, codegen.Options{Strict: true})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	assertContains(t, out, `[ -f`)
+	assertContains(t, out, `[ -d`)
+	assertNotContains(t, out, `main__Besht`)
+	assertNotContains(t, out, `checks__Besht`)
 }
 
 func TestIntegration_ErrorOnMissingImport(t *testing.T) {
@@ -954,6 +1126,26 @@ func TestIntegration_NumberMethods(t *testing.T) {
 	assertContains(t, out, `printf "%.*f", _n, _x`)
 }
 
+func TestIntegration_PrimitiveToStringAndParseIntRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let s: string = "x"
+console.log(s.toString())
+let yes: boolean = true
+let no: boolean = false
+console.log(yes.toString())
+console.log(no.toString())
+console.log(Number.parseInt("42"))
+console.log(Number.parseInt("42", 10))
+try {
+    $("false").run()
+} catch (code: status) {
+    console.log(code.toString())
+}`)
+	want := "x\ntrue\nfalse\n42\n42\n1\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_ConcatLists(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `let a: list<string> = ["one", "two"]
@@ -964,6 +1156,32 @@ let total: number = len(c)
 	out := compileFile(t, path)
 	assertContains(t, out, `printf '%s\n%s'`)
 	assertContains(t, out, `wc -l`)
+}
+
+func TestIntegration_NativeListAPIsReplaceGlobalListHelpersRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let files: list<string> = ["a", "b", "c"]
+let other: list<string> = ["d", "e"]
+console.log(files.length)
+console.log(files[0])
+console.log(files.slice(1).join(","))
+console.log(files.push("x").join(","))
+console.log(files.includes("x"))
+console.log(files.concat(other).join(","))`)
+	want := "3\na\nb,c\na,b,c,x\nfalse\na,b,c,d,e\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ListToStringRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(["a", "b"].toString())
+let empty: string[] = []
+console.log(empty.toString())
+console.log(["alpha beta", "gamma delta"].toString())`)
+	want := "a,b\n\nalpha beta,gamma delta\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
 }
 
 func TestIntegration_ArrowCallbackQualifiesImportedFunction(t *testing.T) {
@@ -993,6 +1211,23 @@ console.log(picked.join(","))
 	assertContains(t, out, `while IFS= read -r _cb_2_24_x`)
 	assertContains(t, out, `while IFS= read -r _cb_3_28_x`)
 	assertNotContains(t, out, `local `)
+}
+
+func TestIntegration_ListSomeEveryFindRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let items = ["apple", "banana", "apricot"]
+let empty: string[] = []
+console.log(items.some(x => x.startsWith("b")))
+console.log(items.some(x => x.startsWith("z")))
+console.log(empty.some(x => true))
+console.log(items.every(x => x.includes("a")))
+console.log(empty.every(x => false))
+console.log(items.find(x => x.startsWith("b")) ?? "missing")
+console.log(items.find(x => x.startsWith("z")) ?? "missing")
+console.log(items.find((x, i) => i == 2))
+`)
+	if out != "true\nfalse\nfalse\ntrue\ntrue\nbanana\nmissing\napricot\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
 }
 
 func TestIntegration_CmdBasicCapture(t *testing.T) {
@@ -1331,6 +1566,81 @@ console.log(MathUtils.round(2.7))`)
 	assertContains(t, out, `classes__User__constructor "$u" 'Alice' 30`)
 	assertContains(t, out, `printf '%s\n' "$(classes__User__greet "$u")"`)
 	assertContains(t, out, `_class_classes__MathUtils_PI=3.14159`)
+}
+
+func TestIntegration_ClassMemberSourceCommentsRespectNoSourceMap(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "classes.bsh", `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+    greet(): string { return "Hello, " + this.name }
+}
+let u = new User("Alice")
+console.log(u.greet())`)
+
+	out, err := codegen.CompileFile(path, codegen.Options{NoSourceMap: true})
+	if err != nil {
+		t.Fatalf("compile error: %v", err)
+	}
+	assertContains(t, out, `classes__User__constructor() {`)
+	assertContains(t, out, `classes__User__greet() {`)
+	assertNotContains(t, out, `# besht:`)
+}
+
+func TestIntegration_ClassAccessorsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+    get label(): string { return this.name }
+    set label(value: string) { this.name = value }
+    static get kind(): string { return "user" }
+}
+let u = new User("Alice")
+console.log(u.label)
+u.label = "Bob"
+console.log(u.label)
+console.log(User.kind)`)
+	if out != "Alice\nBob\nuser\n" {
+		t.Fatalf("output: got %q", out)
+	}
+}
+
+func TestIntegration_ClassGetterCannotMutateThis(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "counter.bsh", `class Counter {
+    value: number
+    constructor() { this.value = 0 }
+    get next(): number {
+        this.value = this.value + 1
+        return this.value
+    }
+}
+let c = new Counter()
+console.log(c.next)`)
+
+	_, err := codegen.CompileFile(path, codegen.Options{})
+	if err == nil || !strings.Contains(err.Error(), `getter "next" must not assign to this properties`) {
+		t.Fatalf("expected mutating getter error, got %v", err)
+	}
+}
+
+func TestIntegration_ClassGetterWithoutReturnAnnotationCannotMutateThis(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "counter.bsh", `class Counter {
+    value: number
+    constructor() { this.value = 0 }
+    get next() {
+        this.value = this.value + 1
+        return this.value
+    }
+}
+let c = new Counter()
+console.log(c.next)`)
+
+	_, err := codegen.CompileFile(path, codegen.Options{})
+	if err == nil || !strings.Contains(err.Error(), `getter "next" must not assign to this properties`) {
+		t.Fatalf("expected mutating getter error, got %v", err)
+	}
 }
 
 func TestIntegration_ArrayFromBlockMapAndSplitJoinRuntime(t *testing.T) {
@@ -1690,6 +2000,20 @@ let empty = Array.of()
 console.log(empty.length)
 console.log(empty.join(",") === "")`)
 	want := "x,y,z\n0\ntrue\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ArrayIsArrayRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(Array.isArray(["a", "b"]))
+console.log(Array.isArray(Array.of("x")))
+console.log(Array.isArray(Array.from({ length: 2 })))
+console.log(Array.isArray("not a list"))
+console.log(Array.isArray({ value: "x" }))
+if (Array.isArray(["condition"])) console.log("condition true")
+if (Array.isArray("condition")) console.log("condition false")`)
+	want := "true\ntrue\ntrue\nfalse\nfalse\ncondition true\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

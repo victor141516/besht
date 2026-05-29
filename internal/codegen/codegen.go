@@ -106,6 +106,23 @@ func nullishSentinelRef() string {
 	return "\"$" + nullishSentinelVar + "\""
 }
 
+func isProcessEnvObject(expr ast.Expression) bool {
+	prop, ok := expr.(*ast.PropertyExpr)
+	if !ok || prop.Property != "env" {
+		return false
+	}
+	ident, ok := prop.Receiver.(*ast.IdentExpr)
+	return ok && ident.Name == "process"
+}
+
+func isProcessEnvProperty(expr ast.Expression) (*ast.PropertyExpr, bool) {
+	prop, ok := expr.(*ast.PropertyExpr)
+	if !ok || !isProcessEnvObject(prop.Receiver) {
+		return nil, false
+	}
+	return prop, true
+}
+
 func (g *Generator) collectArgsSchema(stmts []ast.Statement) {
 	walkArgsStatements(stmts, g.collectArgsSchemaExpr)
 }
@@ -196,6 +213,9 @@ func walkArgsStmt(stmt ast.Statement, visit func(ast.Expression)) {
 		}
 		for _, method := range s.Methods {
 			walkArgsStmt(method.Body, visit)
+		}
+		for _, accessor := range s.Accessors {
+			walkArgsStmt(accessor.Body, visit)
 		}
 	case *ast.Block:
 		if s == nil {
@@ -339,6 +359,9 @@ func (g *Generator) collectObjectTypes(stmts []ast.Statement) {
 		case *ast.ClassDecl:
 			for _, method := range s.Methods {
 				g.collectObjectTypes(method.Body.Statements)
+			}
+			for _, accessor := range s.Accessors {
+				g.collectObjectTypes(accessor.Body.Statements)
 			}
 			if s.Constructor != nil {
 				g.collectObjectTypes(s.Constructor.Body.Statements)
@@ -668,9 +691,16 @@ func (g *Generator) raw(s string) {
 func (g *Generator) push() { g.indent++ }
 func (g *Generator) pop()  { g.indent-- }
 
+func (g *Generator) genSourceComment(pos ast.Pos) {
+	if pos.File == "" || g.NoSourceMap {
+		return
+	}
+	g.line(fmt.Sprintf("# besht:%s:%d:%d", sanitizeShellComment(pos.File), pos.Line, pos.Column))
+}
+
 func (g *Generator) genStmt(stmt ast.Statement) error {
-	if pos := stmtPos(stmt); pos.File != "" && !g.NoSourceMap {
-		g.line(fmt.Sprintf("# besht:%s:%d:%d", sanitizeShellComment(pos.File), pos.Line, pos.Column))
+	if _, ok := stmt.(*ast.ClassDecl); !ok {
+		g.genSourceComment(stmtPos(stmt))
 	}
 	switch s := stmt.(type) {
 	case *ast.ImportDecl:
@@ -955,9 +985,37 @@ func (g *Generator) registerClass(c *ast.ClassDecl) {
 			g.floatVars[fnName] = true
 		}
 	}
+	for _, accessor := range c.Accessors {
+		methodName := string(accessor.Kind) + "_" + accessor.Name
+		retType := accessor.ReturnType
+		if accessor.Kind == ast.AccessorSet || retType == nil {
+			retType = &ast.Type{Kind: ast.TypeVoid}
+		}
+		fnName := classMethodName(c.Name, methodName)
+		g.fnReturnMap[fnName] = retType
+		if g.fnReturnsFloat(accessor.Body.Statements) {
+			g.floatVars[fnName] = true
+		}
+		if accessor.Kind == ast.AccessorGet {
+			g.objPropTypeMap[c.Name+"."+accessor.Name] = retType
+		}
+	}
 	if c.Constructor != nil {
 		g.fnReturnMap[classMethodName(c.Name, "constructor")] = &ast.Type{Kind: ast.TypeVoid}
 	}
+}
+
+func classAccessor(c *ast.ClassDecl, name string, kind ast.ClassAccessorKind, static bool) (*ast.ClassAccessor, bool) {
+	if c == nil {
+		return nil, false
+	}
+	for i := range c.Accessors {
+		accessor := &c.Accessors[i]
+		if accessor.Name == name && accessor.Kind == kind && accessor.IsStatic == static {
+			return accessor, true
+		}
+	}
+	return nil, false
 }
 
 func (g *Generator) genNewLetDecl(varName, sourceName string, e *ast.NewExpr) error {
@@ -1173,6 +1231,11 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	} else {
 		delete(g.listLenMap, varName)
 	}
+	if g.isFloatExpr(s.Value) {
+		g.floatVars[varName] = true
+	} else {
+		delete(g.floatVars, varName)
+	}
 	g.line(fmt.Sprintf("%s=%s", varName, val))
 	return nil
 }
@@ -1273,6 +1336,11 @@ func (g *Generator) genClassDecl(c *ast.ClassDecl) error {
 	if len(c.StaticProps) > 0 {
 		g.line("")
 	}
+	for i := range c.Accessors {
+		if err := g.genClassAccessorDecl(c, &c.Accessors[i]); err != nil {
+			return err
+		}
+	}
 	if c.Constructor != nil {
 		if err := g.genClassMethodDecl(c, c.Constructor, true); err != nil {
 			return err
@@ -1293,8 +1361,20 @@ func (g *Generator) genClassDecl(c *ast.ClassDecl) error {
 	return nil
 }
 
+func (g *Generator) genClassAccessorDecl(c *ast.ClassDecl, accessor *ast.ClassAccessor) error {
+	if accessor.Kind == ast.AccessorGet && methodMutatesThis(accessor.Body.Statements) {
+		return fmt.Errorf("getter %q must not assign to this properties", accessor.Name)
+	}
+	method := &ast.ClassMethod{Pos: accessor.Pos, Name: string(accessor.Kind) + "_" + accessor.Name, IsStatic: accessor.IsStatic, Params: accessor.Params, ReturnType: accessor.ReturnType, Body: accessor.Body}
+	return g.genClassMethodDecl(c, method, false)
+}
+
 func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod, isConstructor bool) error {
 	fnName := classMethodName(c.Name, method.Name)
+	if !isConstructor && method.ReturnType != nil && method.ReturnType.Kind != ast.TypeVoid && methodMutatesThis(method.Body.Statements) {
+		return fmt.Errorf("class method %q returns a value and cannot assign to this properties", method.Name)
+	}
+	g.genSourceComment(method.Pos)
 	g.line(fmt.Sprintf("%s() {", fnName))
 	g.push()
 	prevFn := g.currentFn
@@ -1589,7 +1669,8 @@ func (g *Generator) genSwitch(s *ast.SwitchStmt) error {
 }
 
 func (g *Generator) genTry(s *ast.TryStmt) error {
-	g.line("if ! (")
+	statusVar := fmt.Sprintf("_try_status_%d_%d", s.Pos.Line, s.Pos.Column)
+	g.line("(")
 	g.push()
 	g.line("set -e")
 	for _, stmt := range s.Body.Statements {
@@ -1598,11 +1679,14 @@ func (g *Generator) genTry(s *ast.TryStmt) error {
 		}
 	}
 	g.pop()
-	g.line("); then")
+	g.line(")")
+	g.line(fmt.Sprintf("%s=$?", statusVar))
+	g.line(fmt.Sprintf("if [ \"$%s\" -ne 0 ]; then", statusVar))
 	g.push()
 	catchVar := g.resolveVarName(s.CatchVar)
 	g.paramMap[s.CatchVar] = catchVar
-	g.line(fmt.Sprintf("%s=$?", catchVar))
+	g.varTypeMap[catchVar] = &ast.Type{Kind: ast.TypeStatus}
+	g.line(fmt.Sprintf("%s=\"$%s\"", catchVar, statusVar))
 	for _, stmt := range s.Catch.Statements {
 		if err := g.genStmt(stmt); err != nil {
 			return err
@@ -1697,6 +1781,19 @@ func (g *Generator) genExit(s *ast.ExitStmt) error {
 	return nil
 }
 
+func (g *Generator) genProcessExit(e *ast.MethodCallExpr) error {
+	if len(e.Args) == 0 {
+		g.line("exit 0")
+		return nil
+	}
+	codeStr, err := g.genExprValue(e.Args[0])
+	if err != nil {
+		return err
+	}
+	g.line(fmt.Sprintf("exit %s", codeStr))
+	return nil
+}
+
 func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 	stmtExpr := unwrapAsExpr(s.Expr)
 	switch e := stmtExpr.(type) {
@@ -1704,6 +1801,9 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 		// Bare $() as a statement with no .run() — emit nothing (warning already issued)
 		return nil
 	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" && e.Method == "exit" {
+			return g.genProcessExit(e)
+		}
 		if e.Optional {
 			if className, ok := g.receiverClassName(e.Receiver); ok {
 				return g.genOptionalClassMethodStmt(className, e)
@@ -2064,6 +2164,9 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 		}
 		return g.genIndexExpr(e)
 	case *ast.MethodCallExpr:
+		if builtin, ok := beshtConditionsBuiltinCall(e); ok {
+			return g.genBuiltinCapture(builtin)
+		}
 		if e.Optional {
 			return g.genOptionalMethodCall(e)
 		}
@@ -2435,6 +2538,13 @@ func arrayFromLengthArg(e *ast.BuiltinCallExpr) (ast.Expression, bool) {
 
 func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	switch e.Name {
+	case "file_exists", "is_dir", "is_readable", "is_writable", "is_executable", "is_empty", "is_set":
+		cond, err := g.genBuiltinCondition(e)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("$(if %s; then printf 1; else printf 0; fi)", cond), nil
+
 	case "len":
 		argStr, err := g.genExprValue(e.Args[0])
 		if err != nil {
@@ -2564,6 +2674,12 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Array.of":
 		return g.genListLiteral(&ast.ListLit{Pos: e.Pos, Elements: e.Args})
 
+	case "Array.isArray":
+		if argType := g.inferReceiverType(e.Args[0]); argType != nil && argType.Kind == ast.TypeList {
+			return "1", nil
+		}
+		return "0", nil
+
 	case "Number.isInteger":
 		argStr, err := g.genExprValue(e.Args[0])
 		if err != nil {
@@ -2594,14 +2710,34 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 }
 
 func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
+	if prop, ok := isProcessEnvProperty(e); ok {
+		g.requireRuntimeHelper("nullish")
+		name := prop.Property
+		return fmt.Sprintf("$(if [ -n \"${%s+x}\" ]; then printf '%%s' \"$%s\"; else printf '%%s' \"$%s\"; fi)", name, name, nullishSentinelVar), nil
+	}
+	if isProcessEnvObject(e) {
+		return "", fmt.Errorf("process.env cannot be used as a value; access a variable like process.env.HOME")
+	}
 	if _, ok := e.Receiver.(*ast.ThisExpr); ok {
 		if g.currentThisVar == "" {
 			return "", fmt.Errorf("this.%s used outside class method", e.Property)
+		}
+		if _, ok := classAccessor(g.classMap[g.currentClass], e.Property, ast.AccessorGet, false); ok {
+			return fmt.Sprintf("$(%s \"$%s\")", classMethodName(g.currentClass, "get_"+e.Property), g.currentThisVar), nil
+		}
+		if _, ok := classAccessor(g.classMap[g.currentClass], e.Property, ast.AccessorSet, false); ok {
+			return "", fmt.Errorf("property %q has a setter but no getter", e.Property)
 		}
 		return fmt.Sprintf("$(%s \"$%s\")", classMethodName(g.currentClass, "get_"+e.Property), g.currentThisVar), nil
 	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 		if classDecl := g.classMap[g.resolveClassName(ident.Name)]; classDecl != nil {
+			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorGet, true); ok {
+				return fmt.Sprintf("$(%s)", classMethodName(classDecl.Name, "get_"+e.Property)), nil
+			}
+			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorSet, true); ok {
+				return "", fmt.Errorf("static property %q has a setter but no getter", e.Property)
+			}
 			for _, prop := range classDecl.StaticProps {
 				if prop.Name == e.Property {
 					return fmt.Sprintf("\"$%s\"", classPropVar(classDecl.Name, e.Property)), nil
@@ -2609,6 +2745,15 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 			}
 		}
 		varName := g.resolveVarName(ident.Name)
+		if className, ok := g.varClassMap[varName]; ok {
+			classDecl := g.classMap[className]
+			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorGet, false); ok {
+				return fmt.Sprintf("$(%s \"$%s\")", classMethodName(className, "get_"+e.Property), varName), nil
+			}
+			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorSet, false); ok {
+				return "", fmt.Errorf("property %q has a setter but no getter", e.Property)
+			}
+		}
 		if vt, ok := g.varTypeMap[varName]; ok && vt.Kind == ast.TypeObject {
 			return fmt.Sprintf("\"$%s\"", objectPropVar(varName, e.Property)), nil
 		}
@@ -2651,12 +2796,35 @@ func (g *Generator) genPropertyAssign(s *ast.PropertyAssignStmt) error {
 		if g.currentThisVar == "" {
 			return fmt.Errorf("this.%s used outside class method", s.Property)
 		}
+		if _, ok := classAccessor(g.classMap[g.currentClass], s.Property, ast.AccessorSet, false); ok {
+			g.line(fmt.Sprintf("%s \"$%s\" %s", classMethodName(g.currentClass, "set_"+s.Property), g.currentThisVar, ensureArgSafe(val)))
+			return nil
+		}
+		if _, ok := classAccessor(g.classMap[g.currentClass], s.Property, ast.AccessorGet, false); ok {
+			return fmt.Errorf("property %q has a getter but no setter", s.Property)
+		}
 		g.line(fmt.Sprintf("%s \"$%s\" %s", classMethodName(g.currentClass, "set_"+s.Property), g.currentThisVar, ensureArgSafe(val)))
 		return nil
 	}
 	if classDecl, ok := g.classMap[g.resolveClassName(s.Object)]; ok {
+		if _, ok := classAccessor(classDecl, s.Property, ast.AccessorSet, true); ok {
+			g.line(fmt.Sprintf("%s %s", classMethodName(classDecl.Name, "set_"+s.Property), ensureArgSafe(val)))
+			return nil
+		}
+		if _, ok := classAccessor(classDecl, s.Property, ast.AccessorGet, true); ok {
+			return fmt.Errorf("static property %q has a getter but no setter", s.Property)
+		}
 		g.line(fmt.Sprintf("%s=%s", classPropVar(classDecl.Name, s.Property), val))
 		return nil
+	}
+	if className, ok := g.varClassMap[g.resolveVarName(s.Object)]; ok {
+		if _, ok := classAccessor(g.classMap[className], s.Property, ast.AccessorSet, false); ok {
+			g.line(fmt.Sprintf("%s \"$%s\" %s", classMethodName(className, "set_"+s.Property), g.resolveVarName(s.Object), ensureArgSafe(val)))
+			return nil
+		}
+		if _, ok := classAccessor(g.classMap[className], s.Property, ast.AccessorGet, false); ok {
+			return fmt.Errorf("property %q has a getter but no setter", s.Property)
+		}
 	}
 	propVar := objectPropVar(g.resolveVarName(s.Object), s.Property)
 	if _, isParam := g.paramMap[s.Object]; isParam {
@@ -2830,7 +2998,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		return typeNumber
 	case *ast.BuiltinCallExpr:
 		switch e.Name {
-		case "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+		case "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray":
 			return &ast.Type{Kind: ast.TypeBoolean}
 		case "Number.parseInt", "Number.parseFloat", "to_int":
 			return typeNumber
@@ -2849,13 +3017,29 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: elem}
 		}
 	case *ast.PropertyExpr:
+		if _, ok := isProcessEnvProperty(e); ok {
+			return typeString
+		}
+		if isProcessEnvObject(e) {
+			return &ast.Type{Kind: ast.TypeObject}
+		}
 		if _, ok := e.Receiver.(*ast.ThisExpr); ok && g.currentClass != "" {
+			if _, ok := classAccessor(g.classMap[g.currentClass], e.Property, ast.AccessorGet, false); ok {
+				if pt, ok := g.fnReturnMap[classMethodName(g.currentClass, "get_"+e.Property)]; ok {
+					return pt
+				}
+			}
 			if pt, ok := g.objPropTypeMap[g.currentClass+"."+e.Property]; ok {
 				return pt
 			}
 		}
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 			if classDecl := g.classMap[g.resolveClassName(ident.Name)]; classDecl != nil {
+				if _, ok := classAccessor(classDecl, e.Property, ast.AccessorGet, true); ok {
+					if pt, ok := g.fnReturnMap[classMethodName(classDecl.Name, "get_"+e.Property)]; ok {
+						return pt
+					}
+				}
 				for _, prop := range classDecl.StaticProps {
 					if prop.Name == e.Property {
 						if prop.Type != nil {
@@ -2866,6 +3050,13 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 				}
 			}
 			varName := g.resolveVarName(ident.Name)
+			if className, ok := g.varClassMap[varName]; ok {
+				if _, ok := classAccessor(g.classMap[className], e.Property, ast.AccessorGet, false); ok {
+					if pt, ok := g.fnReturnMap[classMethodName(className, "get_"+e.Property)]; ok {
+						return pt
+					}
+				}
+			}
 			if pt, ok := g.objPropTypeMap[varName+"."+e.Property]; ok {
 				return pt
 			}
@@ -2916,6 +3107,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			}
 		}
 	case *ast.MethodCallExpr:
+		if _, ok := beshtConditionsBuiltinCall(e); ok {
+			return &ast.Type{Kind: ast.TypeBoolean}
+		}
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "args" {
 			switch e.Method {
 			case "argv":
@@ -2959,8 +3153,10 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 				return &ast.Type{Kind: ast.TypeObject}
 			case "join":
 				return typeString
-			case "includes":
+			case "includes", "some", "every":
 				return &ast.Type{Kind: ast.TypeBoolean}
+			case "find":
+				return recvType.Elem
 			case "indexOf", "lastIndexOf", "findIndex", "length":
 				return typeNumber
 			}
@@ -3021,7 +3217,7 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 		return pt != nil && pt.Kind == ast.TypeBoolean
 	case *ast.BuiltinCallExpr:
 		switch e.Name {
-		case "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+		case "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray":
 			return true
 		}
 	case *ast.MethodCallExpr:
@@ -3034,7 +3230,7 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 			}
 		}
 		switch e.Method {
-		case "includes", "startsWith", "endsWith", "has":
+		case "includes", "startsWith", "endsWith", "has", "some", "every":
 			return true
 		}
 	case *ast.FnCallExpr:
@@ -3055,6 +3251,10 @@ func (g *Generator) isFloatExpr(expr ast.Expression) bool {
 		return e.Op == "/" || g.isFloatExpr(e.Left) || g.isFloatExpr(e.Right)
 	case *ast.FnCallExpr:
 		return g.floatVars[e.Name]
+	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+			return true
+		}
 	}
 	return false
 }
@@ -3074,6 +3274,12 @@ func (g *Generator) fnReturnsFloat(stmts []ast.Statement) bool {
 }
 
 func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
+	if builtin, ok := beshtConditionsBuiltinCall(e); ok {
+		return g.genBuiltinCapture(builtin)
+	}
+	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" && e.Method == "exit" {
+		return "", fmt.Errorf("process.exit() cannot be used in value position")
+	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "args" {
 		return g.genArgsMethod(e)
 	}
@@ -3131,6 +3337,14 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	isListMethod := recvType != nil && recvType.Kind == ast.TypeList
 	isStringMethod := recvType != nil && recvType.Kind == ast.TypeString
 	isNumberMethod := recvType != nil && recvType.Kind == ast.TypeNumber
+	isBooleanMethod := recvType != nil && recvType.Kind == ast.TypeBoolean
+	isStatusMethod := recvType != nil && recvType.Kind == ast.TypeStatus
+	if e.Method == "toString" && (isStringMethod || isBooleanMethod || isStatusMethod) {
+		if isBooleanMethod {
+			return fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(recv)), nil
+		}
+		return fmt.Sprintf("$(printf '%%s' %s)", recv), nil
+	}
 	if isNumberMethod || (recvType == nil && (e.Method == "toString" || e.Method == "toFixed")) {
 		switch e.Method {
 		case "toString":
@@ -3405,12 +3619,13 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 		if err != nil {
 			return "", err
 		}
-		sep := stripQuotes(a0)
-		sepEscaped := strings.ReplaceAll(sep, "'", "'\"'\"'")
-		if listLen := g.listLengthExpr(e.Receiver); listLen != "" {
-			return fmt.Sprintf("$(printf '%%s\n' %s | awk -v s='%s' %s 'NR<=_len{if(NR>1)printf s; if($0==\"__BESHT_NL__\")printf \"\\n\"; else printf \"%%s\",$0}END{for(i=NR+1;i<=_len;i++)printf s}')", ensureArgSafe(recv), sepEscaped, awkArg("_len", listLen)), nil
+		return g.genListJoin(recv, e, stripQuotes(a0)), nil
+
+	case "toString":
+		if len(e.Args) != 0 {
+			return "", fmt.Errorf("toString() takes no arguments")
 		}
-		return fmt.Sprintf("$(printf '%%s\n' %s | awk -v s='%s' 'NR>1{printf s}{if($0==\"__BESHT_NL__\")printf \"\\n\"; else printf \"%%s\",$0}')", ensureArgSafe(recv), sepEscaped), nil
+		return g.genListJoin(recv, e, ","), nil
 
 	case "includes":
 		a0, err := arg0()
@@ -3428,6 +3643,15 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 
 	case "findIndex":
 		return g.genListFindIndex(recv, e)
+
+	case "some":
+		return g.genListSomeEvery(recv, e, true)
+
+	case "every":
+		return g.genListSomeEvery(recv, e, false)
+
+	case "find":
+		return g.genListFind(recv, e)
 
 	case "lastIndexOf":
 		a0, err := arg0()
@@ -3449,6 +3673,14 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 		return "", fmt.Errorf("reduce() must be used in a let/const declaration")
 	}
 	return "", fmt.Errorf("list has no method %q", e.Method)
+}
+
+func (g *Generator) genListJoin(recv string, e *ast.MethodCallExpr, sep string) string {
+	sepEscaped := strings.ReplaceAll(sep, "'", "'\"'\"'")
+	if listLen := g.listLengthExpr(e.Receiver); listLen != "" {
+		return fmt.Sprintf("$(printf '%%s\n' %s | awk -v s='%s' %s 'NR<=_len{if(NR>1)printf s; if($0==\"__BESHT_NL__\")printf \"\\n\"; else printf \"%%s\",$0}END{for(i=NR+1;i<=_len;i++)printf s}')", ensureArgSafe(recv), sepEscaped, awkArg("_len", listLen))
+	}
+	return fmt.Sprintf("$(printf '%%s\n' %s | awk -v s='%s' 'NR>1{printf s}{if($0==\"__BESHT_NL__\")printf \"\\n\"; else printf \"%%s\",$0}')", ensureArgSafe(recv), sepEscaped)
 }
 
 func isNewlineSplit(expr ast.Expression) bool {
@@ -3553,6 +3785,69 @@ func (g *Generator) genListFindIndex(recv string, e *ast.MethodCallExpr) (string
 			indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
 		}
 		out = fmt.Sprintf("$(%s=%s; %s=0; _found=-1; while IFS= read -r %s; do %sif [ $_found -lt 0 ] && %s; then _found=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_FIND_%d_%d\n$%s\n__BESHT_FIND_%d_%d\nprintf '%%s' \"$_found\")", dataVar, recv, idx, param, indexAssign, cond, idx, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column)
+		return nil
+	})
+	return out, err
+}
+
+func (g *Generator) genListSomeEvery(recv string, e *ast.MethodCallExpr, some bool) (string, error) {
+	arrow, err := listArrowArg(e)
+	if err != nil {
+		return "", err
+	}
+	if arrow.BlockBody != nil {
+		return "", fmt.Errorf("%s() predicate callback must be expression-bodied", e.Method)
+	}
+	var out string
+	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+		cond, err := g.genCondition(arrow.Body)
+		if err != nil {
+			return err
+		}
+		param := ctx.ParamVars[0]
+		idx := fmt.Sprintf("_listpred_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
+		dataVar := fmt.Sprintf("_listpred_%d_%d_data", arrow.Pos.Line, arrow.Pos.Column)
+		resultVar := fmt.Sprintf("_listpred_%d_%d_result", arrow.Pos.Line, arrow.Pos.Column)
+		indexAssign := ""
+		if len(ctx.ParamVars) > 1 {
+			indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
+		}
+		initial := "1"
+		body := fmt.Sprintf("%sif %s; then :; else %s=0; break; fi;", indexAssign, cond, resultVar)
+		if some {
+			initial = "0"
+			body = fmt.Sprintf("%sif %s; then %s=1; break; fi;", indexAssign, cond, resultVar)
+		}
+		out = fmt.Sprintf("$(%s=%s; %s=%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s %s=$(( %s + 1 )); done <<__BESHT_LIST_PRED_%d_%d\n$%s\n__BESHT_LIST_PRED_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, initial, idx, dataVar, param, body, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column, resultVar)
+		return nil
+	})
+	return out, err
+}
+
+func (g *Generator) genListFind(recv string, e *ast.MethodCallExpr) (string, error) {
+	arrow, err := listArrowArg(e)
+	if err != nil {
+		return "", err
+	}
+	if arrow.BlockBody != nil {
+		return "", fmt.Errorf("find() predicate callback must be expression-bodied")
+	}
+	g.requireRuntimeHelper("nullish")
+	var out string
+	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+		cond, err := g.genCondition(arrow.Body)
+		if err != nil {
+			return err
+		}
+		param := ctx.ParamVars[0]
+		idx := fmt.Sprintf("_listfind_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
+		dataVar := fmt.Sprintf("_listfind_%d_%d_data", arrow.Pos.Line, arrow.Pos.Column)
+		resultVar := fmt.Sprintf("_listfind_%d_%d_result", arrow.Pos.Line, arrow.Pos.Column)
+		indexAssign := ""
+		if len(ctx.ParamVars) > 1 {
+			indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
+		}
+		out = fmt.Sprintf("$(%s=%s; %s=$%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %sif %s; then %s=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_LIST_FIND_%d_%d\n$%s\n__BESHT_LIST_FIND_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, nullishSentinelVar, idx, dataVar, param, indexAssign, cond, resultVar, param, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column, resultVar)
 		return nil
 	})
 	return out, err
@@ -4257,6 +4552,9 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 		}
 		return truthyCondition(call), nil
 	case *ast.MethodCallExpr:
+		if builtin, ok := beshtConditionsBuiltinCall(e); ok {
+			return g.genBuiltinCondition(builtin)
+		}
 		if e.Optional {
 			val, err := g.genExprValue(e)
 			if err != nil {
@@ -4266,6 +4564,13 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 		}
 		return g.genMethodCondition(e)
 	case *ast.PropertyExpr:
+		if _, ok := isProcessEnvProperty(e); ok {
+			val, err := g.genProperty(e)
+			if err != nil {
+				return "", err
+			}
+			return nullishAwareTruthyCondition(val), nil
+		}
 		if e.Optional {
 			val, err := g.genExprValue(e)
 			if err != nil {
@@ -4292,6 +4597,17 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 		return "", err
 	}
 	return truthyCondition(val), nil
+}
+
+func beshtConditionsBuiltinCall(e *ast.MethodCallExpr) (*ast.BuiltinCallExpr, bool) {
+	if !ast.IsBeshtConditionsReceiver(e.Receiver) {
+		return nil, false
+	}
+	builtinName, ok := ast.BeshtConditionBuiltinName(e.Method)
+	if !ok {
+		return nil, false
+	}
+	return &ast.BuiltinCallExpr{Pos: e.Pos, Name: builtinName, Args: e.Args}, true
 }
 
 func (g *Generator) genMethodCondition(e *ast.MethodCallExpr) (string, error) {
@@ -4508,7 +4824,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		return fmt.Sprintf("printf '%%s\\n' %s | grep -qxF %s", listStr, elemStr), nil
 	case "Number.isFinite":
 		return "true", nil
-	case "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+	case "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray":
 		val, err := g.genBuiltinCapture(e)
 		if err != nil {
 			return "", err
@@ -5225,7 +5541,7 @@ func methodMutatesThis(stmts []ast.Statement) bool {
 				return true
 			}
 		case *ast.CStyleForStmt:
-			if methodMutatesThis(s.Body.Statements) {
+			if methodStmtMutatesThis(s.Init) || methodStmtMutatesThis(s.Update) || methodMutatesThis(s.Body.Statements) {
 				return true
 			}
 		case *ast.WhileStmt:
@@ -5245,6 +5561,13 @@ func methodMutatesThis(stmts []ast.Statement) bool {
 		}
 	}
 	return false
+}
+
+func methodStmtMutatesThis(stmt ast.Statement) bool {
+	if stmt == nil {
+		return false
+	}
+	return methodMutatesThis([]ast.Statement{stmt})
 }
 
 func stmtPos(stmt ast.Statement) ast.Pos {

@@ -38,6 +38,8 @@ console.log(`endsWith empty negative: ${sample.endsWith("", -2.8)}`)
 let letters = ["a", "b", "c", "b"]
 console.log(`lastIndexOf b: ${letters.lastIndexOf("b")}`)
 console.log(`lastIndexOf z: ${letters.lastIndexOf("z")}`)
+console.log(`list toString: ${letters.toString()}`)
+console.log(`list toString spaces: ${["a b", "c d"].toString()}`)
 letters.unshift("zero")
 console.log(`unshift order: ${letters.join(",")}`)
 let inertPayload = "$(printf should-not-run)"
@@ -52,6 +54,12 @@ console.log(`Array.of hostile lastIndexOf: ${inertOrdered.lastIndexOf(inertPaylo
 let empty = Array.of()
 console.log(`Array.of empty length: ${empty.length}`)
 console.log(`Array.of empty join: ${empty.join(",")}`)
+console.log(`Array.of empty toString: ${empty.toString()}`)
+console.log(`Array.isArray literal: ${Array.isArray(["a", "b"])}`)
+console.log(`Array.isArray Array.of: ${Array.isArray(ordered)}`)
+console.log(`Array.isArray Array.from: ${Array.isArray(Array.from({ length: 2 }))}`)
+console.log(`Array.isArray string: ${Array.isArray("not a list")}`)
+console.log(`Array.isArray object: ${Array.isArray({ value: "x" })}`)
 
 console.log(`isSafeInteger(42): ${Number.isSafeInteger(42)}`)
 console.log(`isSafeInteger(3.0): ${Number.isSafeInteger(3.0)}`)

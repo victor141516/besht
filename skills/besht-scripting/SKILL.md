@@ -7,8 +7,8 @@ description: >
   variables, constants, raw strings r"...", String.raw, $() command expressions,
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
-  list/string/number methods, Array.from({ length }), Array.of(), Set<T>, nested lists, object literals, classes, logical operators, nullish coalescing ??, args.argv()/positional()/option()/flag(), string
-  concatenation, env(), console.log(), to_str(), String(), to_int(), or
+  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, args.argv()/positional()/option()/flag(), string
+  concatenation, process.env.NAME, process.exit(), env(), console.log(), value.toString(), Number.parseInt(), to_str(), String(), to_int(), Besht.conditions.* wrappers, or
   built-in functions like file_exists, len, and range.
 ---
 
@@ -18,13 +18,15 @@ Write and edit besht scripts. Besht is a TypeScript-flavored language that compi
 
 ```sh
 besht script.bsh                    # print compiled sh to stdout
+besht init                          # write ./stdlib.d.bsh declarations
+besht init --force                  # overwrite ./stdlib.d.bsh declarations
 besht script.bsh -o out.sh          # write to file
 besht --check script.bsh            # type-check and validate imports only
 besht --check --strict script.bsh   # type-check with validation
 besht script.bsh | sh               # compile and run
 besht script.bsh --split -o build/  # compile each file to its own .sh
 besht script.bsh --opt-no-add-binaries-check  # omit runtime self-check
-besht script.bsh --opt-no-source-map            # omit sourcemap from compiled output
+besht script.bsh --opt-no-source-map            # omit source comments from compiled output
 besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to fall back to .ts
 besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
 ```
@@ -78,9 +80,16 @@ Escape sequences in double-quoted strings: `\n` (newline), `\t` (tab), `\r` (car
 ## Environment Variables
 
 ```ts
-let home: string = env("HOME");
-let port: string = env("PORT", "8080"); // with default
+let home: string = process.env.HOME
+let port: string = process.env.PORT ?? "8080"
+let debug: string = process.env.DEBUG ?? "false"
+
+// Older helper remains supported for now:
+let legacyHome: string = env("HOME")
+let legacyPort: string = env("PORT", "8080")
 ```
+
+`process.env.NAME` is nullish only when the variable is unset. Empty strings are preserved, so use `??` for defaults.
 
 ## Script Arguments
 
@@ -108,6 +117,38 @@ console.log({ apple: 3, banana: 2 });
 //   apple: 3,
 //   banana: 2,
 // }
+```
+
+## Process Exit
+
+```ts
+process.exit()
+process.exit(7)
+process.exit(code) // number or status
+
+// Older helper remains supported for now:
+exit(0)
+```
+
+## Condition Helpers
+
+Use `Besht.conditions.*` for file and string predicates. They compile to inline POSIX tests and add no runtime helpers. Older global names such as `file_exists()` and `is_empty()` remain supported for now.
+
+```ts
+if (Besht.conditions.fileExists(path)) {
+  console.log("file exists")
+}
+
+let empty: boolean = Besht.conditions.isEmpty(value)
+let ready = Besht.conditions.isReadable(path) && Besht.conditions.isExecutable(path)
+
+Besht.conditions.fileExists(path)   // file_exists(path), [ -f path ]
+Besht.conditions.isDir(path)        // is_dir(path), [ -d path ]
+Besht.conditions.isReadable(path)   // is_readable(path), [ -r path ]
+Besht.conditions.isWritable(path)   // is_writable(path), [ -w path ]
+Besht.conditions.isExecutable(path) // is_executable(path), [ -x path ]
+Besht.conditions.isEmpty(value)     // is_empty(value), [ -z value ]
+Besht.conditions.isSet(value)       // is_set(value), [ -n value ]
 ```
 
 ## All Variables Declared with `let`
@@ -141,6 +182,8 @@ export interface Repository { findById(id: number): Result<string> }
 
 Simple aliases such as `type Factory = string[]` can be used in later annotations. Complex unions and interfaces exist so users can write TypeScript-compatible syntax and get editor support.
 
+`.d.bsh` files are declaration-only and never emit shell output. Declared functions are called by their declared names; besht does not generate wrappers for them. Import declaration files explicitly for shared declarations, or run `besht init` to create `./stdlib.d.bsh` with standard declarations beside the entry script. That file auto-loads for normal compile, `--split`, and `--check`. `besht init` leaves matching files unchanged and requires `--force` before overwriting different content. Only the entry script directory is scanned; imported module directories are not scanned for their own `stdlib.d.bsh` files.
+
 ## Logical Operators
 
 ```ts
@@ -173,15 +216,19 @@ switch (mode) {
 
 ## Arrow Callbacks
 
-Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, and `.reduce()`.
+Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, and `.reduce()`. Scalar-list `.some()`, `.every()`, `.find()`, and `.findIndex()` use direct expression-bodied arrow predicates.
 
 ```ts
 let names = ["alice", "bob", "anna"]
 let upper = names.map(name => name.toUpperCase())
 let aNames = upper.filter(name => name.startsWith("A"))
+let hasAnna = names.some(name => name == "anna")
+let allShort = names.every((name, i) => name.length < 10 && i >= 0)
+let firstB = names.find(name => name.startsWith("b")) ?? "none"
 let copied = [...aNames, "AMY"]
 let indexes = Array.from({ length: 3 })
 let chosen = Array.of("alice", "anna")
+let chosenIsList = Array.isArray(chosen)
 let labeled = names.map((name, i) => {
     if (i == 0) return "first:" + name
     return i.toString() + ":" + name
@@ -198,7 +245,7 @@ let total = nums.reduce((acc, n) => acc + n, 0)
 let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("\n")
 ```
 
-`Array.from({ length })` creates `[0, 1, ... length - 1]`. `Array.of(...)` creates a list from the given values. `.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()` uses JavaScript-style truthiness and may receive `(item, index)`. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Defer `forEach`, `some`, `every`, `find`, and general arrow function values.
+`Array.from({ length })` creates `[0, 1, ... length - 1]`. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Defer `forEach` and general arrow function values.
 
 ## String and List Search
 
@@ -243,7 +290,7 @@ printUser(user)
 
 ## Classes
 
-Classes support constructors, instance properties/methods, `new`, `this`, and static properties/methods. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored. Inheritance, getters/setters, decorators, and abstract classes are not supported.
+Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored. Inheritance, decorators, and abstract classes are not supported. Generated shell keeps `# besht:file:line:col` comments before explicit class constructor, accessor, and method functions unless `--opt-no-source-map` is used.
 
 ```ts
 class User {
@@ -254,18 +301,30 @@ class User {
     greet(): string {
         return "Hello, " + this.name
     }
+    get label(): string {
+        return this.name
+    }
+    set label(value: string) {
+        this.name = value
+    }
 }
 let u = new User("Alice")
 console.log(u.greet())
+console.log(u.label)
 u.name = "Bob"
+u.label = "Carol"
 
 class MathUtils {
     static PI: number = 3.14159
+    static get label(): string {
+        return "math"
+    }
     static round(n: number): number {
         return Math.round(n)
     }
 }
 console.log(MathUtils.PI)
+console.log(MathUtils.label)
 
 class Game {
     private static Deltas: Record<string, [number, number]> = { U: [-1, 0] }
@@ -273,12 +332,13 @@ class Game {
 }
 ```
 
-Methods that mutate `this` must be void methods. Constructors can set fields, but value-returning methods cannot assign to `this.prop`.
+Getters take no parameters, must return a value, and cannot assign to `this.prop`. Setters take exactly one parameter and do not return a value. Methods that mutate `this` must be void methods. Constructors and setters can set fields, but value-returning methods cannot assign to `this.prop`.
 
 ## Number Builtins
 
 ```ts
-let n = Number.parseInt("42", 10)
+let n = Number.parseInt("42")
+let n10 = Number.parseInt("42", 10)
 let f = Number.parseFloat("3.14")
 let fin = Number.isFinite(f)
 let isInt = Number.isInteger(n)
@@ -291,13 +351,18 @@ let eps = Number.EPSILON
 
 `Number.isNaN()` is always false for currently representable besht values because besht has no NaN runtime sentinel.
 
-## String() Builtin
+## Type Conversion
 
-`String(value)` is an alias for `to_str()`:
+Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `Number.parseInt(value)` accepts one argument or an optional radix argument.
 
 ```ts
-let label = String(count)
+let countText = count.toString()
+let flagText = flag.toString()
+let lines = Number.parseInt(raw)
+let lines10 = Number.parseInt(raw, 10)
 ```
+
+Older helpers remain supported for now: `String(value)`, `to_str(value)`, and `to_int(value)`.
 
 ## Command Execution
 
@@ -523,15 +588,22 @@ if (is_empty(s)) { ... }     // [ -z "$s" ]
 if (is_set(s)) { ... }       // [ -n "$s" ]
 ```
 
-## Built-in List Operations
+## Native List Operations
+
+Prefer TypeScript-style list syntax and methods in new code:
 
 ```ts
-let n: number = len(files)               // element count
-let first: string = head(files)       // first element
-let rest: list<string> = tail(files)  // all but first
-files = append(files, "new.txt")      // add element
-if (contains(files, "x.txt")) { ... } // membership test
+let n: number = files.length
+let first: string = files[0]
+let rest: string[] = files.slice(1)
+let withNew = files.push("new.txt")
+let alsoWithNew = [...files, "new.txt"]
+let text: string = files.toString() // scalar lists: same as files.join(",")
+let hasConfig: boolean = files.includes("config.txt")
+let allFiles = files.concat(otherFiles)
 ```
+
+Compatibility aliases remain supported for now: `len(files)`, `head(files)`, `tail(files)`, `append(files, value)`, `contains(files, value)`, and `concat(files, otherFiles)`. Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
 
 ## Imports and Modules
 
@@ -583,6 +655,8 @@ Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Defau
 
 Float (decimal) literals are supported. `Math.*` methods support decimals.
 
+If you reassign a variable, besht updates its float-tracking metadata from the new right-hand side: float-producing expressions keep later arithmetic on `awk`, while integer or non-float reassignment clears the float marker so later integer arithmetic can use shell integer lowering again.
+
 ```ts
 let price: number = 3.14;
 let neg: number = -1.5;
@@ -600,6 +674,8 @@ Math.sqrt(16); // 4
 
 let n = 42;
 n.toString(); // "42"
+let ok = true;
+ok.toString(); // "true"
 
 let pi = 3.14159;
 pi.toFixed(2); // "3.14"
@@ -617,7 +693,9 @@ s.endsWith("hel", 3); // true, optional length
 let files = ["a", "b", "a"];
 files.unshift("z"); // ["z", "a", "b", "a"]
 files.lastIndexOf("a"); // 2
+files.toString(); // "z,a,b,a" for scalar lists
 Array.of("a", "b"); // ["a", "b"]
+Array.isArray(files); // true for compiler-known lists
 ```
 
 Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions.
@@ -684,9 +762,13 @@ try {
 
 ```ts
 let n: number = 42;
-let s: string = to_str(n); // int → string
+let s: string = n.toString(); // number -> string
 let raw: string = $("wc", "-l", "file.txt");
-let lines: number = to_int(raw); // string → number
+let lines: number = Number.parseInt(raw); // string -> number
+
+// Older helpers remain supported for now:
+let legacyS: string = to_str(n);
+let legacyLines: number = to_int(raw);
 ```
 
 ## Type Rules
@@ -695,10 +777,11 @@ let lines: number = to_int(raw); // string → number
 - `boolean` values work directly in `if`/`while` conditions and render as `true`/`false` in string contexts
 - `list<T>` values can be indexed, joined, and iterated with `for`
 - `status` type holds exit codes; only usable in `catch` clauses
-- String and number values can be converted with `String()`, `to_str()`, and `to_int()`
+- String, number, boolean, and status values can be converted with `.toString()`; strings can be parsed with `Number.parseInt()`. Older `String()`, `to_str()`, and `to_int()` helpers remain supported for now
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
 - `===`/`!==` are aliases for `==`/`!=`
 - Objects and classes support the operations described above; unsupported TypeScript features are listed in their sections
 - `String.raw\`...\`` is identical to `r"..."` — backslashes are literal
 - `list.join(sep)` supports multi-character separators
+- Scalar `list.toString()` is supported as `list.join(",")`; nested-list JS flattening is not implemented

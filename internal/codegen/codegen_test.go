@@ -305,6 +305,24 @@ let s: string = n.toString()`)
 	assertContains(t, out, `printf '%s' "$n"`)
 }
 
+func TestCodegen_PrimitiveToString(t *testing.T) {
+	out := compile(t, `let s: string = "x"
+let ss: string = s.toString()
+let t: boolean = true
+let ts: string = t.toString()
+let f: boolean = false
+let fs: string = f.toString()
+try {
+    $("false").run()
+} catch (code: status) {
+    let cs: string = code.toString()
+}`)
+	assertContains(t, out, `ss=$(printf '%s' "$s")`)
+	assertContains(t, out, `ts=$(if [ $t = 1 ]; then printf true; else printf false; fi)`)
+	assertContains(t, out, `fs=$(if [ $f = 1 ]; then printf true; else printf false; fi)`)
+	assertContains(t, out, `cs=$(printf '%s' "$code")`)
+}
+
 func TestCodegen_NumberToFixed(t *testing.T) {
 	out := compile(t, `let pi: number = 3.14159
 let s: string = pi.toFixed(2)`)
@@ -338,10 +356,10 @@ func TestCodegen_TryCatch(t *testing.T) {
 } catch (err: status) {
     $("echo", "failed").run()
 }`)
-	assertContains(t, out, `if ! (`)
+	assertContains(t, out, `_try_status_`)
 	assertContains(t, out, `set -e`)
 	assertContains(t, out, `risky_cmd`)
-	assertContains(t, out, `$?`)
+	assertContains(t, out, `=$?`)
 	assertContains(t, out, `'echo' 'failed'`)
 	assertContains(t, out, `fi`)
 }
@@ -352,7 +370,7 @@ func TestCodegen_TryCatchVarAvailable(t *testing.T) {
 } catch (code: status) {
     $("echo", "exit: " + code).run()
 }`)
-	assertContains(t, out, `code=$?`)
+	assertContains(t, out, `code="$_try_status_`)
 }
 
 func TestCodegen_BuiltinFileExists(t *testing.T) {
@@ -409,6 +427,43 @@ if (is_set(s)) {
     $("echo", "set").run()
 }`)
 	assertContains(t, out, `[ -n`)
+}
+
+func TestCodegen_BeshtConditionsWrappers(t *testing.T) {
+	tests := []struct {
+		method string
+		arg    string
+		op     string
+	}{
+		{"fileExists", "p", "-f"},
+		{"isDir", "p", "-d"},
+		{"isReadable", "p", "-r"},
+		{"isWritable", "p", "-w"},
+		{"isExecutable", "p", "-x"},
+		{"isEmpty", "s", "-z"},
+		{"isSet", "s", "-n"},
+	}
+	for _, tt := range tests {
+		out := compile(t, `let p: string = "/tmp"
+let s: string = ""
+if (Besht.conditions.`+tt.method+`(`+tt.arg+`)) {
+    $("echo", "ok").run()
+}`)
+		assertContains(t, out, `[ `+tt.op)
+		assertNotContains(t, out, `_bst_starts_with()`)
+		assertNotContains(t, out, `_bst_ends_with()`)
+		assertNotContains(t, out, `_bst_includes()`)
+	}
+}
+
+func TestCodegen_BeshtConditionsValuePosition(t *testing.T) {
+	out := compile(t, `let p: string = "/tmp"
+let ok: boolean = Besht.conditions.fileExists(p)
+if (ok) {
+    $("echo", "ok").run()
+}`)
+	assertContains(t, out, `ok=$(if [ -f $p ]; then printf 1; else printf 0; fi)`)
+	assertContains(t, out, `[ "$ok" = 1 ]`)
 }
 
 func TestCodegen_BuiltinLen(t *testing.T) {
@@ -603,6 +658,28 @@ for (f in files) {
 	assertContains(t, out, `continue`)
 }
 
+func TestCodegen_ProcessEnvUsesUnsetOnlyNullishSentinel(t *testing.T) {
+	out := compile(t, `let home = process.env.HOME ?? "fallback"`)
+	assertContains(t, out, `${HOME+x}`)
+	assertContains(t, out, `_BESHT_NULLISH_SENTINEL`)
+	assertNotContains(t, out, `${HOME:-`)
+}
+
+func TestCodegen_ProcessEnvConditionIsNullishAware(t *testing.T) {
+	out := compile(t, `if (process.env.HOME) {
+    console.log("set")
+}`)
+	assertContains(t, out, `${HOME+x}`)
+	assertContains(t, out, `[ "$_bst_cond" != "$_BESHT_NULLISH_SENTINEL" ]`)
+}
+
+func TestCodegen_ProcessExit(t *testing.T) {
+	out := compile(t, `process.exit()
+process.exit(7)`)
+	assertContains(t, out, `exit 0`)
+	assertContains(t, out, `exit 7`)
+}
+
 func TestCodegen_EnvBuiltin(t *testing.T) {
 	out := compile(t, `let home: string = env("HOME")`)
 	assertContains(t, out, `${HOME}`)
@@ -668,6 +745,13 @@ func TestCodegen_IntBuiltin(t *testing.T) {
 	out := compile(t, `let s: string = "42"
 let n: number = to_int(s)`)
 	assertContains(t, out, `$(( $s + 0 ))`)
+}
+
+func TestCodegen_NumberParseIntOneAndTwoArgs(t *testing.T) {
+	out := compile(t, `let a: number = Number.parseInt("42")
+let b: number = Number.parseInt("42", 10)`)
+	assertContains(t, out, `a=$(( 42 + 0 ))`)
+	assertContains(t, out, `b=$(( 42 + 0 ))`)
 }
 
 func TestCodegen_ConcatBuiltin(t *testing.T) {
@@ -803,6 +887,16 @@ let s: string = l.join(", ")`)
 	assertContains(t, out, `NR>1{printf s}`)
 }
 
+func TestCodegen_ListToString(t *testing.T) {
+	out := compile(t, `let l: list<string> = ["a", "b", "c"]
+let s: string = l.toString()`)
+	assertContains(t, out, `awk -v s=','`)
+	assertContains(t, out, `NR>1{printf s}`)
+	assertNotContains(t, out, `_bst_includes()`)
+	assertNotContains(t, out, `local `)
+	assertNotContains(t, out, `[[`)
+}
+
 func TestCodegen_ListLength(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 let n: number = l.length`)
@@ -835,6 +929,25 @@ if (l.includes("a")) { $("echo", "yes") }`)
 	assertNotContains(t, out, `_bst_includes()`)
 }
 
+func TestCodegen_NativeListAPIsReplaceGlobalListHelpers(t *testing.T) {
+	out := compile(t, `let files: list<string> = ["a", "b", "c"]
+let other: list<string> = ["d"]
+let count: number = files.length
+let first: string = files[0]
+let rest: list<string> = files.slice(1)
+let appended: list<string> = files.push("x")
+if (files.includes("x")) { $("echo", "found").run() }
+let combined: list<string> = files.concat(other)`)
+	assertContains(t, out, `wc -l`)
+	assertContains(t, out, `sed -n`)
+	assertContains(t, out, `tail -n +$(( 1 + 1 ))`)
+	assertContains(t, out, `printf '%s\n%s'`)
+	assertContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `head -n1`)
+	assertNotContains(t, out, `tail -n +2`)
+	assertNotContains(t, out, `_bst_includes()`)
+}
+
 func TestCodegen_ListMapArrow(t *testing.T) {
 	out := compile(t, `let items = ["a", "b"]
 let mapped = items.map(x => x + "!")`)
@@ -848,6 +961,20 @@ func TestCodegen_ListFilterArrow(t *testing.T) {
 let picked = items.filter(x => x.startsWith("a"))`)
 	assertContains(t, out, `_bst_starts_with "$_cb_2_27_x" 'a'`)
 	assertContains(t, out, `printf '%s\n' "$_cb_2_27_x"`)
+}
+
+func TestCodegen_ListSomeEveryFindArrows(t *testing.T) {
+	out := compile(t, `let items = ["a", "b"]
+let hasB = items.some((x, i) => x == "b" && i == 1)
+let allNamed = items.every(x => x != "")
+let found = items.find(x => x == "b")`)
+	assertContains(t, out, `_listpred_2_23_result=0`)
+	assertContains(t, out, `_listpred_3_28_result=1`)
+	assertContains(t, out, `break`)
+	assertContains(t, out, `_listfind_4_24_result=$_BESHT_NULLISH_SENTINEL`)
+	assertContains(t, out, `_BESHT_NULLISH_SENTINEL`)
+	assertNotContains(t, out, `local `)
+	assertNotContains(t, out, `[[`)
 }
 
 func TestCodegen_ListReduceExpressionBodyCanBeJoined(t *testing.T) {
@@ -1362,6 +1489,21 @@ func TestCodegen_MathSign(t *testing.T) {
 	assertContains(t, out, `1`)
 }
 
+func TestCodegen_FloatTrackingClearedOnIntegerReassignment(t *testing.T) {
+	out := compile(t, `let r = Math.round(2.7)
+r = 4
+let sum = r + 2`)
+	assertContains(t, out, `sum=$(( $r + 2 ))`)
+	assertNotContains(t, out, `awk -v _a=$r -v _b=2`)
+}
+
+func TestCodegen_FloatTrackingSetOnFloatReassignment(t *testing.T) {
+	out := compile(t, `let r = 1
+r = Math.sqrt(4)
+let sum = r + 2`)
+	assertContains(t, out, `sum=$(awk -v _a=$r -v _b=2`)
+}
+
 func TestCodegen_StringCharAt(t *testing.T) {
 	out := compile(t, `let s: string = "hello"
 let c: string = s.charAt(1)`)
@@ -1396,6 +1538,15 @@ func TestCodegen_ArrayOf(t *testing.T) {
 	assertContains(t, out, `a`)
 	assertContains(t, out, `b`)
 	assertContains(t, out, `c`)
+}
+
+func TestCodegen_ArrayIsArray(t *testing.T) {
+	out := compile(t, `let isList: boolean = Array.isArray(["a", "b"])
+let madeList: boolean = Array.isArray(Array.of("a"))
+let notList: boolean = Array.isArray("a")`)
+	assertContains(t, out, `isList=1`)
+	assertContains(t, out, `madeList=1`)
+	assertContains(t, out, `notList=0`)
 }
 
 func TestCodegen_NumberIsSafeInteger(t *testing.T) {
@@ -1530,6 +1681,60 @@ console.log(u.name)`)
 	assertContains(t, out, `User__constructor "$u" 'Alice'`)
 	assertContains(t, out, `$(User__greet "$u")`)
 	assertContains(t, out, `_obj_u_name='Bob'`)
+}
+
+func TestCodegen_ClassMemberSourceComments(t *testing.T) {
+	out := compile(t, `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+    greet(): string { return "Hello, " + this.name }
+    static describe(): string { return "User" }
+}`)
+
+	assertContains(t, out, "# besht:test.bsh:3:5\nUser__constructor() {")
+	assertContains(t, out, "# besht:test.bsh:4:5\nUser__greet() {")
+	assertContains(t, out, "# besht:test.bsh:5:12\nUser__describe() {")
+	assertNotContains(t, out, "# besht:test.bsh:2:5\nUser__get_name()")
+	assertNotContains(t, out, "# besht:test.bsh:2:5\nUser__set_name()")
+}
+
+func TestCodegen_ClassSyntheticFunctionsDoNotGetSourceComments(t *testing.T) {
+	out := compile(t, `class AccessorOnly {
+    value: string
+}
+class EmptyDefault {
+}`)
+
+	assertContains(t, out, "AccessorOnly__get_value() {")
+	assertContains(t, out, "AccessorOnly__set_value() {")
+	assertContains(t, out, "EmptyDefault__constructor() {")
+	assertNotContains(t, out, "# besht:test.bsh:1:1\nAccessorOnly__get_value()")
+	assertNotContains(t, out, "# besht:test.bsh:2:5\nAccessorOnly__get_value()")
+	assertNotContains(t, out, "# besht:test.bsh:1:1\nAccessorOnly__set_value()")
+	assertNotContains(t, out, "# besht:test.bsh:4:1\nEmptyDefault__constructor()")
+}
+
+func TestCodegen_ClassAccessors(t *testing.T) {
+	out := compile(t, `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+    get label(): string { return this.name }
+    set label(value: string) { this.name = value }
+    static get kind(): string { return "user" }
+}
+let u = new User("Alice")
+let before: string = u.label
+u.label = "Bob"
+let after: string = u.label
+let kind: string = User.kind`)
+
+	assertContains(t, out, `User__get_label() {`)
+	assertContains(t, out, `User__set_label() {`)
+	assertContains(t, out, `before=$(User__get_label "$u")`)
+	assertContains(t, out, `User__set_label "$u" 'Bob'`)
+	assertContains(t, out, `after=$(User__get_label "$u")`)
+	assertContains(t, out, `kind=$(User__get_kind)`)
+	assertNotContains(t, out, `_obj_u_label=`)
 }
 
 func TestCodegen_StaticClassMembers(t *testing.T) {

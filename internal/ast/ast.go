@@ -209,6 +209,23 @@ type ClassProperty struct {
 	IsStatic bool
 }
 
+type ClassAccessorKind string
+
+const (
+	AccessorGet ClassAccessorKind = "get"
+	AccessorSet ClassAccessorKind = "set"
+)
+
+type ClassAccessor struct {
+	Pos        Pos
+	Name       string
+	Kind       ClassAccessorKind
+	IsStatic   bool
+	Params     []*Param
+	ReturnType *Type
+	Body       *Block
+}
+
 type ClassDecl struct {
 	Pos         Pos
 	Name        string
@@ -217,6 +234,7 @@ type ClassDecl struct {
 	Constructor *ClassMethod
 	Methods     []ClassMethod
 	StaticProps []ClassProperty
+	Accessors   []ClassAccessor
 }
 
 func (n *ClassDecl) nodePos() Pos { return n.Pos }
@@ -698,8 +716,38 @@ func IsBuiltin(name string) bool {
 	case "file_exists", "is_dir", "is_readable", "is_writable", "is_executable",
 		"is_empty", "is_set", "len", "head", "tail", "append", "contains",
 		"range", "exit", "env", "to_str", "to_int", "String", "concat",
+		"Array.isArray",
 		"console.log", "console.error":
 		return true
 	}
 	return false
+}
+
+func BeshtConditionBuiltinName(method string) (string, bool) {
+	switch method {
+	case "fileExists":
+		return "file_exists", true
+	case "isDir":
+		return "is_dir", true
+	case "isReadable":
+		return "is_readable", true
+	case "isWritable":
+		return "is_writable", true
+	case "isExecutable":
+		return "is_executable", true
+	case "isEmpty":
+		return "is_empty", true
+	case "isSet":
+		return "is_set", true
+	}
+	return "", false
+}
+
+func IsBeshtConditionsReceiver(expr Expression) bool {
+	prop, ok := expr.(*PropertyExpr)
+	if !ok || prop.Property != "conditions" {
+		return false
+	}
+	ident, ok := prop.Receiver.(*IdentExpr)
+	return ok && ident.Name == "Besht"
 }

@@ -2,15 +2,19 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/victor141516/besht/internal/codegen"
+	"github.com/victor141516/besht/internal/stdlib"
 )
 
 const usage = `besht — TypeScript-flavored shell compiler
 
 Usage:
+  besht init                          Write ./stdlib.d.bsh declarations
+  besht init --force                  Overwrite ./stdlib.d.bsh declarations
   besht <file.bsh>                    Compile and print to stdout
   besht <file.bsh> -o <out.sh>        Compile to single file
   besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
@@ -22,7 +26,7 @@ Flags:
   -o <path>    Output file (default: stdout) or output directory (with --split)
   --split      Compile each .bsh file to its own .sh file; imports become 'source' calls
   --opt-no-add-binaries-check   Omit the runtime POSIX self-check from compiled output
-  --opt-no-source-map            Omit # besht:source:line:col sourcemap from compiled output
+  --opt-no-source-map            Omit # besht:file:line:col source comments from compiled output
   --opt-resolve-ts-imports       Resolve extensionless imports to .ts when .bsh is absent
   --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
   --check      Type-check and validate imports only; do not generate output
@@ -42,6 +46,12 @@ func main() {
 	if args[0] == "--version" {
 		fmt.Println("besht", version)
 		os.Exit(0)
+	}
+	if args[0] == "init" {
+		if err := runInit(args[1:], ".", os.Stderr); err != nil {
+			fatal("%s", err)
+		}
+		return
 	}
 
 	var inputFile string
@@ -122,6 +132,43 @@ func runCheck(inputFile string, opts codegen.Options) {
 
 func checkFile(inputFile string, opts codegen.Options) error {
 	return codegen.CheckFile(inputFile, opts)
+}
+
+func runInit(args []string, dir string, stderr io.Writer) error {
+	force := false
+	for _, arg := range args {
+		if arg != "--force" {
+			return fmt.Errorf("unsupported init argument: %s", arg)
+		}
+		if force {
+			return fmt.Errorf("unsupported init argument: %s", arg)
+		}
+		force = true
+	}
+
+	path := "stdlib.d.bsh"
+	if dir != "" && dir != "." {
+		path = dir + string(os.PathSeparator) + path
+	}
+	content := []byte(stdlib.Declarations)
+	existing, err := os.ReadFile(path)
+	if err == nil {
+		if string(existing) == stdlib.Declarations {
+			fmt.Fprintln(stderr, "stdlib.d.bsh already up to date")
+			return nil
+		}
+		if !force {
+			return fmt.Errorf("stdlib.d.bsh already exists; pass --force to overwrite")
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("cannot read stdlib.d.bsh: %s", err)
+	}
+
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		return fmt.Errorf("cannot write stdlib.d.bsh: %s", err)
+	}
+	fmt.Fprintln(stderr, "wrote stdlib.d.bsh")
+	return nil
 }
 
 func runCompileFile(inputFile, outputFile string, opts codegen.Options) {

@@ -20,23 +20,25 @@ type Module struct {
 }
 
 type Compiler struct {
-	visited    map[string]bool
-	modules    []*Module
-	root       string
-	entryPath  string
-	globalSigs map[string]*checker.FnSig
-	globalVars map[string]*ast.Type
-	opts       Options
+	visited     map[string]bool
+	modules     []*Module
+	root        string
+	entryPath   string
+	globalSigs  map[string]*checker.FnSig
+	globalDecls map[string]bool
+	globalVars  map[string]*ast.Type
+	opts        Options
 }
 
 func NewCompiler(root string, opts Options) *Compiler {
 	return &Compiler{
-		visited:    make(map[string]bool),
-		modules:    nil,
-		root:       root,
-		globalSigs: make(map[string]*checker.FnSig),
-		globalVars: make(map[string]*ast.Type),
-		opts:       opts,
+		visited:     make(map[string]bool),
+		modules:     nil,
+		root:        root,
+		globalSigs:  make(map[string]*checker.FnSig),
+		globalDecls: make(map[string]bool),
+		globalVars:  make(map[string]*ast.Type),
+		opts:        opts,
 	}
 }
 
@@ -202,6 +204,7 @@ func (c *Compiler) load(absPath string) error {
 			}
 			sig := &checker.FnSig{Params: fn.Params, ReturnType: retType}
 			c.globalSigs[fn.Name] = sig
+			c.globalDecls[fn.Name] = true
 		case *ast.LetDecl:
 			if fn.Exported {
 				name := fn.Name
@@ -738,17 +741,21 @@ func (c *Compiler) buildImportedMaps() (map[string]map[string]string, map[string
 
 	exportedFns := make(map[string]map[string]string)
 	exportedVars := make(map[string]map[string]string)
+	localFns := make(map[string]map[string]bool)
 	for _, mod := range c.modules {
 		prefix := modNameToPrefix(mod.ModName)
 		fns := make(map[string]string)
 		vars := make(map[string]string)
+		locals := make(map[string]bool)
 		for _, stmt := range mod.Prog.Statements {
 			switch fn := stmt.(type) {
 			case *ast.FnDecl:
+				locals[fn.Name] = true
 				if fn.Exported {
 					fns[fn.Name] = prefix + "__" + fn.Name
 				}
 			case *ast.ClassDecl:
+				locals[fn.Name] = true
 				if fn.Exported {
 					fns[fn.Name] = prefix + "__" + fn.Name
 				}
@@ -764,12 +771,19 @@ func (c *Compiler) buildImportedMaps() (map[string]map[string]string, map[string
 		}
 		exportedFns[mod.Path] = fns
 		exportedVars[mod.Path] = vars
+		localFns[mod.Path] = locals
 	}
 
 	for _, mod := range c.modules {
 		importMap := make(map[string]string)
 		importVarMap := make(map[string]string)
 		importVarTypes := make(map[string]*ast.Type)
+		for name := range c.globalDecls {
+			if localFns[mod.Path][name] {
+				continue
+			}
+			importMap[name] = name
+		}
 		for _, imp := range mod.Prog.Imports {
 			if isShellImport(imp) {
 				for _, name := range imp.Names {
@@ -845,6 +859,9 @@ func rewriteStmt(stmt ast.Statement, importMap map[string]string, qualify func(s
 		}
 		for _, method := range s.Methods {
 			rewriteFnCalls(method.Body.Statements, importMap, qualify)
+		}
+		for _, accessor := range s.Accessors {
+			rewriteFnCalls(accessor.Body.Statements, importMap, qualify)
 		}
 	case *ast.Block:
 		rewriteFnCalls(s.Statements, importMap, qualify)
@@ -994,7 +1011,7 @@ func qualifyClassIdent(ident *ast.IdentExpr, importMap map[string]string, qualif
 		ident.Name = qualName
 		return
 	}
-	if ident.Name == "" || ident.Name == "Math" || ident.Name == "Number" || ident.Name == "String" || ident.Name == "Set" || ident.Name == "console" || strings.Contains(ident.Name, "__") || ident.Name[0] < 'A' || ident.Name[0] > 'Z' {
+	if ident.Name == "" || ident.Name == "Besht" || ident.Name == "Math" || ident.Name == "Number" || ident.Name == "String" || ident.Name == "Set" || ident.Name == "console" || strings.Contains(ident.Name, "__") || ident.Name[0] < 'A' || ident.Name[0] > 'Z' {
 		return
 	}
 	ident.Name = qualify(ident.Name)
@@ -1206,8 +1223,8 @@ func (g *moduleGenerator) resolveFnName(name string) string {
 }
 
 func (g *moduleGenerator) genModuleStmt(stmt ast.Statement) error {
-	if pos := stmtPos(stmt); pos.File != "" && !g.NoSourceMap {
-		g.line(fmt.Sprintf("# besht:%s:%d:%d", sanitizeShellComment(pos.File), pos.Line, pos.Column))
+	if _, ok := stmt.(*ast.ClassDecl); !ok {
+		g.genSourceComment(stmtPos(stmt))
 	}
 	if fn, ok := stmt.(*ast.FnDecl); ok {
 		return g.genModuleFnDecl(fn)
@@ -1343,8 +1360,8 @@ func (g *moduleGenerator) genModuleFnDecl(s *ast.FnDecl) error {
 }
 
 func (g *moduleGenerator) genModuleFnBodyStmt(stmt ast.Statement) error {
-	if pos := stmtPos(stmt); pos.File != "" && !g.NoSourceMap {
-		g.line(fmt.Sprintf("# besht:%s:%d:%d", sanitizeShellComment(pos.File), pos.Line, pos.Column))
+	if _, ok := stmt.(*ast.ClassDecl); !ok {
+		g.genSourceComment(stmtPos(stmt))
 	}
 	if s, ok := stmt.(*ast.ExprStmt); ok {
 		if call, ok := s.Expr.(*ast.FnCallExpr); ok {

@@ -85,6 +85,26 @@ func TestChecker_NullishCoalescing(t *testing.T) {
 	mustCheck(t, `let value: number = undefined ?? 7`)
 }
 
+func TestChecker_ProcessEnvAndExit(t *testing.T) {
+	mustCheck(t, `let home: string = process.env.HOME`)
+	mustCheck(t, `let home: string = process.env.HOME ?? "fallback"`)
+	mustCheck(t, `let envObj = process.env`)
+	mustCheck(t, `process.exit()`)
+	mustCheck(t, `process.exit(7)`)
+	mustCheck(t, `try {
+    $("false").run()
+} catch (code: status) {
+    process.exit(code)
+}`)
+}
+
+func TestChecker_ProcessRejectsInvalidAPI(t *testing.T) {
+	expectError(t, `process.foo()`, `process has no method "foo"`)
+	expectError(t, `let cwd = process.cwd`, `process has no property "cwd"`)
+	expectError(t, `process.exit(1, 2)`, `process.exit() takes 0 or 1 argument`)
+	expectError(t, `process.exit("bad")`, `process.exit() argument must be number or status`)
+}
+
 func TestChecker_ArgsHelpers(t *testing.T) {
 	mustCheck(t, `let all: string[] = args.argv()`)
 	mustCheck(t, `let first: string = args.positional(1) ?? "fallback"`)
@@ -201,6 +221,28 @@ func TestChecker_BuiltinIsDir(t *testing.T) {
 if (is_dir(p)) {
     $("echo", "dir")
 }`)
+}
+
+func TestChecker_BeshtConditionsWrappers(t *testing.T) {
+	mustCheck(t, `let p: string = "/tmp"
+let s: string = "x"
+let a: boolean = Besht.conditions.fileExists(p)
+let b: boolean = Besht.conditions.isDir(p)
+let c: boolean = Besht.conditions.isReadable(p)
+let d: boolean = Besht.conditions.isWritable(p)
+let e: boolean = Besht.conditions.isExecutable(p)
+let f: boolean = Besht.conditions.isEmpty(s)
+let g: boolean = Besht.conditions.isSet(s)
+if (Besht.conditions.fileExists(p) && Besht.conditions.isSet(s)) {
+    $("echo", "ok")
+}`)
+}
+
+func TestChecker_BeshtConditionsErrors(t *testing.T) {
+	expectError(t, `let p: string = "/tmp"
+let ok: boolean = Besht.conditions.unknown(p)`, `Besht.conditions has no method "unknown"`)
+	expectError(t, `let ok: boolean = Besht.conditions.fileExists()`, `Besht.conditions.fileExists() takes 1 argument`)
+	expectError(t, `let ok: boolean = Besht.conditions.fileExists("/tmp", "extra")`, `Besht.conditions.fileExists() takes 1 argument`)
 }
 
 func TestChecker_BuiltinLen(t *testing.T) {
@@ -322,6 +364,37 @@ let label: string = x > 5 ? "big" : "small"`)
 func TestChecker_NumberToStringMethod(t *testing.T) {
 	mustCheck(t, `let n: number = 42
 let s: string = n.toString()`)
+}
+
+func TestChecker_PrimitiveToStringMethods(t *testing.T) {
+	mustCheck(t, `let s: string = "x"
+let out: string = s.toString()`)
+	mustCheck(t, `let b: boolean = true
+let out: string = b.toString()`)
+	mustCheck(t, `try {
+    $("false").run()
+} catch (code: status) {
+    let out: string = code.toString()
+}`)
+}
+
+func TestChecker_PrimitiveToStringRejectsArguments(t *testing.T) {
+	expectError(t, `let s: string = "x"
+let out: string = s.toString("bad")`, "toString() takes no arguments")
+	expectError(t, `let n: number = 42
+let out: string = n.toString("bad")`, "toString() takes no arguments")
+	expectError(t, `let b: boolean = true
+let out: string = b.toString("bad")`, "toString() takes no arguments")
+	expectError(t, `try {
+    $("false").run()
+} catch (code: status) {
+    let out: string = code.toString("bad")
+}`, "toString() takes no arguments")
+}
+
+func TestChecker_NumberParseIntOneAndTwoArgs(t *testing.T) {
+	mustCheck(t, `let n: number = Number.parseInt("42")`)
+	mustCheck(t, `let n: number = Number.parseInt("42", 10)`)
 }
 
 func TestChecker_NumberToFixedMethod(t *testing.T) {
@@ -501,6 +574,16 @@ func TestChecker_ListJoin(t *testing.T) {
 let s: string = l.join(", ")`)
 }
 
+func TestChecker_ListToString(t *testing.T) {
+	mustCheck(t, `let list: list<string> = ["a", "b", "c"]
+let s: string = list.toString()`)
+}
+
+func TestChecker_ListToStringRejectsArguments(t *testing.T) {
+	expectError(t, `let list: list<string> = ["a", "b"]
+let s: string = list.toString(",")`, "toString() takes no arguments")
+}
+
 func TestChecker_ListIncludes(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b"]
 if (l.includes("a")) { $("echo", "yes") }`)
@@ -525,6 +608,17 @@ let s: list<string> = l.slice(1, 3)`)
 func TestChecker_ListLength(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b", "c"]
 let n: number = l.length`)
+}
+
+func TestChecker_NativeListAPIsReplaceGlobalListHelpers(t *testing.T) {
+	mustCheck(t, `let files: list<string> = ["a", "b", "c"]
+let other: list<string> = ["d"]
+let count: number = files.length
+let first: string = files[0]
+let rest: list<string> = files.slice(1)
+let appended: list<string> = files.push("x")
+let hasX: boolean = files.includes("x")
+let combined: list<string> = files.concat(other)`)
 }
 
 func TestChecker_CmdExprBasic(t *testing.T) {
@@ -683,6 +777,8 @@ let last: number = s.lastIndexOf("lo")`},
 		{"list lastIndexOf", `let words: string[] = ["a", "b", "a"]
 let last: number = words.lastIndexOf("a")`},
 		{"Array.of", `let made: string[] = Array.of("x", "y", "z")`},
+		{"Array.isArray list", `let ok: boolean = Array.isArray(["x", "y"])`},
+		{"Array.isArray non-list", `let ok: boolean = Array.isArray("x")`},
 		{"Number.isSafeInteger", `let safe: boolean = Number.isSafeInteger(42)`},
 		{"Number.isSafeInteger string predicate", `let safe: boolean = Number.isSafeInteger("1")`},
 		{"Number.isNaN", `let nan: boolean = Number.isNaN(0)`},
@@ -721,6 +817,8 @@ let i: number = s.lastIndexOf("a", 1, 2)`, "lastIndexOf() takes 1 or 2 arguments
 let i: number = s.indexOf("a", "1")`, "indexOf() second argument must be number"},
 		{"safe integer arity", `let ok: boolean = Number.isSafeInteger()`, "Number.isSafeInteger() takes 1 argument"},
 		{"isNaN arity", `let ok: boolean = Number.isNaN()`, "Number.isNaN() takes 1 argument"},
+		{"isArray arity", `let ok: boolean = Array.isArray()`, "Array.isArray() takes 1 argument"},
+		{"isArray extra arg", `let ok: boolean = Array.isArray([], [])`, "Array.isArray() takes 1 argument"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -774,6 +872,35 @@ func TestChecker_ListFilterAcceptsTruthyCallback(t *testing.T) {
 let picked: number[] = items.filter(x => x % 2)`)
 }
 
+func TestChecker_ListPredicateCallbacks(t *testing.T) {
+	mustCheck(t, `let items: string[] = ["alpha", "beta"]
+let hasAlpha: boolean = items.some((item: string) => item.startsWith("a"))
+let allIndexed: boolean = items.every((item, i: number) => i >= 0)
+let found: string = items.find((item, i) => i == 1)`)
+}
+
+func TestChecker_ListPredicateCallbacksRejectInvalidArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		fragment string
+	}{
+		{"some non-arrow", `let items: string[] = ["a"]
+let ok: boolean = items.some("a")`, "list callback must be an arrow expression"},
+		{"every callback arity", `let items: string[] = ["a"]
+let ok: boolean = items.every((a, b, c) => true)`, "arrow callbacks take 1 or 2 parameters"},
+		{"find wrong arity", `let items: string[] = ["a"]
+let hit: string = items.find()`, "find() takes 1 arrow callback"},
+		{"some block body", `let items: string[] = ["a"]
+let ok: boolean = items.some(x => { return true })`, "some() predicate callback must be expression-bodied"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expectError(t, tt.src, tt.fragment)
+		})
+	}
+}
+
 func TestChecker_ListReduceAsListThenJoin(t *testing.T) {
 	mustCheck(t, `let nums: number[] = [1, 2]
 let lines: string = nums.reduce((acc, n) => [...acc, "x"], [] as string[]).join("\n")`)
@@ -811,6 +938,53 @@ func TestChecker_ClassDeclValid(t *testing.T) {
     }
     static label: string = "user"
 }`)
+}
+
+func TestChecker_ClassAccessorsValid(t *testing.T) {
+	mustCheck(t, `class User {
+	name: string
+	constructor(name: string) { this.name = name }
+	get label(): string { return this.name }
+	set label(value: string) { this.name = value }
+}`)
+	mustCheck(t, `class Metrics {
+    static get count(): number { return 1 }
+}
+let count: number = Metrics.count`)
+}
+
+func TestChecker_ClassAccessorValidation(t *testing.T) {
+	expectError(t, `class Circle {
+    get area(value: number): number { return value }
+}`, `getter "area" takes no parameters`)
+	expectError(t, `class Circle {
+    set area() { }
+}`, `setter "area" takes exactly one parameter`)
+	expectError(t, `class Circle {
+    set area(value: number): number { return value }
+}`, `setter "area" must not declare a return type`)
+	expectError(t, `class Circle {
+    area: number
+    get area(): number { return 1 }
+}`, `conflicts with field`)
+	expectError(t, `class Circle {
+    get area(): number { return 1 }
+    get_area(): number { return 1 }
+}`, `conflicts with accessor`)
+	expectError(t, `class Counter {
+    value: number
+    get next(): number {
+        this.value = this.value + 1
+        return this.value
+    }
+}`, `getter "next" must not assign to this properties`)
+	expectError(t, `class Counter {
+    value: number
+    next(): number {
+        this.value = this.value + 1
+        return this.value
+    }
+}`, `class method "next" returns a value and cannot assign to this properties`)
 }
 
 func TestChecker_TypeScriptClassModifiersFindIndexAndDestructure(t *testing.T) {

@@ -1,4 +1,8 @@
 class C {
+  static get label(): string {
+    return 'c'
+  }
+
   static methodA() {
     C.methodB()
     console.log('a')
@@ -9,5 +13,6 @@ class C {
   }
 }
 
+console.log(C.label)
 C.methodA()
 C.methodB()

@@ -102,6 +102,8 @@ make cover
 make cover-html && open coverage.html
 
 # Compile a .bsh file
+go run ./cmd/besht/ init
+go run ./cmd/besht/ init --force
 go run ./cmd/besht/ <file.bsh>
 go run ./cmd/besht/ <file.bsh> -o out.sh
 go run ./cmd/besht/ --check <file.bsh>
@@ -125,11 +127,13 @@ go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
 | Flag                          | Description                                                           |
 | ----------------------------- | --------------------------------------------------------------------- |
 | `-o <path>`                   | Output file or directory (required with `--split`)                    |
+| `init`                        | Write `./stdlib.d.bsh` declarations in the current directory          |
+| `init --force`                | Overwrite a different existing `./stdlib.d.bsh`                       |
 | `--split`                     | Compile each `.bsh` to its own `.sh`; imports become `. source` calls |
 | `--check`                     | Type-check and validate imports only, no output                       |
 | `--strict`                    | Enable compile-time type validation                                   |
 | `--opt-no-add-binaries-check` | Omit the runtime POSIX utility self-check block                       |
-| `--opt-no-source-map`          | Omit `# besht:file:line:col` sourcemap from compiled output              |
+| `--opt-no-source-map`          | Omit `# besht:file:line:col` source comments from compiled output        |
 | `--opt-resolve-ts-imports`     | Let extensionless imports fall back to `.ts` only when `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Allow explicit `.sh` imports outside the compiler root          |
 | `--version`                   | Print version                                                         |
@@ -141,11 +145,13 @@ All flags that change how code is transformed or what is emitted share the `--op
 | Flag                          | Effect                                                                          |
 | ----------------------------- | ------------------------------------------------------------------------------- |
 | `--opt-no-add-binaries-check` | Do not emit the `_r=$(printf ...)` runtime check at the top of compiled scripts |
-| `--opt-no-source-map`          | Do not emit `# besht:file:line:col` source-map comments in compiled output     |
+| `--opt-no-source-map`          | Do not emit `# besht:file:line:col` source comments in compiled output         |
 | `--opt-resolve-ts-imports`     | Resolve extensionless imports to `.bsh` first, then `.ts` if `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Permit explicit `.sh` imports outside the compiler root; `.bsh` imports remain root-confined |
 
 Pass via `codegen.Options{NoCheck: true, NoSourceMap: true, ResolveTsImports: true, AllowExternalShellImports: true}` in Go code.
+
+Generated shell emits inline `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions. Class declarations skip the generic statement-boundary comment so synthetic property accessors and implicit default constructors do not receive source comments.
 
 ## Architecture
 
@@ -181,6 +187,8 @@ internal/
 
 ```
 .bsh source
+  → Entry stdlib.d.bsh auto-load       ← CompileFile, CompileFileSplit, and CheckFile
+  │                                      load only filepath.Dir(entry)/stdlib.d.bsh when present
   → Lexer  (lexer.Tokenize)
   → Parser (parser.Parse)
   → Checker (checker.Check)              ← registers cross-module fn sigs first
@@ -315,6 +323,8 @@ The `rewriteFnCalls()` AST pass in `modules.go` walks the entire program AST bef
 | `status`   | exit code captured as `$?`                                        |
 | `command`  | lazy pipeline description; no shell code until `.run()` is called |
 
+Prefer native list APIs for new user-facing examples and compiler work: `list.length`, `list[0]`, `list.slice(1)`, `list.push(value)` or `[...list, value]`, `list.includes(value)`, and `list.concat(other)`. The old global list helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers.
+
 ### POSIX Compliance Invariants
 
 - No `local` keyword (not POSIX)
@@ -411,6 +421,8 @@ let bigger: number = a > b ? a : b
 // Environment variables
 let home: string = env("HOME")
 let port: string = env("PORT", "8080")
+let nodeHome: string = process.env.HOME
+let nodePort: string = process.env.PORT ?? "8080"
 
 // Script arguments
 let argv: string[] = args.argv()
@@ -419,17 +431,24 @@ let branchArg: string = args.option("branch", "b") ?? "main"
 let dryRun: boolean = args.flag("dry-run", "d")
 
 // Type conversion
-let s: string = to_str(count)
-let n: number = to_int(s)
+let s: string = count.toString()
+let b: string = flag.toString() // true or false
+let n: number = Number.parseInt(s)
+let n10: number = Number.parseInt(s, 10)
+// Older helpers remain supported for now:
+let oldS: string = to_str(count)
+let oldString: string = String(count)
+let oldN: number = to_int(s)
 
-// String() is an alias for to_str()
+// String() remains an alias for to_str()
 let label: string = "check:" + name
 let msg: string = `Hello, ${name}!`  // template literal for interpolation
 let sum: string = `sum=${a + b}`
 let sum: string = `sum=${a + b}`     // full expressions inside ${...}
 
 // Number builtins
-let pi: number = Number.parseInt("42", 10)
+let pi: number = Number.parseInt("42")
+let pi10: number = Number.parseInt("42", 10)
 let pf: number = Number.parseFloat("3.14")
 let fin: boolean = Number.isFinite(pf)
 let isInt: boolean = Number.isInteger(pi)
@@ -551,7 +570,7 @@ let key: string = "name"
 let val: string = user[key]         // reads _obj_user_${key}
 user[key] = "Updated"              // writes _obj_user_${key}
 
-// Classes — constructors, instance properties/methods, new, this
+// Classes — constructors, instance properties/methods, getters/setters, new, this
 class User {
     name: string
     age: number
@@ -564,21 +583,35 @@ class User {
     greet(): string {
         return "Hello, " + this.name
     }
+
+    get label(): string {
+        return this.name + " (" + this.age.toString() + ")"
+    }
+
+    set label(value: string) {
+        this.name = value
+    }
 }
 
 let u = new User("Alice", 30)
 console.log(u.greet())
 console.log(u.name)
+console.log(u.label)
 u.name = "Bob"
+u.label = "Carol"
 
 // Static properties and methods
 class MathUtils {
     static PI: number = 3.14159
+    static get label(): string {
+        return "math"
+    }
     static round(n: number): number {
         return Math.round(n)
     }
 }
 console.log(MathUtils.PI)
+console.log(MathUtils.label)
 console.log(MathUtils.round(2.7))
 
 class Game {
@@ -646,6 +679,12 @@ cmd.run()
 cmd.run()           // ← COMPILE ERROR: already run; use clone()
 cmd.clone().run()   // ← correct
 
+// Process exit
+process.exit()
+process.exit(7)
+process.exit(code) // number or status
+exit(0) // older helper remains supported for now
+
 // Try/catch
 try {
     $("rsync", "-az", src, dest).run()
@@ -660,6 +699,18 @@ function read_file(path: string): string {
     return content
 }
 
+// Besht condition helpers — wrappers around older global condition builtins
+if (Besht.conditions.fileExists(path)) console.log("file")
+if (Besht.conditions.isDir(path)) console.log("dir")
+if (Besht.conditions.isReadable(path)) console.log("readable")
+if (Besht.conditions.isWritable(path)) console.log("writable")
+if (Besht.conditions.isExecutable(path)) console.log("executable")
+let empty: boolean = Besht.conditions.isEmpty(value)
+let set: boolean = Besht.conditions.isSet(value)
+
+// Older names remain supported for now
+if (file_exists(path) || is_empty(value)) console.log("old names still work")
+
 // Math object methods
 let mn: number = Math.min(a, b)     // → awk comparison
 let mx: number = Math.max(a, b)
@@ -672,7 +723,10 @@ let sg: number = Math.sign(-5)      // → awk
 let pw: number = Math.pow(2, 8)     // → awk ^ operator
 let sq: number = Math.sqrt(16)      // → awk sqrt()
 let ns: string = count.toString()
+let bs: string = flag.toString()    // true or false
 let fixed: string = price.toFixed(2)
+
+Reassignment updates float metadata from the new right-hand side: float-producing values keep later arithmetic on `awk`, while integer/non-float reassignment clears the float marker so later integer arithmetic can lower back to `$((...))` when applicable.
 
 // Negative numbers
 let neg: number = -42
@@ -700,11 +754,16 @@ let sub: string = name.slice(0, 5)
 let sub2: string = name.substring(0, 5)
 let ch: string = name.charAt(1)
 
-// List methods
+// List methods. Prefer these native APIs over the older global helper aliases.
+let flen: number = files.length
+let first: string = files[0]
+let rest: list<string> = files.slice(1)
 let pushed: list<string> = files.push("new.txt")
+let alsoPushed: list<string> = [...files, "new.txt"]
 let prepended: list<string> = files.unshift("first.txt")
 let popped: list<string> = files.pop()
 let joined: string = files.join(", ")
+let listText: string = files.toString() // scalar lists only; same as files.join(",")
 let merged: list<string> = files.concat(other)
 let rev: list<string> = files.reverse()
 let copied: list<string> = [...files, "extra"]
@@ -717,6 +776,9 @@ let classified: list<string> = files.map((f, i) => {
     return "next:" + f
 })
 let filtered: list<string> = files.filter(f => f.endsWith(".txt"))
+let hasTxt: boolean = files.some((f, i) => f.endsWith(".txt") && i >= 0)
+let allNamed: boolean = files.every(f => f.length > 0)
+let firstTxt: string = files.find(f => f.endsWith(".txt")) ?? "missing"
 let foundIndex: number = files.findIndex(f => f == "b.txt")
 let reduced: number = nums.reduce((acc, n) => acc + n, 0)
 let lines: string = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("\n")
@@ -728,7 +790,7 @@ let sliced: list<string> = files.slice(1, 3)
 let found: boolean = files.includes("a.txt") // list membership via grep -qxF; does not emit _bst_includes
 let idx: number = files.indexOf("b.txt")
 let lastIdx: number = files.lastIndexOf("b.txt")
-let flen: number = files.length
+// Old global list helper names remain supported for now: len, head, tail, append, contains, concat.
 
 // Set<T> collections — newline-backed, no runtime type checks
 let visited = new Set<string>()
@@ -746,6 +808,8 @@ legacy_log("from shell")
 
 // Declaration file
 declare function external_name(name: string): string
+// Run `besht init` to generate entry-directory stdlib.d.bsh declarations.
+// That file is auto-loaded for compile, split compile, and --check.
 
 // Type aliases and interfaces — parsed and silently ignored
 type Status = "active" | "inactive"
@@ -843,11 +907,11 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Object literals compile to per-property shell variables.** `let user = { id: 1, name: "Victor" }` emits `_obj_user_id=1` and `_obj_user_name="Victor"`. Property access `user.name` reads `_obj_user_name`. Property assignment `user.name = "X"` writes `_obj_user_name="X"`. Since shell variables are global, these `_obj_*` variables are accessible inside functions. When an object is passed as a function parameter, `genProperty` uses `objPropTypeMap` (populated by `collectObjectTypes` pre-pass) to resolve the original `_obj_` prefix directly — no copying needed. Inside a function, `student.name` emits `$_obj_student_name` (using the original top-level variable name, not the mangled parameter name).
 
-**Classes use compiler-managed instance slots.** `let u = new User("Alice")` stores `u='u'`, calls `User__constructor "$u" ...`, and writes instance fields as `_obj_u_name`. `this.prop` inside constructors and methods uses tightly controlled `eval` to construct `_obj_${slot}_${prop}` names; user values must flow through temporary shell variables, never interpolated directly into the eval string. Static properties use `_class_<Class>_<prop>` and static/instance methods compile to `<Class>__<method>` shell functions. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored.
+**Classes use compiler-managed instance slots.** `let u = new User("Alice")` stores `u='u'`, calls `User__constructor "$u" ...`, and writes instance fields as `_obj_u_name`. `this.prop` inside constructors and methods uses tightly controlled `eval` to construct `_obj_${slot}_${prop}` names; user values must flow through temporary shell variables, never interpolated directly into the eval string. Static properties use `_class_<Class>_<prop>` and static/instance methods compile to `<Class>__<method>` shell functions. Explicit getters/setters compile to `<Class>__get_<name>` and `<Class>__set_<name>`; property reads/writes lower to those calls when present. Accessors cannot share a property name with a field, and source methods named `get_<name>`/`set_<name>` conflict with the corresponding accessor. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored.
 
 **Static object maps use object backing.** `static Deltas: Record<string, [number, number]> = { U: [-1, 0] }` emits `_obj__class_Class_Deltas_U` storage, and `Class.Deltas[key]` lowers to computed object access. `Record<K, V>` is annotation-only; it guides compiler inference but adds no runtime type checking.
 
-**Class methods that mutate `this` must be void.** Value-returning methods are invoked through command substitution (`$(Class__method "$slot")`), which runs in a subshell. Any `this.prop = value` mutation inside that subshell is lost, so codegen rejects non-void methods that assign to `this` properties. Constructors are exempt because they are called directly.
+**Class methods and getters that mutate `this` must be void-style calls.** Value-returning methods and getters are invoked through command substitution (`$(Class__method "$slot")`), which runs in a subshell. Any `this.prop = value` mutation inside that subshell is lost, so checker/codegen reject non-void methods and getters that assign to `this` properties. Constructors and setters are exempt because they are called directly.
 
 **`String.raw\`...\`` compiles identically to `r"..."`.** Backslashes are literal — no escape sequence processing. Use for Windows paths, regex, or any string containing `\`.
 
@@ -857,9 +921,11 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Postfix `++` and `--` are statement-only; prefix updates are expressions.** `count++` and `count--` compile to assignment statements. Prefix `++count` and `--count` are supported in expression position and return the updated numeric value. They must resolve through `paramMap` like other variable reads/writes.
 
-**Arrow callbacks support both expression-bodied and block-bodied forms.** Direct list `.map(x => expr)`, `.map((x, i) => { return expr })`, `.filter((x, i) => truthyExpr)`, and `.reduce((acc, cur) => { ... }, init)` callbacks are supported. `.map()` callbacks may take `(item)` or `(item, index)` and block-bodied `return` emits one mapped value then continues the callback loop; supported block statements are `return`, `if`/`else`, and assignments. Do not splice generic expression statements into map callback shell source — reject unsupported statements instead of treating expression values as commands. `.filter()` uses JavaScript-style truthiness and may take the same optional index parameter. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. Arrows are not general function values, cannot be stored in variables, and should be treated as side-effect-free (except in `reduce` block bodies where `return acc` is used). Callback params are temporarily added to `paramMap` via `withCallbackParams()` and restored after body generation; never emit `local`.
+**Arrow callbacks support compiler-known list methods only.** Direct list `.map(x => expr)`, `.map((x, i) => { return expr })`, `.filter((x, i) => truthyExpr)`, `.some((x, i) => truthyExpr)`, `.every((x, i) => truthyExpr)`, `.find((x, i) => truthyExpr)`, `.findIndex((x, i) => truthyExpr)`, and `.reduce((acc, cur) => { ... }, init)` callbacks are supported. `.map()` callbacks may take `(item)` or `(item, index)` and block-bodied `return` emits one mapped value then continues the callback loop; supported block statements are `return`, `if`/`else`, and assignments. Do not splice generic expression statements into map callback shell source — reject unsupported statements instead of treating expression values as commands. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may take the same optional zero-based index parameter. `.some()` returns `1` on the first truthy callback result and `0` for an empty list; `.every()` returns `0` on the first falsey callback result and `1` for an empty list; `.find()` returns the first matching scalar element or `_BESHT_NULLISH_SENTINEL` so `??` fallbacks work. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. Arrows are not general function values, cannot be stored in variables, and should be treated as side-effect-free (except in `reduce` block bodies where `return acc` is used). Callback params are temporarily added to `paramMap` via `withCallbackParams()` and restored after body generation; never emit `local`. `forEach` remains future work.
 
 **`Array.from({ length })` is narrow by design.** It only supports an object literal with a numeric `length` field (including shorthand `{ length }`) and emits a zero-based numeric list. Do not broaden it to arbitrary iterables or mapper callbacks without adding parser/checker/codegen coverage and docs.
+
+**`Array.isArray(value)` is static.** It returns true only when codegen can infer `value` as `TypeList`; otherwise it emits false. Do not add runtime array metadata or dynamic shape inspection for this API without a broader object/list representation design.
 
 **Type assertions are erased.** `expr as Type` exists for TypeScript-compatible syntax and compiler type inference only. It emits the inner expression unchanged. This is especially useful for empty list accumulators such as `[] as string[]`.
 
@@ -867,7 +933,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **List literal spread is generic.** `[...items, extra]` expands the existing newline-delimited list and appends normal elements. It is used by reduce list accumulators and should remain a list literal transformation, not a reduce-specific special case.
 
-**`list.findIndex(callback)` returns a zero-based number or `-1`.** It uses the same one-argument arrow callback machinery as `filter`; keep callback params in `paramMap` and avoid pipeline loops when mutations must persist.
+**List predicate callbacks short-circuit in current-shell heredoc loops.** `list.some(callback)`, `list.every(callback)`, `list.find(callback)`, and `list.findIndex(callback)` use direct arrow callbacks with one item parameter or `(item, index)`. Keep callback params in `paramMap`, increment the optional index once per scalar element, and avoid pipeline loops when state must persist inside the generated predicate loop. `find()` must require the nullish runtime helper and initialize its result to `_BESHT_NULLISH_SENTINEL`; no-match must compose with `??`. Nested-list element decoding is not part of these scalar predicate methods yet.
 
 **For-of list expression loops run in the current shell.** `for (const move of moves.split("") as string[])` uses a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist.
 
@@ -875,7 +941,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the entry-file POSIX self-check block behavior. List `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
 
-**`list.join(sep)` uses awk, not `paste -sd`.** Multi-character separators (like `", "`) require awk since `paste -sd` only uses the first character of the delimiter. The generated code: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
+**`list.join(sep)` and scalar `list.toString()` use awk, not `paste -sd`.** Multi-character separators for `join` require awk since `paste -sd` only uses the first character of the delimiter. Scalar list `toString()` reuses the same join lowering with `,` as the separator and does not implement JavaScript nested-array flattening for `string[][]` or packed rows. The generated join shape is: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
 
 **AWK `OFMT="%.17g"` is set in all arithmetic BEGIN blocks.** This matches JavaScript double-precision output for division results (e.g., `72.66666666666667` instead of `72.6667`).
 
@@ -885,7 +951,11 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`||` and `&&` in value position return actual values (JS semantics), not booleans.** `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. This is different from condition position (used in `if`/`while`) which returns 1/0. The implementation uses a subshell with `_l=temp` capture to test the left side, then returns the appropriate value.
 
-**`??` uses an internal nullish sentinel, not shell default expansion.** Do not lower it to `${var:-fallback}` because empty string, `0`, and `false` must be preserved. Only `null`, `undefined`, missing `args` values, and missing indexes in nullish-left position should trigger the fallback.
+**`??` uses an internal nullish sentinel, not shell default expansion.** Do not lower it to `${var:-fallback}` because empty string, `0`, and `false` must be preserved. Only `null`, `undefined`, missing `args` values, missing `process.env.NAME` variables, and missing indexes in nullish-left position should trigger the fallback.
+
+**`process.env.NAME ?? fallback` must use unset-only detection.** Lower `process.env.NAME` with `${NAME+x}` and `_BESHT_NULLISH_SENTINEL`; never use `${NAME:-fallback}` for this API because an explicitly empty environment variable must be preserved. The old `env()` and `exit()` builtins remain supported until a later removal decision.
+
+**`Besht` is a standard namespace exemption.** Module rewriting must not qualify `Besht` as a class/function-like identifier. `Besht.conditions.*` wrappers are parser-level method calls on `Besht.conditions`, but checker/codegen lower them to the existing condition builtins (`file_exists`, `is_dir`, `is_readable`, `is_writable`, `is_executable`, `is_empty`, `is_set`). In condition position they must emit the same minimal tests (`[ -f ... ]`, `[ -d ... ]`, `[ -r ... ]`, `[ -w ... ]`, `[ -x ... ]`, `[ -z ... ]`, `[ -n ... ]`) and must not introduce runtime helpers.
 
 **`args.*` helpers parse script arguments in generated POSIX sh.** `args.argv()` returns positional args only, `args.positional(n)` returns a 1-based positional value or nullish, `args.option(long, short?)` supports `--long=value`, `--long value`, and optional `-s value`, and `args.flag(long, short?)` returns boolean `1`/`0`. Keep defaults outside helpers via `??`.
 
@@ -917,10 +987,12 @@ Command methods chain on `command` type values. With the lazy Command model:
 10. **SKILL.md**: update `skills/besht-scripting/SKILL.md`
 11. **AGENTS.md**: update this file (Syntax Reference, Types, Architecture, Pitfalls)
 
+**Prefer native list APIs over global list helpers.** New language work, examples, and docs should use `list.length`, `list[0]`, `list.slice(1)`, `list.push(value)` or `[...list, value]`, `list.includes(value)`, and `list.concat(other)`. The old global helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers or present them as the primary API.
+
 **`Set<T>` is a compiler-backed membership collection.** `new Set<T>()` initializes an empty newline-delimited set, `.has(value)` emits a POSIX `grep -qxF` membership test, and `.add(value)` mutates the set with an `awk` uniqueness filter. Type parameters are annotations only; do not add runtime type checks.
 
 **Nested lists are encoded as packed rows.** When `.map()` returns a list, each row is packed with ASCII unit separator (`\037`) so the outer list remains newline-delimited. `matrix[row]` decodes one row, `matrix[row][col]` indexes into it, and `.length` on a decoded row counts row items. Keep this generic; do not special-case fixtures.
 
 **Blockless `if`/`else` bodies are parsed as one-statement blocks.** `if (cond) return x` and `else expr` should produce the same AST shape as braced single-statement blocks.
 
-**Import value exports, shell imports, and .ts fallback.** `export const name = expr` and `export default expr` are module-level value exports. Module codegen qualifies exported values as `<module>__<name>` and default exports as `<module>__default`; imported values are mapped through `moduleGenerator.importVarMap` into `paramMap` so normal identifier and command-spread generation uses the qualified shell variable. Imported value types must also be seeded into `varTypeMap` for both the source import name and qualified shell name so non-strict codegen dispatches imported list/boolean methods and formatting correctly. Keep extensionless import resolution `.bsh`-first. Only `codegen.Options.ResolveTsImports` / `--opt-resolve-ts-imports` may fall back to `.ts`, and `.d.bsh` imports remain declaration-only. Explicit `.sh` imports require named imports plus `assert { type: "shell" }`; default shell imports are rejected, shell files are not parsed for exports, and checker registration treats imported shell functions as unchecked varargs returning `string`. `--check` uses the module compiler path so import validation matches compilation. By default shell imports must stay inside the compiler root; `codegen.Options.AllowExternalShellImports` / `--opt-allow-external-shell-imports` permits explicit `.sh` imports outside that root without relaxing `.bsh` module imports. Bundled output sources the resolved shell file with a guard, while split output copies in-root raw shell dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths. External opt-in shell imports in split output are sourced from their original absolute path instead of copied outside the output root. Shell import guard variables are generated from unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
+**Import value exports, shell imports, declaration files, and .ts fallback.** `export const name = expr` and `export default expr` are module-level value exports. Module codegen qualifies exported values as `<module>__<name>` and default exports as `<module>__default`; imported values are mapped through `moduleGenerator.importVarMap` into `paramMap` so normal identifier and command-spread generation uses the qualified shell variable. Imported value types must also be seeded into `varTypeMap` for both the source import name and qualified shell name so non-strict codegen dispatches imported list/boolean methods and formatting correctly. Keep extensionless import resolution `.bsh`-first. Only `codegen.Options.ResolveTsImports` / `--opt-resolve-ts-imports` may fall back to `.ts`, and `.d.bsh` imports remain declaration-only. `CompileFile`, `CompileFileSplit`, and `CheckFile` auto-load `stdlib.d.bsh` from the entry file directory when present; do not scan imported module directories for their own stdlib files, and do not emit/source declaration files in bundled or split output. Declared function calls must keep the declared external name unqualified; do not rewrite them to `<module>__<name>` because no Besht wrapper is emitted. Explicit `.sh` imports require named imports plus `assert { type: "shell" }`; default shell imports are rejected, shell files are not parsed for exports, and checker registration treats imported shell functions as unchecked varargs returning `string`. `--check` uses the module compiler path so import validation matches compilation. By default shell imports must stay inside the compiler root; `codegen.Options.AllowExternalShellImports` / `--opt-allow-external-shell-imports` permits explicit `.sh` imports outside that root without relaxing `.bsh` module imports. Bundled output sources the resolved shell file with a guard, while split output copies in-root raw shell dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths. External opt-in shell imports in split output are sourced from their original absolute path instead of copied outside the output root. Shell import guard variables are generated from unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.

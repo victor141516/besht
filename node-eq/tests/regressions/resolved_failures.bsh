@@ -50,3 +50,12 @@ let count = 10
 count += 5
 count -= 3
 console.log(`count=${count}`)
+
+// Float tracking resets and restores on reassignment
+let r = Math.round(2.7)
+r = 4
+console.log(`sum=${r + 2}`)
+
+let s = 1
+s = Math.sqrt(4)
+console.log(`sum2=${s + 2}`)

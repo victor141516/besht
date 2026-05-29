@@ -236,6 +236,9 @@ func (ca *CmdAnalysis) phase1Stmt(stmt ast.Statement, scope *cmdScope) {
 		for _, method := range s.Methods {
 			ca.phase1Stmts(method.Body.Statements, newCmdScope(scope))
 		}
+		for _, accessor := range s.Accessors {
+			ca.phase1Stmts(accessor.Body.Statements, newCmdScope(scope))
+		}
 	}
 }
 
@@ -457,6 +460,9 @@ func (ca *CmdAnalysis) phase2Stmt(stmt ast.Statement, scope *cmdScope) {
 		}
 		for _, method := range s.Methods {
 			ca.phase2Stmts(method.Body.Statements, newCmdScope(scope))
+		}
+		for _, accessor := range s.Accessors {
+			ca.phase2Stmts(accessor.Body.Statements, newCmdScope(scope))
 		}
 	}
 }

@@ -130,6 +130,13 @@ func collectFnSigs(stmts []ast.Statement, fns map[string]*FnSig) {
 				}
 				fns[fn.Name+"__"+method.Name] = &FnSig{Params: method.Params, ReturnType: retType}
 			}
+			for _, accessor := range fn.Accessors {
+				retType := accessor.ReturnType
+				if accessor.Kind == ast.AccessorSet || retType == nil {
+					retType = &ast.Type{Kind: ast.TypeVoid}
+				}
+				fns[fn.Name+"__"+string(accessor.Kind)+"_"+accessor.Name] = &FnSig{Params: accessor.Params, ReturnType: retType}
+			}
 		}
 	}
 }
@@ -327,6 +334,33 @@ func (c *Checker) checkFnDecl(s *ast.FnDecl) error {
 }
 
 func (c *Checker) checkClassDecl(s *ast.ClassDecl) error {
+	fieldNames := make(map[string]bool)
+	accessorNames := make(map[string]map[ast.ClassAccessorKind]bool)
+	for _, prop := range s.Properties {
+		fieldNames[prop.Name] = true
+	}
+	for _, prop := range s.StaticProps {
+		fieldNames[prop.Name] = true
+	}
+	for _, accessor := range s.Accessors {
+		if fieldNames[accessor.Name] {
+			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("class accessor %q conflicts with field", accessor.Name)}
+		}
+		if accessorNames[accessor.Name] == nil {
+			accessorNames[accessor.Name] = make(map[ast.ClassAccessorKind]bool)
+		}
+		if accessorNames[accessor.Name][accessor.Kind] {
+			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("duplicate %s accessor %q", accessor.Kind, accessor.Name)}
+		}
+		accessorNames[accessor.Name][accessor.Kind] = true
+	}
+	for _, method := range s.Methods {
+		for name := range accessorNames {
+			if method.Name == "get_"+name || method.Name == "set_"+name {
+				return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("method %q conflicts with accessor %q", method.Name, name)}
+			}
+		}
+	}
 	for _, prop := range s.StaticProps {
 		pt := prop.Type
 		if pt == nil && prop.Value != nil {
@@ -340,6 +374,11 @@ func (c *Checker) checkClassDecl(s *ast.ClassDecl) error {
 			pt = &ast.Type{Kind: ast.TypeString}
 		}
 		c.classProps[s.Name+"."+prop.Name] = pt
+	}
+	for _, accessor := range s.Accessors {
+		if accessor.IsStatic && accessor.Kind == ast.AccessorGet && accessor.ReturnType != nil && accessor.ReturnType.Kind != ast.TypeVoid {
+			c.classProps[s.Name+"."+accessor.Name] = accessor.ReturnType
+		}
 	}
 	for _, prop := range s.Properties {
 		if prop.Value != nil {
@@ -358,16 +397,48 @@ func (c *Checker) checkClassDecl(s *ast.ClassDecl) error {
 			return err
 		}
 	}
+	for i := range s.Accessors {
+		if err := c.checkClassAccessor(&s.Accessors[i]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
+func (c *Checker) checkClassAccessor(accessor *ast.ClassAccessor) error {
+	switch accessor.Kind {
+	case ast.AccessorGet:
+		if len(accessor.Params) != 0 {
+			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q takes no parameters", accessor.Name)}
+		}
+		if accessor.ReturnType == nil || accessor.ReturnType.Kind == ast.TypeVoid {
+			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must declare a return type", accessor.Name)}
+		}
+		if classBodyMutatesThis(accessor.Body.Statements) {
+			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not assign to this properties", accessor.Name)}
+		}
+	case ast.AccessorSet:
+		if len(accessor.Params) != 1 {
+			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q takes exactly one parameter", accessor.Name)}
+		}
+		if accessor.ReturnType != nil && accessor.ReturnType.Kind != ast.TypeVoid {
+			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must not declare a return type", accessor.Name)}
+		}
+	}
+	method := &ast.ClassMethod{Pos: accessor.Pos, Name: string(accessor.Kind) + "_" + accessor.Name, IsStatic: accessor.IsStatic, Params: accessor.Params, ReturnType: accessor.ReturnType, Body: accessor.Body}
+	return c.checkClassMethod(method, false)
+}
+
 func (c *Checker) checkClassMethod(method *ast.ClassMethod, isConstructor bool) error {
-	prevFn := c.currentFn
-	prevInFn := c.inFunction
 	retType := method.ReturnType
 	if retType == nil || isConstructor {
 		retType = &ast.Type{Kind: ast.TypeVoid}
 	}
+	if !isConstructor && retType.Kind != ast.TypeVoid && classBodyMutatesThis(method.Body.Statements) {
+		return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("class method %q returns a value and cannot assign to this properties", method.Name)}
+	}
+	prevFn := c.currentFn
+	prevInFn := c.inFunction
 	c.currentFn = &FnSig{Params: method.Params, ReturnType: retType}
 	c.inFunction = true
 	outer := c.scope
@@ -383,6 +454,60 @@ func (c *Checker) checkClassMethod(method *ast.ClassMethod, isConstructor bool) 
 	c.currentFn = prevFn
 	c.inFunction = prevInFn
 	return err
+}
+
+func classBodyMutatesThis(stmts []ast.Statement) bool {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.PropertyAssignStmt:
+			if s.Object == "this" {
+				return true
+			}
+		case *ast.Block:
+			if classBodyMutatesThis(s.Statements) {
+				return true
+			}
+		case *ast.IfStmt:
+			if classBodyMutatesThis(s.Then.Statements) || (s.Else != nil && classBodyMutatesThis(s.Else.Statements)) {
+				return true
+			}
+			for _, ei := range s.ElseIfs {
+				if classBodyMutatesThis(ei.Body.Statements) {
+					return true
+				}
+			}
+		case *ast.ForStmt:
+			if classBodyMutatesThis(s.Body.Statements) {
+				return true
+			}
+		case *ast.CStyleForStmt:
+			if classStmtMutatesThis(s.Init) || classStmtMutatesThis(s.Update) || classBodyMutatesThis(s.Body.Statements) {
+				return true
+			}
+		case *ast.WhileStmt:
+			if classBodyMutatesThis(s.Body.Statements) {
+				return true
+			}
+		case *ast.TryStmt:
+			if classBodyMutatesThis(s.Body.Statements) || classBodyMutatesThis(s.Catch.Statements) {
+				return true
+			}
+		case *ast.SwitchStmt:
+			for _, swCase := range s.Cases {
+				if classBodyMutatesThis(swCase.Body.Statements) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func classStmtMutatesThis(stmt ast.Statement) bool {
+	if stmt == nil {
+		return false
+	}
+	return classBodyMutatesThis([]ast.Statement{stmt})
 }
 
 func (c *Checker) checkBlock(block *ast.Block) error {
@@ -1153,6 +1278,15 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCallExpr) (*ast.Type, error) {
 		}
 		return &ast.Type{Kind: ast.TypeList, Elem: firstType}, nil
 
+	case "Array.isArray":
+		if len(e.Args) != 1 {
+			return nil, &CheckError{Pos: e.Pos, Message: "Array.isArray() takes 1 argument"}
+		}
+		if _, err := c.checkExpr(e.Args[0]); err != nil {
+			return nil, err
+		}
+		return &ast.Type{Kind: ast.TypeBoolean}, nil
+
 	case "Number.isFinite", "Number.isInteger":
 		if len(e.Args) != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
@@ -1205,18 +1339,24 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCallExpr) (*ast.Type, error) {
 }
 
 func (c *Checker) checkMethodCall(e *ast.MethodCallExpr) (*ast.Type, error) {
+	if ast.IsBeshtConditionsReceiver(e.Receiver) {
+		return c.checkBeshtConditionsMethod(e)
+	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "args" {
 		return c.checkArgsMethod(e)
 	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
 		return c.checkMathMethod(e)
 	}
+	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" {
+		return c.checkProcessMethod(e)
+	}
 
 	recvType, err := c.checkExpr(e.Receiver)
 	if err != nil {
 		return nil, err
 	}
-	if recvType.Kind == ast.TypeList && (e.Method == "map" || e.Method == "filter" || e.Method == "reduce" || e.Method == "findIndex") {
+	if recvType.Kind == ast.TypeList && (e.Method == "map" || e.Method == "filter" || e.Method == "reduce" || e.Method == "findIndex" || e.Method == "some" || e.Method == "every" || e.Method == "find") {
 		return c.checkListMethod(e, recvType)
 	}
 	for _, arg := range e.Args {
@@ -1234,10 +1374,51 @@ func (c *Checker) checkMethodCall(e *ast.MethodCallExpr) (*ast.Type, error) {
 		return c.checkStringMethod(e)
 	case ast.TypeNumber:
 		return c.checkNumberMethod(e)
+	case ast.TypeBoolean, ast.TypeStatus:
+		return c.checkPrimitiveToStringMethod(e, recvType)
 	case ast.TypeCommand:
 		return c.checkCommandMethod(e)
 	}
 	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
+}
+
+func (c *Checker) checkBeshtConditionsMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
+	builtinName, ok := ast.BeshtConditionBuiltinName(e.Method)
+	if !ok {
+		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.conditions has no method %q", e.Method)}
+	}
+	if len(e.Args) != 1 {
+		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.conditions.%s() takes 1 argument", e.Method)}
+	}
+	return c.checkBuiltinCall(&ast.BuiltinCallExpr{Pos: e.Pos, Name: builtinName, Args: e.Args})
+}
+
+func (c *Checker) checkProcessMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
+	if e.Method != "exit" {
+		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no method %q", e.Method)}
+	}
+	if len(e.Args) > 1 {
+		return nil, &CheckError{Pos: e.Pos, Message: "process.exit() takes 0 or 1 argument"}
+	}
+	if len(e.Args) == 1 {
+		argType, err := c.checkExpr(e.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		if argType.Kind != ast.TypeNumber && argType.Kind != ast.TypeStatus {
+			return nil, &CheckError{Pos: e.Pos, Message: "process.exit() argument must be number or status"}
+		}
+	}
+	return &ast.Type{Kind: ast.TypeVoid}, nil
+}
+
+func isProcessEnvExpr(expr ast.Expression) bool {
+	prop, ok := expr.(*ast.PropertyExpr)
+	if !ok || prop.Property != "env" {
+		return false
+	}
+	ident, ok := prop.Receiver.(*ast.IdentExpr)
+	return ok && ident.Name == "process"
 }
 
 func (c *Checker) checkArgsMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
@@ -1408,6 +1589,11 @@ func (c *Checker) checkListMethod(e *ast.MethodCallExpr, listType *ast.Type) (*a
 			return nil, &CheckError{Pos: e.Pos, Message: "join() takes 1 argument (separator)"}
 		}
 		return strType, nil
+	case "toString":
+		if nargs != 0 {
+			return nil, &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+		}
+		return strType, nil
 	case "includes":
 		if nargs != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: "includes() takes 1 argument"}
@@ -1426,6 +1612,28 @@ func (c *Checker) checkListMethod(e *ast.MethodCallExpr, listType *ast.Type) (*a
 			return nil, err
 		}
 		return intType, nil
+	case "some", "every":
+		if nargs != 1 {
+			return nil, &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
+		}
+		if _, err := c.checkArrowCallback(e.Args[0], listType.Elem); err != nil {
+			return nil, err
+		}
+		if arrow := e.Args[0].(*ast.ArrowExpr); arrow.BlockBody != nil {
+			return nil, &CheckError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
+		}
+		return boolType, nil
+	case "find":
+		if nargs != 1 {
+			return nil, &CheckError{Pos: e.Pos, Message: "find() takes 1 arrow callback"}
+		}
+		if _, err := c.checkArrowCallback(e.Args[0], listType.Elem); err != nil {
+			return nil, err
+		}
+		if arrow := e.Args[0].(*ast.ArrowExpr); arrow.BlockBody != nil {
+			return nil, &CheckError{Pos: arrow.Pos, Message: "find() predicate callback must be expression-bodied"}
+		}
+		return listType.Elem, nil
 	case "lastIndexOf":
 		if nargs != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: "lastIndexOf() takes 1 argument"}
@@ -1643,6 +1851,11 @@ func (c *Checker) checkStringMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
 	intType := &ast.Type{Kind: ast.TypeNumber}
 
 	switch e.Method {
+	case "toString":
+		if nargs != 0 {
+			return nil, &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+		}
+		return strType, nil
 	case "split":
 		if nargs != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: "split() takes 1 argument (separator)"}
@@ -1828,6 +2041,16 @@ func (c *Checker) checkNumberMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
 	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("number has no method %q", e.Method)}
 }
 
+func (c *Checker) checkPrimitiveToStringMethod(e *ast.MethodCallExpr, recvType *ast.Type) (*ast.Type, error) {
+	if e.Method != "toString" {
+		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
+	}
+	if len(e.Args) != 0 {
+		return nil, &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+	}
+	return &ast.Type{Kind: ast.TypeString}, nil
+}
+
 func commandEnvName(expr ast.Expression) (string, error) {
 	var name string
 	switch e := expr.(type) {
@@ -1901,9 +2124,18 @@ func optionalNullishReceiver(expr ast.Expression) bool {
 
 func (c *Checker) checkProperty(e *ast.PropertyExpr) (*ast.Type, error) {
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
+		if ident.Name == "process" {
+			if e.Property == "env" {
+				return &ast.Type{Kind: ast.TypeObject}, nil
+			}
+			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no property %q", e.Property)}
+		}
 		if pt, ok := c.classProps[ident.Name+"."+e.Property]; ok {
 			return pt, nil
 		}
+	}
+	if isProcessEnvExpr(e.Receiver) {
+		return &ast.Type{Kind: ast.TypeString}, nil
 	}
 	recvType, err := c.checkExpr(e.Receiver)
 	if err != nil {

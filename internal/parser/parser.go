@@ -224,6 +224,31 @@ func (p *Parser) parseClassDecl(exported bool) (*ast.ClassDecl, error) {
 		p.advance()
 		memberPos := p.pos2ast(memberTok)
 		name := memberTok.Literal
+		if (name == "get" || name == "set") && isIdentifierName(p.peekType()) && p.peekN(1).Type == lexer.TokLParen {
+			accessorName := p.advance()
+			params, err := p.parseParamsAfterOpen()
+			if err != nil {
+				return nil, err
+			}
+			var returnType *ast.Type
+			if p.peekType() == lexer.TokColon {
+				p.advance()
+				returnType, err = p.parseType()
+				if err != nil {
+					return nil, err
+				}
+			}
+			body, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			kind := ast.AccessorGet
+			if name == "set" {
+				kind = ast.AccessorSet
+			}
+			decl.Accessors = append(decl.Accessors, ast.ClassAccessor{Pos: memberPos, Name: accessorName.Literal, Kind: kind, IsStatic: isStatic, Params: params, ReturnType: returnType, Body: body})
+			continue
+		}
 		if p.peekType() == lexer.TokLParen {
 			params, err := p.parseParamsAfterOpen()
 			if err != nil {
@@ -1891,7 +1916,7 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 			return &ast.PropertyExpr{Pos: pos, Receiver: &ast.IdentExpr{Pos: pos, Name: name}, Property: memberTok.Literal}, nil
 		}
 
-		if name == "Array" && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "from" || p.peekN(1).Literal == "of") {
+		if (name == "Array" || tok.Type == lexer.TokTypeArray) && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "from" || p.peekN(1).Literal == "of" || p.peekN(1).Literal == "isArray") {
 			methodTok := p.peekN(1)
 			p.advance()
 			p.advance()
