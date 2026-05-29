@@ -636,9 +636,10 @@ func (n *PropagateExpr) exprNode()    {}
 // IndexExpr: expr[index]
 type IndexExpr struct {
 	baseExpr
-	Pos   Pos
-	Expr  Expression
-	Index Expression
+	Pos      Pos
+	Expr     Expression
+	Index    Expression
+	Optional bool
 }
 
 func (n *IndexExpr) nodePos() Pos { return n.Pos }
@@ -651,6 +652,7 @@ type MethodCallExpr struct {
 	Receiver Expression
 	Method   string
 	Args     []Expression
+	Optional bool
 }
 
 func (n *MethodCallExpr) nodePos() Pos { return n.Pos }
@@ -662,6 +664,7 @@ type PropertyExpr struct {
 	Pos      Pos
 	Receiver Expression
 	Property string
+	Optional bool
 }
 
 func (n *PropertyExpr) nodePos() Pos { return n.Pos }

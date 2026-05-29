@@ -938,6 +938,54 @@ func TestParser_TypeScriptClassModifiersAndStaticRecord(t *testing.T) {
 	}
 }
 
+func TestParser_OptionalChainingMetadata(t *testing.T) {
+	prog := mustParse(t, `let a = obj?.prop
+let b = obj?.[key]
+let c = obj?.method(arg)
+let d = obj?.prop?.nested
+let e = obj?.items?.[i]
+let f = obj.prop[index].method(arg)`)
+
+	prop := prog.Statements[0].(*ast.LetDecl).Value.(*ast.PropertyExpr)
+	if !prop.Optional || prop.Property != "prop" {
+		t.Fatalf("optional property metadata lost: %#v", prop)
+	}
+
+	idx := prog.Statements[1].(*ast.LetDecl).Value.(*ast.IndexExpr)
+	if !idx.Optional {
+		t.Fatalf("optional index metadata lost: %#v", idx)
+	}
+
+	method := prog.Statements[2].(*ast.LetDecl).Value.(*ast.MethodCallExpr)
+	if !method.Optional || method.Method != "method" {
+		t.Fatalf("optional method metadata lost: %#v", method)
+	}
+
+	nested := prog.Statements[3].(*ast.LetDecl).Value.(*ast.PropertyExpr)
+	innerProp, ok := nested.Receiver.(*ast.PropertyExpr)
+	if !ok || !nested.Optional || !innerProp.Optional {
+		t.Fatalf("nested optional property metadata lost: outer=%#v inner=%#v", nested, innerProp)
+	}
+
+	nestedIndex := prog.Statements[4].(*ast.LetDecl).Value.(*ast.IndexExpr)
+	innerItems, ok := nestedIndex.Expr.(*ast.PropertyExpr)
+	if !ok || !nestedIndex.Optional || !innerItems.Optional {
+		t.Fatalf("nested optional index metadata lost: outer=%#v inner=%#v", nestedIndex, innerItems)
+	}
+
+	normalMethod := prog.Statements[5].(*ast.LetDecl).Value.(*ast.MethodCallExpr)
+	normalIndex := normalMethod.Receiver.(*ast.IndexExpr)
+	normalProp := normalIndex.Expr.(*ast.PropertyExpr)
+	if normalMethod.Optional || normalIndex.Optional || normalProp.Optional {
+		t.Fatalf("normal chain marked optional: method=%#v index=%#v prop=%#v", normalMethod, normalIndex, normalProp)
+	}
+}
+
+func TestParser_OptionalChainingRejectsUnsupportedCalls(t *testing.T) {
+	expectParseError(t, `let a = fn?.()`)
+	expectParseError(t, `let b = obj.method?.()`)
+}
+
 func TestParser_ListMapArrow(t *testing.T) {
 	prog := mustParse(t, `let items = ["a"]
 let mapped = items.map(x => x + "!")`)

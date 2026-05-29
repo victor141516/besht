@@ -1240,10 +1240,28 @@ func (p *Parser) parseParamsOnly() ([]*ast.Param, error) {
 }
 
 func (p *Parser) parsePostfixFrom(expr ast.Expression) (ast.Expression, error) {
+	return p.parsePostfixLoop(expr)
+}
+
+func (p *Parser) parsePostfixLoop(expr ast.Expression) (ast.Expression, error) {
 	for {
-		if p.peekType() == lexer.TokQuestion && p.peekN(1).Type == lexer.TokDot && p.peekN(2).Type == lexer.TokLBracket {
+		optional := false
+		hasDot := false
+		dotTok := lexer.Token{}
+		if p.peekType() == lexer.TokQuestion && p.peekN(1).Type == lexer.TokDot {
+			optional = true
+			hasDot = true
 			p.advance()
-			p.advance()
+			dotTok = p.advance()
+		} else if p.peekType() == lexer.TokDot {
+			hasDot = true
+			dotTok = p.advance()
+		}
+
+		if optional && p.peekType() == lexer.TokLParen {
+			return nil, p.errorf(p.peek(), "optional function calls are not supported")
+		}
+		if p.peekType() == lexer.TokLBracket && (optional || !hasDot) {
 			tok := p.advance()
 			pos := p.pos2ast(tok)
 			index, err := p.parseExpr()
@@ -1253,25 +1271,11 @@ func (p *Parser) parsePostfixFrom(expr ast.Expression) (ast.Expression, error) {
 			if _, err := p.expect(lexer.TokRBracket); err != nil {
 				return nil, err
 			}
-			expr = &ast.IndexExpr{Pos: pos, Expr: expr, Index: index}
+			expr = &ast.IndexExpr{Pos: pos, Expr: expr, Index: index, Optional: optional}
 			continue
 		}
-		if p.peekType() == lexer.TokLBracket {
-			tok := p.advance()
-			pos := p.pos2ast(tok)
-			index, err := p.parseExpr()
-			if err != nil {
-				return nil, err
-			}
-			if _, err := p.expect(lexer.TokRBracket); err != nil {
-				return nil, err
-			}
-			expr = &ast.IndexExpr{Pos: pos, Expr: expr, Index: index}
-			continue
-		}
-		if p.peekType() == lexer.TokDot {
-			tok := p.advance()
-			pos := p.pos2ast(tok)
+		if hasDot {
+			pos := p.pos2ast(dotTok)
 			nameTok, err := p.expectIdentifierName()
 			if err != nil {
 				return nil, err
@@ -1281,9 +1285,9 @@ func (p *Parser) parsePostfixFrom(expr ast.Expression) (ast.Expression, error) {
 				if err != nil {
 					return nil, err
 				}
-				expr = &ast.MethodCallExpr{Pos: pos, Receiver: expr, Method: nameTok.Literal, Args: args}
+				expr = &ast.MethodCallExpr{Pos: pos, Receiver: expr, Method: nameTok.Literal, Args: args, Optional: optional}
 			} else {
-				expr = &ast.PropertyExpr{Pos: pos, Receiver: expr, Property: nameTok.Literal}
+				expr = &ast.PropertyExpr{Pos: pos, Receiver: expr, Property: nameTok.Literal, Optional: optional}
 			}
 			continue
 		}
@@ -1767,57 +1771,7 @@ func (p *Parser) parsePostfix() (ast.Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	for {
-		if p.peekType() == lexer.TokQuestion && p.peekN(1).Type == lexer.TokDot && p.peekN(2).Type == lexer.TokLBracket {
-			p.advance()
-			p.advance()
-			tok := p.advance()
-			pos := p.pos2ast(tok)
-			index, err := p.parseExpr()
-			if err != nil {
-				return nil, err
-			}
-			if _, err := p.expect(lexer.TokRBracket); err != nil {
-				return nil, err
-			}
-			expr = &ast.IndexExpr{Pos: pos, Expr: expr, Index: index}
-			continue
-		}
-		if p.peekType() == lexer.TokLBracket {
-			tok := p.advance() // [
-			pos := p.pos2ast(tok)
-			index, err := p.parseExpr()
-			if err != nil {
-				return nil, err
-			}
-			if _, err := p.expect(lexer.TokRBracket); err != nil {
-				return nil, err
-			}
-			expr = &ast.IndexExpr{Pos: pos, Expr: expr, Index: index}
-			continue
-		}
-		if p.peekType() == lexer.TokDot {
-			tok := p.advance() // .
-			pos := p.pos2ast(tok)
-			nameTok, err := p.expectIdentifierName()
-			if err != nil {
-				return nil, err
-			}
-			if p.peekType() == lexer.TokLParen {
-				args, err := p.parseArgList()
-				if err != nil {
-					return nil, err
-				}
-				expr = &ast.MethodCallExpr{Pos: pos, Receiver: expr, Method: nameTok.Literal, Args: args}
-			} else {
-				expr = &ast.PropertyExpr{Pos: pos, Receiver: expr, Property: nameTok.Literal}
-			}
-			continue
-		}
-		break
-	}
-	return expr, nil
+	return p.parsePostfixLoop(expr)
 }
 
 func (p *Parser) parsePrimary() (ast.Expression, error) {
