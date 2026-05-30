@@ -9,7 +9,7 @@ description: >
   functions, if/while/for/switch, break/continue, try/catch, imports,
   list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, args.argv()/positional()/option()/flag(), string
   concatenation, process.env.NAME, process.exit(), env(), console.log(), value.toString(), Number.parseInt(), to_str(), String(), to_int(), Besht.conditions.* wrappers, or
-  built-in functions like file_exists, len, and range.
+  fetch(url).text(), built-in functions like file_exists, len, and range.
 ---
 
 Write and edit besht scripts. Besht is a TypeScript-flavored language that compiles to POSIX sh. Files use the `.bsh` extension.
@@ -21,7 +21,7 @@ besht script.bsh                    # print compiled sh to stdout
 besht init                          # write ./stdlib.d.bsh declarations
 besht init --force                  # overwrite ./stdlib.d.bsh declarations
 besht script.bsh -o out.sh          # write to file
-besht --check script.bsh            # type-check and validate imports only
+besht --check script.bsh            # validate imports, commands, and unsupported fetch APIs
 besht --check --strict script.bsh   # type-check with validation
 besht script.bsh | sh               # compile and run
 besht script.bsh --split -o build/  # compile each file to its own .sh
@@ -101,6 +101,20 @@ let dryRun = args.flag("dry-run", "d")
 ```
 
 Use `??` for argument defaults. `args.positional()` and `args.option()` are nullish when absent and preserve empty strings when present. `args.flag()` returns a boolean. `--` stops option parsing, so later `-`-prefixed values are positional.
+
+## Fetch
+
+`fetch()` is currently a narrow synchronous text-only GET API backed by `curl -sS -- <url>`.
+
+```ts
+let body: string = fetch(url).text()
+
+let response = fetch(url) // runs curl once
+let first: string = response.text()
+let second: string = response.text() // reuses the stored body
+```
+
+This slice supports only `fetch(url).text()` and assigned response `.text()`. It does not support `await`, options objects, POST/method overrides, headers, request bodies, `.json()`, `.status`, `.ok`, `.headers`, streaming, abort, or clone yet. `besht --check` rejects unsupported response properties and methods even without `--strict`.
 
 ## Print
 
@@ -641,7 +655,7 @@ import { legacy_log } from "./legacy.sh" assert { type: "shell" };
 legacy_log("from besht");
 ```
 
-Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Default shell imports are rejected. Imported shell functions are unchecked varargs and return `string` in value position. `--check` validates imports. By default shell imports must stay inside the compiler root; pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root.
+Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Default shell imports are rejected. Imported shell functions are unchecked varargs and return `string` in value position. `--check` validates imports and unsupported fetch response APIs. By default shell imports must stay inside the compiler root; pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root.
 
 ## Comments
 

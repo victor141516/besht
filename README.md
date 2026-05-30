@@ -29,7 +29,7 @@ besht script.bsh -o script.sh
 # Compile each .bsh file to its own .sh file (recommended for multi-file projects)
 besht script.bsh --split -o build/
 
-# Type-check and validate imports only
+# Validate imports, command usage, and unsupported fetch APIs
 besht --check script.bsh
 
 # Type-check and validate annotations
@@ -110,6 +110,7 @@ Files use the `.bsh` extension.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
 - Semicolons are optional (only required inside `for` headers).
 - `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
+- `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
 - Arrow callbacks support expression and block bodies for list `.map()` and `.reduce()`; `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` callbacks may also receive a zero-based index parameter.
 - Generated shell elides string runtime helpers unless one-argument string `.includes()`, `.startsWith()`, or `.endsWith()` actually needs them.
 
@@ -200,6 +201,20 @@ let dryRun = args.flag("dry-run", "d")
 - `args.option(longName, shortName?)` supports `--name=value`, `--name value`, and `-n value`; absent options are nullish.
 - `args.flag(longName, shortName?)` returns `true` when `--name` or `-n` is present.
 - `--` stops option and flag parsing; later values are treated as positional arguments.
+
+### Fetch
+
+The first `fetch()` slice is synchronous, curl-backed, and text-only. It performs a GET with `curl -sS -- <url>` and returns stdout through `.text()`.
+
+```ts
+let body: string = fetch("file:///tmp/data.txt").text()
+
+let response = fetch(url) // runs curl once here
+let first: string = response.text()
+let second: string = response.text() // reuses the stored body
+```
+
+This slice deliberately rejects or defers `await`, `fetch(url, options)`, POST/method options, headers, request bodies, redirects policy, streaming, abort/clone, response `.json()`, `.status`, `.ok`, and `.headers`. `--check` rejects those unsupported response properties and methods even when annotation type checking is not enabled.
 
 ### Nullish coalescing
 
@@ -837,7 +852,7 @@ import { legacy_log } from "./legacy.sh" assert { type: "shell" };
 legacy_log("from besht");
 ```
 
-`--check` validates imports using the same module resolver as compilation. Shell imports require a `.sh` path and `assert { type: "shell" }`. They are named-only; default shell imports are rejected. Besht does not parse the shell file or infer exports, so imported shell functions are unchecked varargs and return `string` when used in value position. By default, shell imports must stay inside the compiler root. Pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root. Bundled output sources the resolved `.sh` file with a guard. Split output copies in-root `.sh` dependencies into the output tree and sources them through `_BESHT_ROOT`; external opt-in shell imports are sourced from their original absolute path. Shell import guards use unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
+`--check` validates imports using the same module resolver as compilation and rejects unsupported fetch response APIs such as `.status` and `.json()` even without `--strict`. Shell imports require a `.sh` path and `assert { type: "shell" }`. They are named-only; default shell imports are rejected. Besht does not parse the shell file or infer exports, so imported shell functions are unchecked varargs and return `string` when used in value position. By default, shell imports must stay inside the compiler root. Pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root. Bundled output sources the resolved `.sh` file with a guard. Split output copies in-root `.sh` dependencies into the output tree and sources them through `_BESHT_ROOT`; external opt-in shell imports are sourced from their original absolute path. Shell import guards use unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
 
 ### Comments
 
@@ -921,7 +936,7 @@ besht init                          Write ./stdlib.d.bsh declarations
 besht init --force                  Overwrite ./stdlib.d.bsh declarations
 besht <file.bsh> -o <out.sh>        Compile to a single bundled file
 besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
-besht --check <file.bsh>            Type-check and validate imports only (no output)
+besht --check <file.bsh>            Validate imports, command usage, and unsupported fetch APIs (no output)
 besht --check --strict <file.bsh>   Type-check with validation
 besht <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-check
 besht <file.bsh> --opt-no-source-map            Omit source comments from compiled output

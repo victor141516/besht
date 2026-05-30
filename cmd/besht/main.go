@@ -18,7 +18,7 @@ Usage:
   besht <file.bsh>                    Compile and print to stdout
   besht <file.bsh> -o <out.sh>        Compile to single file
   besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
-  besht --check <file.bsh>            Type-check and validate imports only (no output)
+  besht --check <file.bsh>            Validate imports, command usage, and unsupported fetch APIs (no output)
   besht --strict <file.bsh>           Validate types during checking/compile
   besht --version                     Print version
 
@@ -29,7 +29,7 @@ Flags:
   --opt-no-source-map            Omit # besht:file:line:col source comments from compiled output
   --opt-resolve-ts-imports       Resolve extensionless imports to .ts when .bsh is absent
   --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
-  --check      Type-check and validate imports only; do not generate output
+  --check      Validate imports, command usage, and unsupported fetch APIs; do not generate output
   --strict     Enable compile-time type validation
   --version    Show version and exit
   -h, --help   Show this message
