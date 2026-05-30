@@ -429,6 +429,30 @@ func TestChecker_EnvBuiltinWithDefault(t *testing.T) {
 	mustCheck(t, `let port: string = env("PORT", "8080")`)
 }
 
+func TestChecker_FetchTextSlice(t *testing.T) {
+	mustCheck(t, `let url: string = "file:///tmp/data.txt"
+let body: string = fetch(url).text()
+let response = fetch(url)
+let body2: string = response.text()`)
+}
+
+func TestChecker_FetchRejectsDeferredSurface(t *testing.T) {
+	expectError(t, `let body = fetch("file:///tmp/data.txt", { method: "POST" }).text()`, "fetch() takes 1 URL argument")
+	expectError(t, `let body = fetch(42).text()`, "fetch() URL must be string")
+	expectError(t, `let response = fetch("file:///tmp/data.txt")
+let body = response.text("utf8")`, "FetchResponse.text() takes no arguments")
+	expectError(t, `let response = fetch("file:///tmp/data.txt")
+let data = response.json()`, `FetchResponse has no method "json"`)
+	expectError(t, `let response = fetch("file:///tmp/data.txt")
+let ok = response.ok`, `FetchResponse has no property "ok"`)
+	expectError(t, `let response = fetch("file:///tmp/data.txt")
+let status = response.status`, `FetchResponse has no property "status"`)
+	expectError(t, `let response = fetch("file:///tmp/data.txt")
+let headers = response.headers`, `FetchResponse has no property "headers"`)
+	expectError(t, `let response = fetch("file:///tmp/data.txt")
+let body = response.body`, `FetchResponse has no property "body"`)
+}
+
 func TestChecker_PrintBuiltin(t *testing.T) {
 	mustCheck(t, `let msg: string = "hello"
 console.log(msg)`)

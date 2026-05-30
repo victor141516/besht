@@ -1195,6 +1195,19 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCallExpr) (*ast.Type, error) {
 		}
 		return &ast.Type{Kind: ast.TypeString}, nil
 
+	case "fetch":
+		if len(e.Args) != 1 {
+			return nil, &CheckError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
+		}
+		argType, err := c.checkExpr(e.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		if argType.Kind != ast.TypeString {
+			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("fetch() URL must be string, got %s", argType)}
+		}
+		return &ast.Type{Kind: ast.TypeFetchResponse}, nil
+
 	case "console.log", "console.error":
 		for _, arg := range e.Args {
 			if _, err := c.checkExpr(arg); err != nil {
@@ -1378,8 +1391,25 @@ func (c *Checker) checkMethodCall(e *ast.MethodCallExpr) (*ast.Type, error) {
 		return c.checkPrimitiveToStringMethod(e, recvType)
 	case ast.TypeCommand:
 		return c.checkCommandMethod(e)
+	case ast.TypeFetchResponse:
+		return c.checkFetchResponseMethod(e)
 	}
 	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
+}
+
+func (c *Checker) checkFetchResponseMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
+	for _, arg := range e.Args {
+		if _, err := c.checkExpr(arg); err != nil {
+			return nil, err
+		}
+	}
+	if e.Method != "text" {
+		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)}
+	}
+	if len(e.Args) != 0 {
+		return nil, &CheckError{Pos: e.Pos, Message: "FetchResponse.text() takes no arguments"}
+	}
+	return &ast.Type{Kind: ast.TypeString}, nil
 }
 
 func (c *Checker) checkBeshtConditionsMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
@@ -2140,6 +2170,9 @@ func (c *Checker) checkProperty(e *ast.PropertyExpr) (*ast.Type, error) {
 	recvType, err := c.checkExpr(e.Receiver)
 	if err != nil {
 		return nil, err
+	}
+	if recvType.Kind == ast.TypeFetchResponse {
+		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", e.Property)}
 	}
 	switch e.Property {
 	case "length":
