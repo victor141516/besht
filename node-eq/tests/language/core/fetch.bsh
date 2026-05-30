@@ -1,0 +1,18 @@
+let payloadPath = env("PWD") + "/node-eq/tests/language/core/fetch_payload.txt"
+let url = "file://" + payloadPath
+
+let direct = fetch(url).text()
+console.log(`direct: ${direct}`)
+
+let response = fetch(url)
+let first = response.text()
+let second = response.text()
+console.log(`assigned first: ${first}`)
+console.log(`assigned second: ${second}`)
+
+function makeUrl(value: string): string {
+    return value
+}
+
+let fromFunction = fetch(makeUrl(url)).text()
+console.log(`function url: ${fromFunction}`)
