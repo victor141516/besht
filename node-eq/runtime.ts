@@ -149,6 +149,16 @@ function env(name: string, defaultValue?: string): string {
   return process.env[name] ?? defaultValue ?? ""
 }
 
+function fetch(url: string): { text(): string } {
+  const result = spawnSync("curl", ["-sS", "--", url], {
+    encoding: "utf8",
+    maxBuffer: 100 * 1024 * 1024,
+  })
+  if (result.stderr) process.stderr.write(result.stderr)
+  const body = (result.stdout ?? "").replace(/\n+$/, "")
+  return { text: () => body }
+}
+
 const argOptionNames = new Set<string>()
 const argFlagNames = new Set<string>()
 
@@ -307,6 +317,7 @@ export {
   $,
   args,
   env,
+  fetch,
   to_str,
   to_int,
   RuntimeString as String,

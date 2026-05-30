@@ -78,7 +78,7 @@ function materialize(file: string): string {
 
   const wrapper = `
 import {
-  $, args, env, to_str, to_int, String, Number, exit,
+  $, args, env, fetch, to_str, to_int, String, Number, exit,
   file_exists, is_dir, is_readable, is_writable, is_executable,
   is_empty, is_set,
   len, head, tail, append, contains, concat, range,
@@ -86,7 +86,7 @@ import {
 } from ${JSON.stringify(runtimePath)};
 
 const _runtime = {
-  $, args, env, to_str, to_int, String, Number, exit,
+  $, args, env, fetch, to_str, to_int, String, Number, exit,
   file_exists, is_dir, is_readable, is_writable, is_executable,
   is_empty, is_set,
   len, head, tail, append, contains, concat, range,
