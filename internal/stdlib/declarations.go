@@ -34,6 +34,10 @@ declare function range(start: number, end: number): number[]
 
 declare function env(name: string): string
 declare function env(name: string, defaultValue: string): string
+interface FetchResponse {
+    text(): string
+}
+declare function fetch(url: string): FetchResponse
 declare function to_str(value: string): string
 declare function to_int(value: string): number
 declare function String(value: string): string

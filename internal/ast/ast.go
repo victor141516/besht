@@ -31,6 +31,7 @@ const (
 	TypeSet
 	TypeCommand // result of $() — lazy command pipeline
 	TypeObject
+	TypeFetchResponse
 )
 
 // Type represents a besht type annotation.
@@ -60,6 +61,8 @@ func (t *Type) String() string {
 		return "command"
 	case TypeObject:
 		return "object"
+	case TypeFetchResponse:
+		return "FetchResponse"
 	}
 	return "unknown"
 }
@@ -715,7 +718,7 @@ func IsBuiltin(name string) bool {
 	switch name {
 	case "file_exists", "is_dir", "is_readable", "is_writable", "is_executable",
 		"is_empty", "is_set", "len", "head", "tail", "append", "contains",
-		"range", "exit", "env", "to_str", "to_int", "String", "concat",
+		"range", "exit", "env", "fetch", "to_str", "to_int", "String", "concat",
 		"Array.isArray",
 		"console.log", "console.error":
 		return true

@@ -779,6 +779,22 @@ func TestParser_BuiltinCalls(t *testing.T) {
 	}
 }
 
+func TestParser_FetchParsesAsBuiltinCall(t *testing.T) {
+	prog := mustParse(t, `let body = fetch(url).text()`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	method, ok := decl.Value.(*ast.MethodCallExpr)
+	if !ok || method.Method != "text" {
+		t.Fatalf("value: expected .text() method call, got %T %#v", decl.Value, decl.Value)
+	}
+	builtin, ok := method.Receiver.(*ast.BuiltinCallExpr)
+	if !ok {
+		t.Fatalf("receiver: expected *ast.BuiltinCallExpr, got %T", method.Receiver)
+	}
+	if builtin.Name != "fetch" || len(builtin.Args) != 1 {
+		t.Fatalf("fetch builtin shape: got %#v", builtin)
+	}
+}
+
 func TestParser_BeshtConditionsCallShape(t *testing.T) {
 	prog := mustParse(t, `let ok: boolean = Besht.conditions.fileExists(path)`)
 	decl := prog.Statements[0].(*ast.LetDecl)
