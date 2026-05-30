@@ -690,6 +690,54 @@ func TestCodegen_EnvBuiltinWithDefault(t *testing.T) {
 	assertContains(t, out, `${PORT:-8080}`)
 }
 
+func TestCodegen_FetchDirectText(t *testing.T) {
+	out := compile(t, `let url: string = "file:///tmp/data.txt"
+let body: string = fetch(url).text()`)
+	assertContains(t, out, `body=$(curl -sS -- "$url")`)
+	assertNotContains(t, out, `local `)
+	assertNotContains(t, out, `[[`)
+}
+
+func TestCodegen_FetchAssignedResponseRunsOnceAndReusesBody(t *testing.T) {
+	out := compile(t, `let url: string = "file:///tmp/data.txt"
+let response = fetch(url)
+let first: string = response.text()
+let second: string = response.text()`)
+	assertContains(t, out, `response='response'`)
+	assertContains(t, out, `_obj_response_body=$(curl -sS -- "$url")`)
+	assertContains(t, out, `first="$_obj_response_body"`)
+	assertContains(t, out, `second="$_obj_response_body"`)
+	if strings.Count(out, `curl -sS --`) != 1 {
+		t.Fatalf("assigned fetch should run curl once, output:\n%s", out)
+	}
+}
+
+func TestCodegen_FetchResponseAliasCopiesBody(t *testing.T) {
+	out := compile(t, `let url: string = "file:///tmp/data.txt"
+let response = fetch(url)
+let alias = response
+let fromAlias: string = alias.text()`)
+	assertContains(t, out, `_obj_alias_body="$_obj_response_body"`)
+	assertContains(t, out, `fromAlias="$_obj_alias_body"`)
+}
+
+func TestCodegen_FetchResponseReassignmentRefreshesBody(t *testing.T) {
+	out := compile(t, `let one: string = "file:///tmp/one.txt"
+let two: string = "file:///tmp/two.txt"
+let response = fetch(one)
+response = fetch(two)
+let body: string = response.text()`)
+	assertContains(t, out, `_obj_response_body=$(curl -sS -- "$one")`)
+	assertContains(t, out, `_obj_response_body=$(curl -sS -- "$two")`)
+	assertContains(t, out, `body="$_obj_response_body"`)
+}
+
+func TestCodegen_FetchQuotesCommandSubstitutionURL(t *testing.T) {
+	out := compile(t, `function makeUrl(): string { return "file:///tmp/data file.txt" }
+let body: string = fetch(makeUrl()).text()`)
+	assertContains(t, out, `curl -sS -- "$(makeUrl)"`)
+}
+
 func TestCodegen_PrintBuiltin(t *testing.T) {
 	out := compile(t, `let msg: string = "hello"
 console.log(msg)`)

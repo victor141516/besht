@@ -132,6 +132,142 @@ func TestIntegration_ProcessExitRuntime(t *testing.T) {
 	}
 }
 
+func TestIntegration_FetchTextFileURLRuntime(t *testing.T) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl not available")
+	}
+	dir := t.TempDir()
+	dataPath := writeFile(t, dir, "data.txt", "hello fetch")
+	dataPath2 := writeFile(t, dir, "data2.txt", "second fetch")
+	url := "file://" + filepath.ToSlash(dataPath)
+	url2 := "file://" + filepath.ToSlash(dataPath2)
+	out := runCompiledShell(t, `let url: string = "`+url+`"
+let url2: string = "`+url2+`"
+console.log(fetch(url).text())
+let response = fetch(url)
+console.log(response.text())
+console.log(response.text())
+let alias = response
+console.log(alias.text())
+response = fetch(url2)
+console.log(response.text())
+console.log(alias.text())`)
+	if out != "hello fetch\nhello fetch\nhello fetch\nhello fetch\nsecond fetch\nhello fetch\n" {
+		t.Fatalf("fetch output: got %q", out)
+	}
+}
+
+func TestIntegration_FetchImportedResponseText(t *testing.T) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl not available")
+	}
+	dir := t.TempDir()
+	dataPath := writeFile(t, dir, "data.txt", "imported fetch")
+	url := "file://" + filepath.ToSlash(dataPath)
+	writeFile(t, dir, "dep.bsh", `export const response = fetch("`+url+`")`)
+	main := writeFile(t, dir, "main.bsh", `import { response } from "./dep"
+console.log(response.text())`)
+	out := compileFile(t, main)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	output, err := exec.Command("sh", shPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
+	}
+	if string(output) != "imported fetch\n" {
+		t.Fatalf("imported response output: got %q", output)
+	}
+}
+
+func TestIntegration_CheckFileRejectsUnsupportedFetchResponseSurfaceNonStrict(t *testing.T) {
+	dir := t.TempDir()
+	valid := writeFile(t, dir, "valid.bsh", `let response = fetch("file:///tmp/data.txt")
+let body = response.text()
+let name: string = 42
+function permissive(): boolean { return "not really" }`)
+	if err := codegen.CheckFile(valid, codegen.Options{}); err != nil {
+		t.Fatalf("non-strict CheckFile should allow text() and annotation mismatch, got %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		main    string
+		wantErr string
+	}{
+		{
+			name:    "options",
+			main:    `let body = fetch("file:///tmp/data.txt", { method: "POST" }).text()`,
+			wantErr: "fetch() takes 1 URL argument",
+		},
+		{
+			name: "status property",
+			main: `let response = fetch("file:///tmp/data.txt")
+let status = response.status`,
+			wantErr: `FetchResponse has no property "status"`,
+		},
+		{
+			name: "json method",
+			main: `let response = fetch("file:///tmp/data.txt")
+let data = response.json()`,
+			wantErr: `FetchResponse has no method "json"`,
+		},
+		{
+			name: "text arguments",
+			main: `let response = fetch("file:///tmp/data.txt")
+let data = response.text("utf8")`,
+			wantErr: "FetchResponse.text() takes no arguments",
+		},
+		{
+			name:    "template interpolation",
+			main:    "let data = `${fetch(\"file:///tmp/data.txt\").json()}`",
+			wantErr: `FetchResponse has no method "json"`,
+		},
+		{
+			name: "arrow callback",
+			main: `let urls: string[] = ["file:///tmp/data.txt"]
+let data = urls.map(url => fetch(url).json())`,
+			wantErr: `FetchResponse has no method "json"`,
+		},
+		{
+			name: "class constructor",
+			main: `class Loader {
+    constructor() {
+        let response = fetch("file:///tmp/data.txt")
+        response.json()
+    }
+}`,
+			wantErr: `FetchResponse has no method "json"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeFile(t, dir, tt.name+".bsh", tt.main)
+			if err := codegen.CheckFile(path, codegen.Options{}); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("non-strict CheckFile error: got %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	writeFile(t, dir, "dep.bsh", `export function load() {
+    let response = fetch("file:///tmp/data.txt")
+    response.status
+}`)
+	main := writeFile(t, dir, "imported.bsh", `import { load } from "./dep"
+load()`)
+	if err := codegen.CheckFile(main, codegen.Options{}); err == nil || !strings.Contains(err.Error(), `FetchResponse has no property "status"`) {
+		t.Fatalf("non-strict CheckFile imported module error: got %v", err)
+	}
+
+	writeFile(t, dir, "exported_response.bsh", `export const response = fetch("file:///tmp/data.txt")`)
+	importedResponse := writeFile(t, dir, "imported_response.bsh", `import { response } from "./exported_response"
+let status = response.status`)
+	if err := codegen.CheckFile(importedResponse, codegen.Options{}); err == nil || !strings.Contains(err.Error(), `FetchResponse has no property "status"`) {
+		t.Fatalf("non-strict CheckFile imported response error: got %v", err)
+	}
+}
+
 func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderStrictCheck(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "stdlib.d.bsh", stdlib.Declarations)

@@ -806,6 +806,10 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		return nil
 	}
 
+	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
+		return err
+	}
+
 	// Lazy command chain (no .run() inline): just register the identity, no code.
 	if g.isLazyCommandBinding(s.Value) && g.cmdAnalysis != nil {
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeCommand}
@@ -1218,11 +1222,15 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 }
 
 func (g *Generator) genAssignment(s *ast.Assignment) error {
+	varName := g.resolveVarName(s.Name)
+	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
+		return err
+	}
+
 	val, err := g.genExprRHS(s.Value, nil)
 	if err != nil {
 		return err
 	}
-	varName := g.resolveVarName(s.Name)
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
@@ -1238,6 +1246,37 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	}
 	g.line(fmt.Sprintf("%s=%s", varName, val))
 	return nil
+}
+
+func (g *Generator) genFetchResponseBinding(varName string, expr ast.Expression) (bool, error) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.genFetchResponseBinding(varName, e.Expr)
+	case *ast.BuiltinCallExpr:
+		if e.Name != "fetch" {
+			return false, nil
+		}
+		body, err := g.genFetchCall(e)
+		if err != nil {
+			return true, err
+		}
+		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
+		g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, "body"), body))
+		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeFetchResponse}
+		g.objPropTypeMap[varName+".body"] = typeString
+		return true, nil
+	case *ast.IdentExpr:
+		sourceName := g.resolveVarName(e.Name)
+		if typ := g.varTypeMap[sourceName]; typ == nil || typ.Kind != ast.TypeFetchResponse {
+			return false, nil
+		}
+		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
+		g.line(fmt.Sprintf("%s=\"$%s\"", objectPropVar(varName, "body"), objectPropVar(sourceName, "body")))
+		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeFetchResponse}
+		g.objPropTypeMap[varName+".body"] = typeString
+		return true, nil
+	}
+	return false, nil
 }
 
 func (g *Generator) resolveVarName(name string) string {
@@ -2998,6 +3037,8 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		return typeNumber
 	case *ast.BuiltinCallExpr:
 		switch e.Name {
+		case "fetch":
+			return &ast.Type{Kind: ast.TypeFetchResponse}
 		case "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray":
 			return &ast.Type{Kind: ast.TypeBoolean}
 		case "Number.parseInt", "Number.parseFloat", "to_int":
@@ -3126,6 +3167,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			}
 		}
 		recvType := g.inferReceiverType(e.Receiver)
+		if recvType != nil && recvType.Kind == ast.TypeFetchResponse && e.Method == "text" {
+			return typeString
+		}
 		if recvType != nil && recvType.Kind == ast.TypeList {
 			switch e.Method {
 			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "filter":
@@ -3286,6 +3330,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if className, ok := g.receiverClassName(e.Receiver); ok {
 		return g.genClassMethodCall(className, e)
 	}
+	if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeFetchResponse {
+		return g.genFetchResponseMethod(e)
+	}
 	// Handle terminal command methods that read captured output
 	if e.Method == "readStdout" || e.Method == "readStdoutLines" || e.Method == "readStderr" || e.Method == "exitCode" {
 		id := -1
@@ -3384,6 +3431,34 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	}
 	// Default: try string methods (most common when type is unknown)
 	return g.genStringMethod(recv, e)
+}
+
+func (g *Generator) genFetchResponseMethod(e *ast.MethodCallExpr) (string, error) {
+	if e.Method != "text" {
+		return "", fmt.Errorf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)
+	}
+	if len(e.Args) != 0 {
+		return "", fmt.Errorf("FetchResponse.text() takes no arguments")
+	}
+	if fetchCall, ok := e.Receiver.(*ast.BuiltinCallExpr); ok && fetchCall.Name == "fetch" {
+		return g.genFetchCall(fetchCall)
+	}
+	if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
+		varName := g.resolveVarName(ident.Name)
+		return fmt.Sprintf("\"$%s\"", objectPropVar(varName, "body")), nil
+	}
+	return "", fmt.Errorf("FetchResponse.text() receiver must be fetch(url) or a fetch response variable")
+}
+
+func (g *Generator) genFetchCall(e *ast.BuiltinCallExpr) (string, error) {
+	if len(e.Args) != 1 {
+		return "", fmt.Errorf("fetch() takes 1 URL argument; options are not supported yet")
+	}
+	url, err := g.genExprValue(e.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return commandSubstitution("curl -sS -- " + ensureArgSafe(cmdArgQuote(url))), nil
 }
 
 func shellWordList(values map[string]bool) string {

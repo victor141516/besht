@@ -85,7 +85,13 @@ func CheckFile(entryPath string, opts Options) error {
 	if err := c.load(absEntry); err != nil {
 		return err
 	}
+	_, _, importedVarTypes := c.buildImportedMaps()
 	for _, mod := range c.modules {
+		if !opts.Strict {
+			if err := checker.ValidateFetchSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
+				return err
+			}
+		}
 		analysis := AnalyzeProgram(mod.Prog.Statements)
 		for _, w := range analysis.Warnings {
 			fmt.Fprintf(os.Stderr, "besht: warning: %s: %s\n", w.Pos, w.Message)
@@ -727,6 +733,12 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 		return &ast.Type{Kind: ast.TypeBoolean}
 	case *ast.ObjectLit:
 		return &ast.Type{Kind: ast.TypeObject}
+	case *ast.BuiltinCallExpr:
+		if e.Name == "fetch" {
+			return &ast.Type{Kind: ast.TypeFetchResponse}
+		}
+	case *ast.AsExpr:
+		return inferExportValueType(e.Expr)
 	}
 	if t := expr.GetType(); t != nil {
 		return t
