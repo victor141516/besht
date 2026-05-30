@@ -94,7 +94,16 @@ Out of scope for besht. Decorators have no shell equivalent and would require a 
 
 ## `fetch()` HTTP client builtin
 
-Support Node.js-style `fetch()` for making HTTP requests from besht scripts.
+**Status: first synchronous text-only slice implemented.** Supported today:
+
+```ts
+let body: string = fetch("https://example.com/data.txt").text()
+
+let response = fetch(url) // runs curl once
+let again: string = response.text() // reuses stored body
+```
+
+This lowers to `curl -sS -- <url>` and returns stdout text. Remaining future work: broaden toward Node.js-style `fetch()` for richer HTTP requests and responses.
 
 ```ts
 let response = await fetch("https://api.example.com/data")
@@ -109,16 +118,16 @@ console.log(to_str(res.status))
 let json = res.json()
 ```
 
-**Compilation strategy:** `fetch()` would compile to `curl` commands under the hood. Since besht has no async runtime, `await fetch()` would be synchronous (curl already is in shell). The `Response` object would compile to a set of shell variables or an object literal holding `status`, `body`, etc.
+**Compilation strategy:** `fetch()` compiles to `curl` commands under the hood. Since besht has no async runtime, any future `await fetch()` design would still be synchronous (curl already is in shell). The current response object stores text in an internal body slot; future response fields could compile to a set of shell variables or an object literal holding `status`, `body`, etc.
 
 Implementation considerations:
-- `fetch(url)` → `curl -sf "$url"` for simple GETs
-- `fetch(url, { method: "POST", body: "..." })` → `curl -sf -X POST -d "$body" "$url"`
+- `fetch(url).text()` → `curl -sS -- "$url"` for simple text GETs
+- Future `fetch(url, { method: "POST", body: "..." })` design should preserve `--` URL delimiting and safe argument quoting.
 - `response.text()` → captured stdout from curl
 - `response.status` → captured exit code or `-w "%{http_code}"`
 - `response.json()` → parse with a simple awk/sed extractor (full JSON parsing in POSIX sh is hard)
 - Headers support via `-H` flags
-- `await` keyword is syntactic sugar — besht is synchronous, so `await fetch()` is just `fetch()`
+- `await` remains deferred; if added later it should be syntactic sugar only because besht execution is synchronous.
 - Need to handle: URL quoting, special characters in body, redirect following (`-L`), timeout (`--max-time`)
 - Consider also supporting `response.headers` and `response.ok`
 

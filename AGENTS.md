@@ -130,7 +130,7 @@ go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
 | `init`                        | Write `./stdlib.d.bsh` declarations in the current directory          |
 | `init --force`                | Overwrite a different existing `./stdlib.d.bsh`                       |
 | `--split`                     | Compile each `.bsh` to its own `.sh`; imports become `. source` calls |
-| `--check`                     | Type-check and validate imports only, no output                       |
+| `--check`                     | Validate imports, command usage, and unsupported fetch APIs, no output |
 | `--strict`                    | Enable compile-time type validation                                   |
 | `--opt-no-add-binaries-check` | Omit the runtime POSIX utility self-check block                       |
 | `--opt-no-source-map`          | Omit `# besht:file:line:col` source comments from compiled output        |
@@ -429,6 +429,12 @@ let argv: string[] = args.argv()
 let input: string = args.positional(1) ?? "-"
 let branchArg: string = args.option("branch", "b") ?? "main"
 let dryRun: boolean = args.flag("dry-run", "d")
+
+// Fetch text-only GETs. Synchronous and curl-backed (`curl -sS -- <url>`).
+let body: string = fetch(url).text()
+let response = fetch(url) // runs curl once at assignment time
+let bodyAgain: string = response.text() // reuses stored response text
+// Deferred: await, options/POST/headers/body, json(), status, ok, headers.
 
 // Type conversion
 let s: string = count.toString()
@@ -960,6 +966,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 **`args.*` helpers parse script arguments in generated POSIX sh.** `args.argv()` returns positional args only, `args.positional(n)` returns a 1-based positional value or nullish, `args.option(long, short?)` supports `--long=value`, `--long value`, and optional `-s value`, and `args.flag(long, short?)` returns boolean `1`/`0`. Keep defaults outside helpers via `??`.
 
 **`--` stops args option parsing.** After `--`, values that look like options or flags are positional. For example, `script --branch=dev -- -d file` has `args.flag("dry-run", "d") == false` and positional args `-d`, `file`.
+
+**`fetch()` is currently a narrow synchronous text-only builtin.** It returns internal `TypeFetchResponse`, supports only `fetch(url).text()` and `let response = fetch(url); response.text()`, and lowers to `curl -sS -- <url>`. Assigned responses run curl once and store stdout in `_obj_<response>_body`; aliases and reassignments copy or refresh that body slot. `.body` is internal and not a user-facing property. `codegen.CheckFile` enables a narrow non-strict fetch-surface validation pass so `--check` rejects unsupported response properties/methods like `.status` and `.json()` without enabling annotation type mismatch errors. Do not add `await`, options, POST, headers, bodies, `.json()`, `.status`, `.ok`, or `.headers` without a separate design.
 
 **Equality conditions bind operands before comparing.** `genBinaryCondition()` must assign both sides to temporary variables and compare `[ "$_bst_left" = "$_bst_right" ]` / `!=`. Direct `[ $(fn) = "multi\nline" ]` breaks POSIX `[ ]` argument parsing when strings contain spaces or newlines.
 
