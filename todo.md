@@ -4,31 +4,39 @@ Items here are not scheduled. They were identified during development and saved 
 
 ---
 
-## Source maps
+## Standard-library namespace and JS-style API surface
 
-Future enhancement: add richer source mapping for debugging beyond the current inline `# besht:file:line:col` source comments.
-
----
-
-## Standard-library namespace and TypeScript-compatible builtins
-
-Move Besht-specific built-in functions toward a fake globally available standard-library object named `Besht`, grouped by functionality, while preferring TypeScript/JavaScript-standard APIs where they already exist.
+Reshape Besht's built-in helper APIs into a more TypeScript/JavaScript-like standard-library surface while keeping generated POSIX sh small and optimal.
 
 Requirements to preserve for later design:
 
 - Group Besht-only helpers under `Besht.<group>.*` with camelCase names. For example, condition helpers such as `file_exists(p)` should become something like `Besht.conditions.fileExists(p)`.
-- Prefer native list syntax and methods over new global list functions. Old global helpers remain supported for compatibility for now.
+- Prefer TypeScript/JavaScript-standard APIs where they already exist, such as `.toString()`, `Number.parseInt()`, `process.env`, and `process.exit()`.
+- Prefer native array/list syntax and methods over standalone list helper functions. Old global helpers remain supported for compatibility for now.
 - Keep generated POSIX sh as small and optimal as possible: these standard-looking APIs should compile to the same minimal inline tests, index reads, and list operations the compiler can already produce, not to a bulky runtime library.
 - Replace `to_str(value)` with TypeScript-style `value.toString()` and replace `to_int(value)` with `Number.parseInt(value)`.
-- Remaining: broader JS stdlib migration, other Besht namespace groups, eventual removal of old `env()` / `exit()` / condition-helper global names, eventual removal of old global list helpers, and the larger move away from `list<T>` terminology. The old names remain supported for now.
+- Replace `env()` and `exit()` with TypeScript/Node-style `process.env` access and `process.exit(code)`.
 
-Potential grouping sketch:
+Remaining future work:
 
-- Standard TypeScript/JavaScript namespaces and methods for conversions and process access: `.toString()`, `Number.parseInt()`, `process.env`, and `process.exit()`.
+- Broader JS stdlib migration.
+- Other Besht namespace groups beyond `Besht.conditions`.
+- Eventual removal, warning, or deprecation strategy for old `env()` / `exit()` / condition-helper global names.
+- Eventual removal, warning, or deprecation strategy for old global list helpers.
+- The larger move away from `list<T>` terminology toward `Array<T>` / `T[]` as the preferred user-facing type.
+
+Open design questions:
+
+- Whether old builtin names remain as migration aliases, warnings, or are removed in one breaking change. For now they remain compatibility aliases; eventual removal is future work.
+- Whether `Besht.conditions` is the canonical namespace name, and how to group other non-JS-standard helpers. Other non-JS-standard helpers should also be grouped; analyze the list of helpers and decide the best names for other groups.
+- Whether `process.env.NAME` should support default values, and if so what syntax replaces `env("NAME", "default")`. Current direction: use the TypeScript-like `process.env.NAME ?? "default"`, with compiler lowering that preserves explicitly empty environment values.
+- Whether this is purely API syntax sugar over existing runtime representations, or whether docs should also move away from `list<T>` terminology.
 
 Implementation notes:
 
-- Parser/checker/codegen will need to recognize `Besht.*` and `process.*` as standard namespaces so module qualification does not rewrite them.
+- Parser/checker/codegen need to recognize `Besht.*`, `process.*`, and future standard namespaces such as `Object`, `Array`, `Boolean`, and `JSON` so module qualification does not rewrite them.
+- Static namespaces should use handling similar to the existing `Number.*` special case.
+- Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, and `reduce`; `forEach` remains future work.
 - Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, and node-eq fixtures in sync.
 
 ---
@@ -39,62 +47,11 @@ Implementation notes:
 
 `Math.sqrt(2) * Math.sqrt(2)` produces `1.99999` in awk (limited precision) vs `2.0000000000000004` in JavaScript. This is a runtime precision difference, not a semantic error. The comparison tests accept this divergence.
 
-
----
-
-## TypeScript class follow-ups
-
-**Status: phases 1 and 2 implemented on `feat/class-support`.** Basic classes now support constructors, instance properties, instance methods, `new`, `this`, static properties, static methods, and getters/setters. Remaining class-related work:
-
-### Inheritance (`extends`)
-
-```ts
-class Animal {
-  name: string
-  constructor(name: string) { this.name = name }
-  speak(): string { return this.name + " makes a sound" }
-}
-
-class Dog extends Animal {
-  breed: string
-  constructor(name: string, breed: string) {
-    super(name)
-    this.breed = breed
-  }
-  speak(): string { return this.name + " barks" }
-}
-```
-
-Shell has no inheritance. Possible strategies include flattening parent fields into child constructors or introducing a vtable-like dispatch layer for overridden methods. This is the hardest class phase.
-
-### Abstract classes and interfaces
-
-```ts
-abstract class Shape {
-  abstract area(): number
-  describe(): string { return "Area: " + to_str(this.area()) }
-}
-```
-
-Abstract declarations would be ignored at runtime, with concrete methods compiling like normal class methods.
-
-### Decorators
-
-```ts
-@log
-class MyService {
-  @memoize
-  expensive(): string { ... }
-}
-```
-
-Out of scope for besht. Decorators have no shell equivalent and would require a compile-time metaprogramming system.
-
 ---
 
 ## `fetch()` HTTP client builtin
 
-**Status: first synchronous text-only slice implemented.** Supported today:
+**Status: first synchronous text-only slice implemented and intentionally kept as-is until Besht has promises.** Supported today:
 
 ```ts
 let body: string = fetch("https://example.com/data.txt").text()
@@ -103,7 +60,9 @@ let response = fetch(url) // runs curl once
 let again: string = response.text() // reuses stored body
 ```
 
-This lowers to `curl -sS -- <url>` and returns stdout text. Remaining future work: broaden toward Node.js-style `fetch()` for richer HTTP requests and responses.
+This lowers to `curl -sS -- <url>` and returns stdout text. Keep this API frozen at the current text-only surface until a promise/async design exists in Besht. Do not incrementally add Node-style options, richer response fields, `.json()`, or `await fetch()` before promises are designed.
+
+When promises are implemented, revisit a richer Node.js-style `fetch()` design:
 
 ```ts
 let response = await fetch("https://api.example.com/data")
@@ -118,18 +77,13 @@ console.log(to_str(res.status))
 let json = res.json()
 ```
 
-**Compilation strategy:** `fetch()` compiles to `curl` commands under the hood. Since besht has no async runtime, any future `await fetch()` design would still be synchronous (curl already is in shell). The current response object stores text in an internal body slot; future response fields could compile to a set of shell variables or an object literal holding `status`, `body`, etc.
+Post-promises implementation considerations:
 
-Implementation considerations:
-- `fetch(url).text()` → `curl -sS -- "$url"` for simple text GETs
 - Future `fetch(url, { method: "POST", body: "..." })` design should preserve `--` URL delimiting and safe argument quoting.
-- `response.text()` → captured stdout from curl
-- `response.status` → captured exit code or `-w "%{http_code}"`
-- `response.json()` → parse with a simple awk/sed extractor (full JSON parsing in POSIX sh is hard)
-- Headers support via `-H` flags
-- `await` remains deferred; if added later it should be syntactic sugar only because besht execution is synchronous.
-- Need to handle: URL quoting, special characters in body, redirect following (`-L`), timeout (`--max-time`)
-- Consider also supporting `response.headers` and `response.ok`
+- `response.status` could use captured exit code or `-w "%{http_code}"`.
+- `response.json()` would need either a limited extractor or a deliberate dependency such as `jq`; full JSON parsing in POSIX sh is hard.
+- Headers support via `-H` flags.
+- Need to handle URL quoting, special characters in body, redirect following (`-L`), timeout (`--max-time`), `response.headers`, and `response.ok`.
 
 ---
 
@@ -169,23 +123,3 @@ Design questions:
 - Whether callbacks can capture outer variables, and if so how mutations should behave.
 - How callback-returning APIs interact with newline-delimited list storage.
 - Whether callback support should be limited to compiler-known list methods before becoming a general function-value feature.
-
----
-
-## JS-style standard library API surface
-
-Reshape Besht's built-in helper APIs into a more TypeScript/JavaScript-like standard library surface while keeping generated POSIX sh as small and optimal as possible.
-
-Proposed direction:
-
-- Expose grouped standard-library helpers through global objects instead of top-level snake_case builtins. For Besht-specific helpers, use a global `Besht` object with functionality-based groups and camelCase names, for example `Besht.conditions.fileExists(path)` instead of `file_exists(path)`.
-- Prefer existing array/list syntax and methods over standalone list helper functions. The compiler should keep lowering these forms to small shell output. Old global list helpers remain supported for compatibility for now.
-- Replace `to_str(value)` with TypeScript-style `value.toString()` and replace `to_int(value)` with `Number.parseInt(value)`.
-- Replace `env()` and `exit()` with TypeScript/Node-style `process.env` access and `process.exit(code)`.
-
-Open design questions:
-
-- Whether old builtin names remain as migration aliases, warnings, or are removed in one breaking change. -> For now they remain compatibility aliases; eventual removal is future work.
-- Whether `Besht.conditions` is the canonical namespace name, and how to group other non-JS-standard helpers. -> other non-JS-standard helpers should also be grouped. Analyse the list of helpers and decide the best names for other groups.
-- Whether `process.env.NAME` should support default values, and if so what syntax replaces `env("NAME", "default")`. -> Default values will use the more typescript-like `process.env.NAME ?? "default"`. The compiler should be smart and use the proper shell syntax when the default value is known at compile time.
-- Whether this is purely API syntax sugar over existing runtime representations, or if docs should also move from `list<T>` terminology toward `Array<T>`/`T[]` as the preferred user-facing type. -> Native list helper replacements are available and documented; the larger `list<T>` terminology removal remains future work.
