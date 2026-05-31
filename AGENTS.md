@@ -174,7 +174,7 @@ internal/
 └── codegen/
     ├── codegen.go       # Generator: AST → POSIX sh string
     │                    # genCmdPipeline/genCmdChain build shell pipelines
-    │                    # shellQuote() single-quotes all command args safely
+    │                    # cmdArgWordForExpr() emits safe command words/quotes safely
     └── modules.go       # Multi-file compilation: Compiler, load(), emit(), emitSplit()
                          # Import resolution, module name qualification, dep ordering
                          # rewriteFnCalls() AST pass qualifies imported fn names
@@ -223,7 +223,7 @@ $("curl", "-sf", url).pipe($("jq", ".name"));
 $("make", "build").stderr("null");
 ```
 
-The compiler single-quotes every literal argument in the output. Single-quote escaping handles embedded `'` characters automatically (`'it'"'"'s alive'`). Variable references are passed unquoted as `$var`. This prevents shell injection and gives the compiler full control over quoting strategy.
+The compiler emits shell-safe literal command words bare when possible (`git status --short`) and single-quotes anything that needs protection (`'*.go'`, `'hello world'`, raw strings, shell reserved command names, embedded quotes). Single-quote escaping handles embedded `'` characters automatically (`'it'"'"'s alive'`). Variable references are passed as `"$var"`. This prevents shell injection and gives the compiler full control over quoting strategy.
 
 The `shell { }` syntax has been **removed**. There is no escape hatch to raw shell.
 
@@ -334,7 +334,7 @@ Prefer native list APIs for new user-facing examples and compiler work: `list.le
 - No `{1..10}` brace expansion
 - Arithmetic: `$(( expr ))` only
 - Test: `[ ]` only (single bracket)
-- All literal command args single-quoted in output
+- Literal command args are either conservative shell-safe bare words or single-quoted
 
 ## Test Layout
 
@@ -900,7 +900,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`genArgs()` applies `ensureArgSafe()` to all generated args.** Any `$(...)` expression is automatically wrapped in `"$(...)"` when passed as an argument to a command, `console.log`, or a function call. This prevents word-splitting of multi-word command output.
 
-**`shellQuote()` single-quotes literal args only.** Values starting with `$` are passed raw as variable references. Complex expressions that happen to start with `$` skip quoting — be aware.
+**Command literal words prefer natural bare output only when safe.** `genCmdArgs()` uses `cmdArgWordForExpr()` so ordinary string literals such as `"git"` and `"--short"` can emit as `git --short`, while raw strings, globs, spaces, embedded quotes, variables, command substitutions, shell reserved command names, and command-position assignments remain quoted or protected. Do not route general string/assignment/list emission through this command-word path.
 
 **`escapeForDoubleQuote()` handles shell-active characters in string literals.** When emitting a double-quoted sh string, backtick `` ` ``, `$(`, and bare `$WORD`/`$1` (not inside `${...}`) must be escaped as `` \` ``, `\$(`, and `\$WORD`. The `${besht_var}` interpolation form is intentional and must be left intact. `\$` (already escaped by the lexer for literal dollars) must also be left as-is. Any new string emission path must call `escapeForDoubleQuote()` before wrapping in `"..."`.
 

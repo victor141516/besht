@@ -6114,7 +6114,7 @@ func (g *Generator) genCmdArgs(args []ast.Expression) (string, error) {
 					warnIfFlagLikePattern(arg, val)
 				}
 			}
-			b.WriteString(fmt.Sprintf("set -- \"$@\" %s\n", cmdArgQuote(val)))
+			b.WriteString(fmt.Sprintf("set -- \"$@\" %s\n", cmdArgWordForExpr(arg, val, i == 0)))
 		}
 		b.WriteString("\"$@\")")
 		return b.String(), nil
@@ -6131,7 +6131,7 @@ func (g *Generator) genCmdArgs(args []ast.Expression) (string, error) {
 				warnIfFlagLikePattern(arg, val)
 			}
 		}
-		parts = append(parts, cmdArgQuote(val))
+		parts = append(parts, cmdArgWordForExpr(arg, val, i == 0))
 	}
 	return strings.Join(parts, " "), nil
 }
@@ -6190,11 +6190,24 @@ func hasShellExpansion(s string) bool {
 }
 
 func cmdArgQuote(val string) string {
+	return cmdArgWord(val, false, false)
+}
+
+func cmdArgWordForExpr(expr ast.Expression, val string, commandPosition bool) string {
+	_, ordinaryString := expr.(*ast.StringLit)
+	return cmdArgWord(val, commandPosition, ordinaryString)
+}
+
+func cmdArgWord(val string, commandPosition bool, unquoteSingleQuoted bool) string {
 	if strings.HasPrefix(val, "$(") {
 		return val
 	}
 	isSingleQuoted := strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'") && len(val) >= 2
 	if isSingleQuoted {
+		inner := val[1 : len(val)-1]
+		if unquoteSingleQuoted && !strings.Contains(inner, "'") && shellSafeBareWord(inner, commandPosition) {
+			return inner
+		}
 		return val
 	}
 	isDoubleQuoted := strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") && len(val) >= 2
@@ -6203,12 +6216,49 @@ func cmdArgQuote(val string) string {
 		if hasShellExpansion(inner) {
 			return val
 		}
+		if shellSafeBareWord(inner, commandPosition) {
+			return inner
+		}
 		return shellQuote(inner)
 	}
 	if strings.HasPrefix(val, "$") {
 		return "\"" + val + "\""
 	}
+	if shellSafeBareWord(val, commandPosition) {
+		return val
+	}
 	return shellQuote(val)
+}
+
+func shellSafeBareWord(s string, commandPosition bool) bool {
+	if s == "" {
+		return false
+	}
+	if commandPosition && (strings.Contains(s, "=") || isShellReservedWord(s)) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		switch c {
+		case '@', '%', '_', '+', '=', ':', ',', '.', '/', '-':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isShellReservedWord(s string) bool {
+	switch s {
+	case "!", "{", "}", "case", "do", "done", "elif", "else", "esac", "fi", "for", "if", "in", "then", "until", "while":
+		return true
+	default:
+		return false
+	}
 }
 
 const workdirPipelinePrefix = "__BESHT_WORKDIR__"

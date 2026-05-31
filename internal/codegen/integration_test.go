@@ -551,7 +551,7 @@ $("echo", "Hello, " + name + "!").run()
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `name='world'`)
-	assertContains(t, out, `'echo'`)
+	assertContains(t, out, `echo`)
 }
 
 func TestIntegration_FunctionCallAndReturn(t *testing.T) {
@@ -577,9 +577,9 @@ if (n > 5) {
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `if awk -v _a=$n -v _b=5`)
-	assertContains(t, out, `'echo' 'big'`)
+	assertContains(t, out, `echo big`)
 	assertContains(t, out, `else`)
-	assertContains(t, out, `'echo' 'small'`)
+	assertContains(t, out, `echo small`)
 	assertContains(t, out, `fi`)
 }
 
@@ -1411,7 +1411,7 @@ func TestIntegration_CmdBasicCapture(t *testing.T) {
 console.log(user)
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `user=$('whoami')`)
+	assertContains(t, out, `user=$(whoami)`)
 }
 
 func TestIntegration_CmdPipeline(t *testing.T) {
@@ -1421,9 +1421,9 @@ func TestIntegration_CmdPipeline(t *testing.T) {
     .pipe($("cut", "-d:", "-f1")).run().readStdout()
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `'cat'`)
-	assertContains(t, out, `'grep'`)
-	assertContains(t, out, `'cut'`)
+	assertContains(t, out, `cat`)
+	assertContains(t, out, `grep`)
+	assertContains(t, out, `cut`)
 	assertContains(t, out, `|`)
 }
 
@@ -1432,7 +1432,7 @@ func TestIntegration_CmdRedirects(t *testing.T) {
 	path := writeFile(t, dir, "main.bsh", `$("make", "build").stdout("/tmp/build.log").stderr("&1").run()
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `'make'`)
+	assertContains(t, out, `make`)
 	assertContains(t, out, `2>&1`)
 	assertContains(t, out, `> /tmp/build.log`)
 }
@@ -1444,9 +1444,9 @@ func TestIntegration_CmdForLines(t *testing.T) {
 }
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `'find'`)
+	assertContains(t, out, `find`)
 	assertContains(t, out, `while IFS= read -r`)
-	assertContains(t, out, `'echo'`)
+	assertContains(t, out, `echo`)
 }
 
 func TestIntegration_CmdSingleQuoteEscape(t *testing.T) {
@@ -1474,7 +1474,7 @@ func TestIntegration_CmdEnv(t *testing.T) {
 	path := writeFile(t, dir, "main.bsh", `$("env").env("FOO", "bar").run()
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `FOO='bar' 'env'`)
+	assertContains(t, out, `FOO='bar' env`)
 }
 
 func TestIntegration_CmdWorkdirRuntime(t *testing.T) {
@@ -1569,7 +1569,7 @@ $("echo", user).run()
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `lib__utils__get_user()`)
-	assertContains(t, out, `'whoami'`)
+	assertContains(t, out, `whoami`)
 }
 
 func TestIntegration_RuntimeCheckInOutput(t *testing.T) {
