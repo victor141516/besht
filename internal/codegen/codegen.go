@@ -6300,6 +6300,9 @@ func formatCmdForBare(pipeline, redirect string) string {
 	if redirect == "" {
 		return pipeline
 	}
+	if !strings.Contains(pipeline, " | ") {
+		return pipeline + redirect
+	}
 	return "{ " + pipeline + "; }" + redirect
 }
 

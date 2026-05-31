@@ -1228,7 +1228,9 @@ func TestCodegen_CmdPipeChain(t *testing.T) {
 
 func TestCodegen_CmdStdoutRedirect(t *testing.T) {
 	out := compile(t, `$("make", "build").stdout("/tmp/build.log").run()`)
+	assertContains(t, out, `make build > /tmp/build.log`)
 	assertContains(t, out, `> /tmp/build.log`)
+	assertNotContains(t, out, `{ make build; } > /tmp/build.log`)
 }
 
 func TestCodegen_CmdStdoutAppend(t *testing.T) {
@@ -1370,7 +1372,7 @@ func TestCodegen_CmdPipeIntoStdout(t *testing.T) {
     .pipe($("grep", "ERROR"))
     .stdout("/tmp/errors.log")
     `)
-	assertContains(t, out, `cat`)
+	assertContains(t, out, `{ cat input.txt | grep ERROR; } > /tmp/errors.log`)
 	assertContains(t, out, `|`)
 	assertContains(t, out, `grep`)
 	assertContains(t, out, `> /tmp/errors.log`)
@@ -1378,8 +1380,10 @@ func TestCodegen_CmdPipeIntoStdout(t *testing.T) {
 
 func TestCodegen_CmdStderrAndStdout(t *testing.T) {
 	out := compile(t, `$("make", "all").stderr("&1").stdout("/tmp/build.log").run()`)
+	assertContains(t, out, `make all 2>&1 > /tmp/build.log`)
 	assertContains(t, out, `2>&1`)
 	assertContains(t, out, `> /tmp/build.log`)
+	assertNotContains(t, out, `{ make all; } 2>&1 > /tmp/build.log`)
 }
 
 func TestCodegen_CmdSingleQuoteInArg(t *testing.T) {
