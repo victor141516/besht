@@ -36,7 +36,7 @@ Implementation notes:
 
 - Parser/checker/codegen need to recognize `Besht.*`, `process.*`, and future standard namespaces such as `Object`, `Array`, `Boolean`, and `JSON` so module qualification does not rewrite them.
 - Static namespaces should use handling similar to the existing `Number.*` special case.
-- Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, and `reduce`; `forEach` remains future work.
+- Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, and node-eq fixtures in sync.
 
 ---
@@ -96,25 +96,25 @@ Recommended phases:
 - **Number / Math:** consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
 - **String:** consider regex-dependent APIs like `match()` or `search()` after lower-risk string methods.
 - **Array / list:** Consider related helpers when they map cleanly to current list representations without runtime shape metadata.
-- **Boolean:** decide whether `Boolean(value)` and `Boolean.prototype.toString()` are useful enough given booleans are stored as `1`/`0` and rendered as `true`/`false` in string contexts.
-- **Object:** add reliable object shape metadata first, then implement known-shape APIs like `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()`.
+- **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
+- **Object:** `Object.keys()`, narrow scalar-value `Object.values()`, scalar-value `Object.entries()`, and `Object.hasOwn(obj, key)` are implemented over compiler-managed object key metadata. Future richer known-shape APIs should keep the same no-runtime-metadata boundary unless a broader object model is designed.
 - **Object copying:** evaluate `Object.assign()` and `Object.fromEntries()` after object alias/field metadata is reliable.
 - **JSON:** consider limited `JSON.stringify()` for known object/list shapes; defer full `JSON.parse()` unless besht gains a real parser or explicitly depends on an external tool like `jq`.
 
 Implementation notes:
 
-- Static namespaces such as `Object`, `Array`, `Boolean`, and `JSON` need parser/codegen handling similar to the existing `Number.*` special case.
+- Static namespaces such as `Boolean` and `JSON` need parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` slices are implemented.
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
-- Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, and `reduce`; `forEach` remains future work.
+- Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Every added API needs checker, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.
 
 ---
 
 ## Arrow functions and callbacks
 
-**Status: partial — expression-bodied callbacks for `list.map()`, `list.filter()`, `list.some()`, `list.every()`, `list.find()`, and `list.findIndex()` are implemented, and `list.reduce()` supports expression-bodied and block-bodied two-parameter callbacks.**
+**Status: partial — expression-bodied callbacks for `list.map()`, `list.filter()`, `list.some()`, `list.every()`, `list.find()`, and `list.findIndex()` are implemented, `list.reduce()` supports expression-bodied and block-bodied two-parameter callbacks, and `list.forEach()` supports statement-position side-effect callbacks.**
 
-Continue expanding JavaScript/TypeScript callback syntax so APIs such as `forEach()` and general callback values can be implemented cleanly.
+Continue expanding JavaScript/TypeScript callback syntax so general callback values can be implemented cleanly.
 
 Design questions:
 

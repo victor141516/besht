@@ -386,6 +386,10 @@ let c: list<string> = ["e", "f"]
 let matrix: string[][] = rows.map(row => row.join("").split("") as string[])
 let indexes: number[] = Array.from({ length: 3 }) // [0, 1, 2]
 let selected: string[] = Array.of("a", "b") // ["a", "b"]
+let objectKeys: string[] = Object.keys(user) // object key list
+let objectValues: string[] = Object.values(user) // object value list
+let objectEntries: string[][] = Object.entries(user) // packed [key, value] rows
+let objectHasName: boolean = Object.hasOwn(user, "name")
 
 // Constants (compile-time immutability)
 const MAX: number = 100
@@ -441,11 +445,14 @@ let s: string = count.toString()
 let b: string = flag.toString() // true or false
 let n: number = Number.parseInt(s)
 let n10: number = Number.parseInt(s, 10)
+let truthy: boolean = Boolean(s)
 // Older helpers remain supported for now:
 let oldS: string = to_str(count)
 let oldString: string = String(count)
 let oldN: number = to_int(s)
 
+// Boolean(value) returns a primitive boolean using JS-like truthiness for current Besht values.
+// It does not create Boolean object wrappers or add runtime type metadata.
 // String() remains an alias for to_str()
 let label: string = "check:" + name
 let msg: string = `Hello, ${name}!`  // template literal for interpolation
@@ -575,6 +582,14 @@ user.name = "Compiler Tester"
 let key: string = "name"
 let val: string = user[key]         // reads _obj_user_${key}
 user[key] = "Updated"              // writes _obj_user_${key}
+let keys: string[] = Object.keys(user) // ["id", "name", "active"]
+let values: string[] = Object.values(user)
+let entries: string[][] = Object.entries(user)
+let hasName: boolean = Object.hasOwn(user, "name")
+
+function showKeys(obj: object): string[] {
+    return Object.keys(obj)
+}
 
 // Classes — constructors, instance properties/methods, getters/setters, new, this
 class User {
@@ -781,6 +796,7 @@ let classified: list<string> = files.map((f, i) => {
     if (i == 0) return "first:" + f
     return "next:" + f
 })
+files.forEach((f, i) => console.log(i.toString() + ":" + f))
 let filtered: list<string> = files.filter(f => f.endsWith(".txt"))
 let hasTxt: boolean = files.some((f, i) => f.endsWith(".txt") && i >= 0)
 let allNamed: boolean = files.every(f => f.length > 0)
@@ -859,6 +875,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`Number.isNaN()` is always false for currently representable besht values.** Besht has no NaN runtime sentinel, so the API exists for JS-compatible syntax but can't observe NaN.
 
+**`Boolean(value)` is a primitive coercion builtin only.** It returns Besht boolean `1`/`0` and relies on existing boolean string rendering for `true`/`false`. Keep the slice narrow: falsey values are `false`, `0`, `0.0`, `""`, `null`, and `undefined`; non-empty strings including `"0"`/`"false"`, non-zero numbers, arrays, objects, and sets are truthy. Do not add Boolean object wrappers, `new Boolean`, `Boolean.parse`, or runtime type metadata for this API.
+
 ---
 
 ## Common Pitfalls for Agents
@@ -913,6 +931,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Object literals compile to per-property shell variables.** `let user = { id: 1, name: "Victor" }` emits `_obj_user_id=1` and `_obj_user_name="Victor"`. Property access `user.name` reads `_obj_user_name`. Property assignment `user.name = "X"` writes `_obj_user_name="X"`. Since shell variables are global, these `_obj_*` variables are accessible inside functions. When an object is passed as a function parameter, `genProperty` uses `objPropTypeMap` (populated by `collectObjectTypes` pre-pass) to resolve the original `_obj_` prefix directly — no copying needed. Inside a function, `student.name` emits `$_obj_student_name` (using the original top-level variable name, not the mangled parameter name).
 
+**`Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use `_objkeys_*` metadata.** Object literal bindings, aliases, reduce object accumulators, class instance slots, static object maps, dot property assignments, and computed property assignments must keep `_objkeys_<object>` in sync. `Object.keys()` lowers to a newline-delimited list from that metadata, `Object.values()` evals each keyed scalar `_obj_*` slot in the same order, and `Object.entries()` emits existing nested-list unit-separator packed `[key, value]` rows for scalar values. Statically known boolean values format as `true`/`false` when enumerated through `Object.values()` or `Object.entries()`, while the stored shell slots remain `1`/`0`. `Object.values()` and `Object.entries()` must reject statically known list/object/set/command/fetch values because the current `string[]` and packed `string[][]` representations cannot preserve deeper nested values without corrupting rows. These helpers must not emit a runtime helper. `Object.hasOwn()` checks exact line membership against that metadata, returns `1`/`0`, and returns false for dynamic keys that fail `[A-Za-z0-9_]+` instead of mutating metadata or exiting. Static and computed object keys must match `[A-Za-z0-9_]`; computed assignments append only validated keys. The `object` annotation parses to `TypeObject` so function parameters can carry object slot names for Object helpers. `process.env` is intentionally not enumerable; reject `Object.keys(process.env)`, `Object.values(process.env)`, `Object.entries(process.env)`, and `Object.hasOwn(process.env, key)` in `--check` and compile paths.
+
 **Classes use compiler-managed instance slots.** `let u = new User("Alice")` stores `u='u'`, calls `User__constructor "$u" ...`, and writes instance fields as `_obj_u_name`. `this.prop` inside constructors and methods uses tightly controlled `eval` to construct `_obj_${slot}_${prop}` names; user values must flow through temporary shell variables, never interpolated directly into the eval string. Static properties use `_class_<Class>_<prop>` and static/instance methods compile to `<Class>__<method>` shell functions. Explicit getters/setters compile to `<Class>__get_<name>` and `<Class>__set_<name>`; property reads/writes lower to those calls when present. Accessors cannot share a property name with a field, and source methods named `get_<name>`/`set_<name>` conflict with the corresponding accessor. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored.
 
 **Static object maps use object backing.** `static Deltas: Record<string, [number, number]> = { U: [-1, 0] }` emits `_obj__class_Class_Deltas_U` storage, and `Class.Deltas[key]` lowers to computed object access. `Record<K, V>` is annotation-only; it guides compiler inference but adds no runtime type checking.
@@ -927,7 +947,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Postfix `++` and `--` are statement-only; prefix updates are expressions.** `count++` and `count--` compile to assignment statements. Prefix `++count` and `--count` are supported in expression position and return the updated numeric value. They must resolve through `paramMap` like other variable reads/writes.
 
-**Arrow callbacks support compiler-known list methods only.** Direct list `.map(x => expr)`, `.map((x, i) => { return expr })`, `.filter((x, i) => truthyExpr)`, `.some((x, i) => truthyExpr)`, `.every((x, i) => truthyExpr)`, `.find((x, i) => truthyExpr)`, `.findIndex((x, i) => truthyExpr)`, and `.reduce((acc, cur) => { ... }, init)` callbacks are supported. `.map()` callbacks may take `(item)` or `(item, index)` and block-bodied `return` emits one mapped value then continues the callback loop; supported block statements are `return`, `if`/`else`, and assignments. Do not splice generic expression statements into map callback shell source — reject unsupported statements instead of treating expression values as commands. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may take the same optional zero-based index parameter. `.some()` returns `1` on the first truthy callback result and `0` for an empty list; `.every()` returns `0` on the first falsey callback result and `1` for an empty list; `.find()` returns the first matching scalar element or `_BESHT_NULLISH_SENTINEL` so `??` fallbacks work. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. Arrows are not general function values, cannot be stored in variables, and should be treated as side-effect-free (except in `reduce` block bodies where `return acc` is used). Callback params are temporarily added to `paramMap` via `withCallbackParams()` and restored after body generation; never emit `local`. `forEach` remains future work.
+**Arrow callbacks support compiler-known list methods only.** Direct list `.map(x => expr)`, `.map((x, i) => { return expr })`, `.filter((x, i) => truthyExpr)`, `.some((x, i) => truthyExpr)`, `.every((x, i) => truthyExpr)`, `.find((x, i) => truthyExpr)`, `.findIndex((x, i) => truthyExpr)`, `.reduce((acc, cur) => { ... }, init)`, and statement-position `.forEach((x, i) => { ... })` callbacks are supported. `.map()` callbacks may take `(item)` or `(item, index)` and block-bodied `return` emits one mapped value then continues the callback loop; supported block statements are `return`, `if`/`else`, and assignments. Do not splice generic expression statements into map callback shell source — reject unsupported statements instead of treating expression values as commands. `.filter()`, `.some()`, `.every()`, and `.findIndex()` use JavaScript-style truthiness and may take the same optional zero-based index parameter. `.some()` returns `1` on the first truthy callback result and `0` for an empty list; `.every()` returns `0` on the first falsey callback result and `1` for an empty list; `.find()` returns the first matching scalar element or `_BESHT_NULLISH_SENTINEL` so `??` fallbacks work. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` has no value result, takes `(item)` or `(item, index)`, rejects `return`/`break`/`continue` plus pure value expressions, and emits a current-shell heredoc loop so outer assignments and `Set.add()` side effects persist. Arrows are not general function values, cannot be stored in variables, and should be treated as side-effect-free except in `reduce` and `forEach` block bodies. Callback params are temporarily added to `paramMap` via `withCallbackParams()` and restored after body generation; never emit `local`.
 
 **`Array.from({ length })` is narrow by design.** It only supports an object literal with a numeric `length` field (including shorthand `{ length }`) and emits a zero-based numeric list. Do not broaden it to arbitrary iterables or mapper callbacks without adding parser/checker/codegen coverage and docs.
 
