@@ -1835,18 +1835,6 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 	return words, true
 }
 
-func staticScalarListValues(list *ast.ListLit) ([]string, bool) {
-	values := make([]string, 0, len(list.Elements))
-	for _, elem := range list.Elements {
-		value, ok := staticScalarValue(elem)
-		if !ok || strings.Contains(value, "\n") {
-			return nil, false
-		}
-		values = append(values, value)
-	}
-	return values, true
-}
-
 func staticScalarValue(expr ast.Expression) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.StringLit:
@@ -1862,9 +1850,43 @@ func staticScalarValue(expr ast.Expression) (string, bool) {
 			return "1", true
 		}
 		return "0", true
+	case *ast.AsExpr:
+		return staticScalarValue(e.Expr)
 	default:
 		return "", false
 	}
+}
+
+func staticScalarListValues(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.ListLit:
+		values := make([]string, 0, len(e.Elements))
+		for _, elem := range e.Elements {
+			value, ok := staticScalarValue(elem)
+			if !ok {
+				return nil, false
+			}
+			values = append(values, value)
+		}
+		return values, true
+	case *ast.AsExpr:
+		return staticScalarListValues(e.Expr)
+	default:
+		return nil, false
+	}
+}
+
+func staticScalarListValuesWithoutNewlines(expr ast.Expression) ([]string, bool) {
+	values, ok := staticScalarListValues(expr)
+	if !ok {
+		return nil, false
+	}
+	for _, value := range values {
+		if strings.Contains(value, "\n") {
+			return nil, false
+		}
+	}
+	return values, true
 }
 
 func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
@@ -1890,32 +1912,9 @@ func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression)
 }
 
 func staticListLiteralValue(list *ast.ListLit) (string, bool) {
-	values := make([]string, 0, len(list.Elements))
-	for _, elem := range list.Elements {
-		switch e := elem.(type) {
-		case *ast.StringLit:
-			if strings.Contains(e.Value, "\n") {
-				return "", false
-			}
-			values = append(values, e.Value)
-		case *ast.RawStringLit:
-			if strings.Contains(e.Value, "\n") {
-				return "", false
-			}
-			values = append(values, e.Value)
-		case *ast.IntLit:
-			values = append(values, strconv.FormatInt(e.Value, 10))
-		case *ast.FloatLit:
-			values = append(values, e.Value)
-		case *ast.BoolLit:
-			if e.Value {
-				values = append(values, "1")
-			} else {
-				values = append(values, "0")
-			}
-		default:
-			return "", false
-		}
+	values, ok := staticScalarListValuesWithoutNewlines(list)
+	if !ok {
+		return "", false
 	}
 	return strings.Join(values, "\n"), true
 }
@@ -1937,21 +1936,11 @@ func staticStringByteLength(expr ast.Expression) (int, bool) {
 }
 
 func staticScalarListLength(expr ast.Expression) (int, bool) {
-	switch e := expr.(type) {
-	case *ast.ListLit:
-		for _, elem := range e.Elements {
-			switch elem.(type) {
-			case *ast.StringLit, *ast.RawStringLit, *ast.IntLit, *ast.FloatLit, *ast.BoolLit:
-				continue
-			default:
-				return 0, false
-			}
-		}
-		return len(e.Elements), true
-	case *ast.AsExpr:
-		return staticScalarListLength(e.Expr)
+	values, ok := staticScalarListValues(expr)
+	if !ok {
+		return 0, false
 	}
-	return 0, false
+	return len(values), true
 }
 
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
@@ -4317,6 +4306,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if val, ok, err := g.genStaticListJoinMethod(e); ok || err != nil {
 		return val, err
 	}
+	if val, ok, err := g.genStaticListSearchMethod(e); ok || err != nil {
+		return val, err
+	}
 	// Handle terminal command methods that read captured output
 	if isTerminalCommandReadMethod(e.Method) {
 		if runCall, ok := immediateRunReceiver(e); ok {
@@ -4795,11 +4787,7 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 }
 
 func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	list, ok := e.Receiver.(*ast.ListLit)
-	if !ok {
-		return "", false, nil
-	}
-	values, ok := staticScalarListValues(list)
+	values, ok := staticScalarListValuesWithoutNewlines(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -4822,6 +4810,49 @@ func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool
 	default:
 		return "", false, nil
 	}
+}
+
+func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	switch e.Method {
+	case "includes", "indexOf", "lastIndexOf":
+	default:
+		return "", false, nil
+	}
+	values, ok := staticScalarListValues(e.Receiver)
+	if !ok {
+		return "", false, nil
+	}
+	if len(e.Args) != 1 {
+		return "", true, fmt.Errorf("%s() requires an argument", e.Method)
+	}
+	needle, ok := staticScalarValue(e.Args[0])
+	if !ok {
+		return "", false, nil
+	}
+
+	index := -1
+	if e.Method == "lastIndexOf" {
+		for i := len(values) - 1; i >= 0; i-- {
+			if values[i] == needle {
+				index = i
+				break
+			}
+		}
+	} else {
+		for i, value := range values {
+			if value == needle {
+				index = i
+				break
+			}
+		}
+	}
+	if e.Method == "includes" {
+		if index >= 0 {
+			return "1", true, nil
+		}
+		return "0", true, nil
+	}
+	return strconv.Itoa(index), true, nil
 }
 
 func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {

@@ -635,6 +635,8 @@ Static scalar list literals compile to quoted newline-backed shell strings when 
 
 Static string literal and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
 
+Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls compile to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path.
+
 ## Imports and Modules
 
 ```ts

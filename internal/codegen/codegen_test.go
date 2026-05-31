@@ -1019,6 +1019,22 @@ if (l.includes("a")) { $("echo", "yes") }`)
 	assertNotContains(t, out, `_bst_includes()`)
 }
 
+func TestCodegen_StaticListLiteralIncludes(t *testing.T) {
+	out := compile(t, `let found: boolean = ["a", "b"].includes("b")`)
+	assertContains(t, out, `found=1`)
+	assertNotContains(t, out, `grep -qxF`)
+}
+
+func TestCodegen_StaticListLiteralIndexOf(t *testing.T) {
+	out := compile(t, `let first: number = ["a", "b", "a"].indexOf("a")
+let last: number = ["a", "b", "a"].lastIndexOf("a")
+let missing: number = ["a", "b", "a"].indexOf("z")`)
+	assertContains(t, out, `first=0`)
+	assertContains(t, out, `last=2`)
+	assertContains(t, out, `missing=-1`)
+	assertNotContains(t, out, `awk -v _needle`)
+}
+
 func TestCodegen_NativeListAPIsReplaceGlobalListHelpers(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b", "c"]
 let other: list<string> = ["d"]
