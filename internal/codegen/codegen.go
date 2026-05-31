@@ -1825,6 +1825,38 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 	return words, true
 }
 
+func staticScalarListValues(list *ast.ListLit) ([]string, bool) {
+	values := make([]string, 0, len(list.Elements))
+	for _, elem := range list.Elements {
+		value, ok := staticScalarValue(elem)
+		if !ok || strings.Contains(value, "\n") {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
+}
+
+func staticScalarValue(expr ast.Expression) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.StringLit:
+		return e.Value, true
+	case *ast.RawStringLit:
+		return e.Value, true
+	case *ast.IntLit:
+		return strconv.FormatInt(e.Value, 10), true
+	case *ast.FloatLit:
+		return e.Value, true
+	case *ast.BoolLit:
+		if e.Value {
+			return "1", true
+		}
+		return "0", true
+	default:
+		return "", false
+	}
+}
+
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	if len(words) == 0 {
 		return nil
@@ -4148,6 +4180,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeFetchResponse {
 		return g.genFetchResponseMethod(e)
 	}
+	if val, ok, err := g.genStaticListJoinMethod(e); ok || err != nil {
+		return val, err
+	}
 	// Handle terminal command methods that read captured output
 	if e.Method == "readStdout" || e.Method == "readStdoutLines" || e.Method == "readStderr" || e.Method == "exitCode" {
 		id := -1
@@ -4593,6 +4628,36 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 		return "", fmt.Errorf("forEach() must be used as a statement")
 	}
 	return "", fmt.Errorf("list has no method %q", e.Method)
+}
+
+func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	list, ok := e.Receiver.(*ast.ListLit)
+	if !ok {
+		return "", false, nil
+	}
+	values, ok := staticScalarListValues(list)
+	if !ok {
+		return "", false, nil
+	}
+
+	switch e.Method {
+	case "join":
+		if len(e.Args) != 1 {
+			return "", true, fmt.Errorf("join() requires an argument")
+		}
+		sep, ok := staticScalarValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		return shellQuote(strings.Join(values, sep)), true, nil
+	case "toString":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toString() takes no arguments")
+		}
+		return shellQuote(strings.Join(values, ",")), true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {

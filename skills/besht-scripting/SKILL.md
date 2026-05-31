@@ -623,11 +623,12 @@ let rest: string[] = files.slice(1)
 let withNew = files.push("new.txt")
 let alsoWithNew = [...files, "new.txt"]
 let text: string = files.toString() // scalar lists: same as files.join(",")
+let literalText: string = ["a", "b", "c"].join(",") // compiles to 'a,b,c'
 let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
 ```
 
-Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
+Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice. Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static.
 
 ## Imports and Modules
 

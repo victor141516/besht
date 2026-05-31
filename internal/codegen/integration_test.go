@@ -1359,6 +1359,16 @@ console.log(["alpha beta", "gamma delta"].toString())`)
 	}
 }
 
+func TestIntegration_StaticListLiteralJoinRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(["a", "b", "c"].join("|"))
+console.log(["can't", "stop"].join(" / "))
+console.log([1, 2, 3].join(","))`)
+	want := "a|b|c\ncan't / stop\n1,2,3\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_ArrowCallbackQualifiesImportedFunction(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "lib/fmt.bsh", `export function bang(s: string): string {
