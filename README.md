@@ -91,6 +91,7 @@ Files use the `.bsh` extension.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static ASCII string literal `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments compile to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
+- Static ASCII string literal `.split()` calls with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls keep the shell arithmetic path.
 - Static ASCII string literal transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments compile to constants; dynamic and non-ASCII transforms keep the POSIX tool path.
 - `switch/case/default` compiles to shell `case/esac`.
@@ -444,6 +445,8 @@ s.length; // int (character count)
 One-argument string `includes()`, `startsWith()`, and `endsWith()` use tiny POSIX helper functions that are emitted only when the generated shell calls them. Two-argument string search methods use inline `awk` instead. Static ASCII string literal searches and `charAt()` calls with static arguments compile to constants.
 
 Static ASCII string literal transforms with static arguments compile to constants. Dynamic and non-ASCII transforms use POSIX tools such as `sed`, `tr`, `cut`, and `awk`.
+
+Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools such as `tr` and `awk`.
 
 Primitive values have basic formatting helpers:
 

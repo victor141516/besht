@@ -986,6 +986,8 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		g.listLenMap[varName] = "0"
 	} else if isArgsArgvCall(s.Value) {
 		g.listLenMap[varName] = g.argsArgcExpr()
+	} else if values, ok := staticStringSplitValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else {
 		delete(g.listLenMap, varName)
 	}
@@ -1386,6 +1388,8 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	}
 	if emptyArrayOf(s.Value) {
 		g.listLenMap[varName] = "0"
+	} else if values, ok := staticStringSplitValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else {
 		delete(g.listLenMap, varName)
 	}
@@ -1730,6 +1734,9 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		if builtin, ok := beshtBuiltinCall(iter); ok && builtin.Name == "Besht.iter.range" {
 			return g.genForRange(s, builtin)
 		}
+		if words, ok := staticForListWordsExpr(iter); ok {
+			return g.genForStaticList(s, words)
+		}
 		pipeline, redirect, err := g.genCmdChain(iter)
 		if err != nil {
 			return err
@@ -1894,6 +1901,16 @@ func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
 	case *ast.ListLit:
 		return staticForListWords(e)
+	case *ast.MethodCallExpr:
+		values, ok := staticStringSplitValues(e)
+		if !ok {
+			return nil, false
+		}
+		words := make([]string, 0, len(values))
+		for _, value := range values {
+			words = append(words, shellQuote(value))
+		}
+		return words, true
 	case *ast.AsExpr:
 		return staticForListWordsExpr(e.Expr)
 	default:
@@ -1937,6 +1954,9 @@ func staticStringByteLength(expr ast.Expression) (int, bool) {
 }
 
 func staticScalarListLength(expr ast.Expression) (int, bool) {
+	if values, ok := staticStringSplitValues(expr); ok {
+		return len(values), true
+	}
 	values, ok := staticScalarListValues(expr)
 	if !ok {
 		return 0, false
@@ -2010,6 +2030,42 @@ func staticStringText(expr ast.Expression) (string, bool) {
 		return staticStringText(e.Expr)
 	}
 	return "", false
+}
+
+func staticStringSplitValues(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return staticStringSplitValues(e.Expr)
+	case *ast.MethodCallExpr:
+		if e.Method != "split" || len(e.Args) != 1 {
+			return nil, false
+		}
+		recv, ok := staticASCIIStringValue(e.Receiver)
+		if !ok {
+			return nil, false
+		}
+		sep, ok := staticASCIIStringValue(e.Args[0])
+		if !ok {
+			return nil, false
+		}
+		var values []string
+		if sep == "" {
+			values = make([]string, 0, len(recv))
+			for i := 0; i < len(recv); i++ {
+				values = append(values, recv[i:i+1])
+			}
+		} else {
+			values = strings.Split(recv, sep)
+		}
+		for _, value := range values {
+			if strings.Contains(value, "\n") {
+				return nil, false
+			}
+		}
+		return values, true
+	default:
+		return nil, false
+	}
 }
 
 func staticIntLiteral(expr ast.Expression) (int, bool) {
@@ -4467,6 +4523,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if val, ok, err := g.genStaticStringTransform(e); ok || err != nil {
 		return val, err
 	}
+	if val, ok, err := g.genStaticStringSplitMethod(e); ok || err != nil {
+		return val, err
+	}
 	// Handle terminal command methods that read captured output
 	if isTerminalCommandReadMethod(e.Method) {
 		if runCall, ok := immediateRunReceiver(e); ok {
@@ -6071,6 +6130,17 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 	default:
 		return "", false, nil
 	}
+}
+
+func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	if e.Method != "split" {
+		return "", false, nil
+	}
+	values, ok := staticStringSplitValues(e)
+	if !ok {
+		return "", false, nil
+	}
+	return shellQuote(strings.Join(values, "\n")), true, nil
 }
 
 func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {

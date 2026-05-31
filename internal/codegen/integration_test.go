@@ -2163,6 +2163,21 @@ console.log("hi".padEnd(5, "."))`)
 	}
 }
 
+func TestIntegration_StaticStringSplitRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let parts = "a,b,c".split(",")
+console.log(parts.length)
+for (part of parts) {
+    console.log(part)
+}
+for (ch of "xy".split("")) {
+    console.log(ch)
+}`)
+	want := "3\na\nb\nc\nx\ny\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PureJSAPIsDoNotExecuteHostileStrings(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "owned")
