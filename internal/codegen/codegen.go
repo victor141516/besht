@@ -2072,6 +2072,15 @@ func staticParseIntValue(input string, radixArg *int) (string, bool) {
 	return strconv.FormatInt(sign*value, 10), digits > 0
 }
 
+func isASCIIWhitespace(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	if len(words) == 0 {
 		return nil
@@ -4455,6 +4464,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if val, ok, err := g.genStaticStringMethod(e); ok || err != nil {
 		return val, err
 	}
+	if val, ok, err := g.genStaticStringTransform(e); ok || err != nil {
+		return val, err
+	}
 	// Handle terminal command methods that read captured output
 	if isTerminalCommandReadMethod(e.Method) {
 		if runCall, ok := immediateRunReceiver(e); ok {
@@ -5927,6 +5939,135 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 			return shellQuote(""), true, nil
 		}
 		return shellQuote(recv[idx : idx+1]), true, nil
+	default:
+		return "", false, nil
+	}
+}
+
+func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, bool, error) {
+	recv, ok := staticASCIIStringValue(e.Receiver)
+	if !ok {
+		return "", false, nil
+	}
+	staticArg := func(idx int) (string, bool) {
+		if len(e.Args) <= idx {
+			return "", false
+		}
+		return staticASCIIStringValue(e.Args[idx])
+	}
+	staticIntArg := func(idx int, fallback int) (int, bool) {
+		if len(e.Args) <= idx {
+			return fallback, true
+		}
+		return staticIntValue(e.Args[idx])
+	}
+
+	switch e.Method {
+	case "trim":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trim() takes no arguments")
+		}
+		return shellQuote(strings.TrimFunc(recv, isASCIIWhitespace)), true, nil
+	case "trimStart":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trimStart() takes no arguments")
+		}
+		return shellQuote(strings.TrimLeftFunc(recv, isASCIIWhitespace)), true, nil
+	case "trimEnd":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trimEnd() takes no arguments")
+		}
+		return shellQuote(strings.TrimRightFunc(recv, isASCIIWhitespace)), true, nil
+	case "toUpperCase":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toUpperCase() takes no arguments")
+		}
+		return shellQuote(strings.ToUpper(recv)), true, nil
+	case "toLowerCase":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toLowerCase() takes no arguments")
+		}
+		return shellQuote(strings.ToLower(recv)), true, nil
+	case "slice":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", true, fmt.Errorf("slice() takes one or two arguments")
+		}
+		start, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		end, ok := staticIntArg(1, len(recv))
+		if !ok {
+			return "", false, nil
+		}
+		if start < 0 {
+			start = len(recv) + start
+		}
+		if end < 0 {
+			end = len(recv) + end
+		}
+		start = clampInt(start, 0, len(recv))
+		end = clampInt(end, 0, len(recv))
+		if end < start {
+			end = start
+		}
+		return shellQuote(recv[start:end]), true, nil
+	case "substring":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", true, fmt.Errorf("substring() takes one or two arguments")
+		}
+		start, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		end, ok := staticIntArg(1, len(recv))
+		if !ok {
+			return "", false, nil
+		}
+		start = clampInt(start, 0, len(recv))
+		end = clampInt(end, 0, len(recv))
+		if start > end {
+			start, end = end, start
+		}
+		return shellQuote(recv[start:end]), true, nil
+	case "repeat":
+		if len(e.Args) != 1 {
+			return "", true, fmt.Errorf("repeat() requires an argument")
+		}
+		count, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		if count < 0 {
+			return "", false, nil
+		}
+		return shellQuote(strings.Repeat(recv, count)), true, nil
+	case "padStart", "padEnd":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", true, fmt.Errorf("%s() takes one or two arguments", e.Method)
+		}
+		targetLen, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		fill := " "
+		if len(e.Args) == 2 {
+			var ok bool
+			fill, ok = staticArg(1)
+			if !ok {
+				return "", false, nil
+			}
+		}
+		if targetLen <= len(recv) || fill == "" {
+			return shellQuote(recv), true, nil
+		}
+		need := targetLen - len(recv)
+		padding := strings.Repeat(fill, need/len(fill)+1)
+		padding = padding[:need]
+		if e.Method == "padStart" {
+			return shellQuote(padding + recv), true, nil
+		}
+		return shellQuote(recv + padding), true, nil
 	default:
 		return "", false, nil
 	}

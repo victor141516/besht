@@ -2148,6 +2148,21 @@ console.log("hello".charAt(99))`)
 	}
 }
 
+func TestIntegration_StaticStringTransformsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log("  hi  ".trim())
+console.log("hello".toUpperCase())
+console.log("HELLO".toLowerCase())
+console.log("hello".slice(1, 4))
+console.log("hello".substring(4, 1))
+console.log("ha".repeat(3))
+console.log("hi".padStart(5, "0"))
+console.log("hi".padEnd(5, "."))`)
+	want := "hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PureJSAPIsDoNotExecuteHostileStrings(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "owned")

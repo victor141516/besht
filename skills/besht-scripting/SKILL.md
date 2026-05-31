@@ -267,6 +267,8 @@ let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).joi
 
 Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literal searches and `charAt()` calls with static arguments compile to constants. Lists also support `items.includes(x)` for exact item membership.
 
+Static ASCII string literal transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments compile to constants. Dynamic and non-ASCII transforms use POSIX tools.
+
 ## Sets and Nested Lists
 
 ```ts
