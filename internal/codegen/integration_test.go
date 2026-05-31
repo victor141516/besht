@@ -2757,6 +2757,47 @@ show()`, "--branch=dev", "-d", "input.txt")
 	}
 }
 
+func TestIntegration_TopLevelPositionalOnlyArgsUseCompactRuntime(t *testing.T) {
+	src := `let first = Besht.args.positional(1) ?? "missing"
+let second = Besht.args.positional(2) ?? "missing"
+console.log(first + ":" + second)`
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", src)
+	compiled, err := codegen.CompileFile(path, codegen.Options{NoCheck: true, NoSourceMap: true})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if strings.Contains(compiled, "_bst_args_") || strings.Contains(compiled, "_bst_argc") {
+		t.Fatalf("top-level positional-only args should not emit full args runtime:\n%s", compiled)
+	}
+
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(compiled), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	output, err := exec.Command("sh", shPath, "--", "-x", "").CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, compiled)
+	}
+	if string(output) != "-x:\n" {
+		t.Fatalf("output: got %q", output)
+	}
+}
+
+func TestIntegration_TopLevelPositionalWithOptionsKeepsArgsRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let all = Besht.args.argv()
+console.log(Besht.args.positional(1) ?? "missing")
+console.log(all.join("|"))`)
+	compiled, err := codegen.CompileFile(path, codegen.Options{NoCheck: true, NoSourceMap: true})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !strings.Contains(compiled, "_bst_args_positional") {
+		t.Fatalf("mixed args usage should keep full args runtime:\n%s", compiled)
+	}
+}
+
 func TestIntegration_ArgsSchemaDoesNotDropPositionalsAfterFlagsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let all = Besht.args.argv()
 console.log(all.join("|"))

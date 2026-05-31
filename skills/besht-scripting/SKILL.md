@@ -98,7 +98,7 @@ let branch = Besht.args.option("branch", "b") ?? "main"
 let dryRun = Besht.args.flag("dry-run", "d")
 ```
 
-Use `??` for argument defaults. `Besht.args.positional()` and `Besht.args.option()` are nullish when absent and preserve empty strings when present. `Besht.args.flag()` returns a boolean. `--` stops option parsing, so later `-`-prefixed values are positional.
+Use `??` for argument defaults. `Besht.args.positional()` and `Besht.args.option()` are nullish when absent and preserve empty strings when present. `Besht.args.flag()` returns a boolean. `--` stops option parsing, so later `-`-prefixed values are positional. Top-level scripts that only read positional arguments compile to a compact inline scan; `argv()`, `option()`, `flag()`, and args reads inside functions use the shared parser runtime.
 
 ## Fetch
 

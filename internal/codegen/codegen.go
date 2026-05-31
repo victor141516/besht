@@ -4236,9 +4236,9 @@ func shellWordList(values map[string]bool) string {
 }
 
 func (g *Generator) genArgsMethod(e *ast.MethodCallExpr) (string, error) {
-	g.requireRuntimeHelper("args")
 	switch e.Method {
 	case "argv":
+		g.requireRuntimeHelper("args")
 		if len(e.Args) != 0 {
 			return "", fmt.Errorf("Besht.args.argv() takes no arguments")
 		}
@@ -4251,8 +4251,13 @@ func (g *Generator) genArgsMethod(e *ast.MethodCallExpr) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if g.canInlineTopLevelPositionalArg() {
+			return g.genInlineTopLevelPositionalArg(idx), nil
+		}
+		g.requireRuntimeHelper("args")
 		return fmt.Sprintf("$(_bst_args_call _bst_args_positional %s %s %s)", ensureArgSafe(idx), shellWordList(g.argsOptions), shellWordList(g.argsFlags)), nil
 	case "option":
+		g.requireRuntimeHelper("args")
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", fmt.Errorf("Besht.args.option() takes 1 or 2 arguments")
 		}
@@ -4269,6 +4274,7 @@ func (g *Generator) genArgsMethod(e *ast.MethodCallExpr) (string, error) {
 		}
 		return fmt.Sprintf("$(_bst_args_call _bst_args_option %s %s)", ensureArgSafe(longName), ensureArgSafe(shortName)), nil
 	case "flag":
+		g.requireRuntimeHelper("args")
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", fmt.Errorf("Besht.args.flag() takes 1 or 2 arguments")
 		}
@@ -4286,6 +4292,15 @@ func (g *Generator) genArgsMethod(e *ast.MethodCallExpr) (string, error) {
 		return fmt.Sprintf("$(_bst_args_call _bst_args_flag %s %s)", ensureArgSafe(longName), ensureArgSafe(shortName)), nil
 	}
 	return "", fmt.Errorf("Besht.args has no method %q", e.Method)
+}
+
+func (g *Generator) canInlineTopLevelPositionalArg() bool {
+	return !g.inFunction && len(g.argsOptions) == 0 && len(g.argsFlags) == 0
+}
+
+func (g *Generator) genInlineTopLevelPositionalArg(idx string) string {
+	g.requireRuntimeHelper("nullish")
+	return fmt.Sprintf("$(_bst_n=%s; _bst_i=1; for _bst_a do if [ \"$_bst_a\" = '--' ]; then continue; fi; if [ \"$_bst_i\" -eq \"$_bst_n\" ]; then printf '%%s' \"$_bst_a\"; exit 0; fi; _bst_i=$(( _bst_i + 1 )); done; printf '%%s' \"$%s\")", ensureArgSafe(idx), nullishSentinelVar)
 }
 
 func (g *Generator) argsArgcExpr() string {
