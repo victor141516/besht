@@ -633,6 +633,8 @@ Scalar `list.toString()` is supported as comma-join output; nested-list JavaScri
 
 Static scalar list literals compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the generated `printf` builder.
 
+Static string literal and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
+
 ## Imports and Modules
 
 ```ts

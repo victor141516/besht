@@ -940,6 +940,12 @@ let n: number = s.length`)
 	assertContains(t, out, `wc -c`)
 }
 
+func TestCodegen_StaticStringLiteralLength(t *testing.T) {
+	out := compile(t, `let n: number = "hello".length`)
+	assertContains(t, out, `n=5`)
+	assertNotContains(t, out, `wc -c`)
+}
+
 func TestCodegen_ListPush(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a"]
 let l2: list<string> = l.push("b")`)
@@ -979,6 +985,12 @@ func TestCodegen_ListLength(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 let n: number = l.length`)
 	assertContains(t, out, `wc -l`)
+}
+
+func TestCodegen_StaticListLiteralLength(t *testing.T) {
+	out := compile(t, `let n: number = ["a", "b", "c"].length`)
+	assertContains(t, out, `n=3`)
+	assertNotContains(t, out, `wc -l`)
 }
 
 func TestCodegen_ListReverse(t *testing.T) {
