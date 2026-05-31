@@ -2291,6 +2291,29 @@ console.log(report())`)
 	}
 }
 
+func TestIntegration_StaticListForUsesCompactShellLoop(t *testing.T) {
+	src := `for (name of ["Ada Lovelace", "", "Bob"]) {
+    console.log("[" + name + "]")
+}`
+	out := runCompiledShell(t, src)
+	if out != "[Ada Lovelace]\n[]\n[Bob]\n" {
+		t.Fatalf("output: got %q", out)
+	}
+
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", src)
+	compiled, err := codegen.CompileFile(path, codegen.Options{NoCheck: true, NoSourceMap: true})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if !strings.Contains(compiled, "for name in 'Ada Lovelace' '' 'Bob'; do") {
+		t.Fatalf("static list should compile to compact shell for loop:\n%s", compiled)
+	}
+	if strings.Contains(compiled, "_forlist_") || strings.Contains(compiled, "__BESHT_FOR_") {
+		t.Fatalf("static list should not materialize a here-doc loop:\n%s", compiled)
+	}
+}
+
 func TestIntegration_ObjectKeysRejectsUnsupportedSurfaces(t *testing.T) {
 	tests := []struct {
 		name    string

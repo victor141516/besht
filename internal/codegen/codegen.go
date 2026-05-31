@@ -1730,6 +1730,10 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 			return err
 		}
 		return g.genForShell(s, callStr)
+	case *ast.ListLit:
+		if words, ok := staticForListWords(iter); ok {
+			return g.genForStaticList(s, words)
+		}
 	}
 	iterStr, err := g.genExprValue(s.Iterator)
 	if err != nil {
@@ -1784,6 +1788,55 @@ func (g *Generator) genForRange(s *ast.ForStmt, r *ast.BuiltinCallExpr) error {
 		}
 	}
 	g.line(fmt.Sprintf("%s=$(( %s + 1 ))", iVar, iVar))
+	g.pop()
+	g.line("done")
+	g.undeclareLoopVar(s.VarName)
+	return nil
+}
+
+func staticForListWords(list *ast.ListLit) ([]string, bool) {
+	words := make([]string, 0, len(list.Elements))
+	for _, elem := range list.Elements {
+		switch e := elem.(type) {
+		case *ast.StringLit:
+			if strings.Contains(e.Value, "\n") {
+				return nil, false
+			}
+			words = append(words, shellQuote(e.Value))
+		case *ast.RawStringLit:
+			if strings.Contains(e.Value, "\n") {
+				return nil, false
+			}
+			words = append(words, shellQuote(e.Value))
+		case *ast.IntLit:
+			words = append(words, shellQuote(strconv.FormatInt(e.Value, 10)))
+		case *ast.FloatLit:
+			words = append(words, shellQuote(e.Value))
+		case *ast.BoolLit:
+			if e.Value {
+				words = append(words, shellQuote("1"))
+			} else {
+				words = append(words, shellQuote("0"))
+			}
+		default:
+			return nil, false
+		}
+	}
+	return words, true
+}
+
+func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
+	if len(words) == 0 {
+		return nil
+	}
+	iVar := g.declareLoopVar(s.VarName)
+	g.line(fmt.Sprintf("for %s in %s; do", iVar, strings.Join(words, " ")))
+	g.push()
+	for _, stmt := range s.Body.Statements {
+		if err := g.genStmt(stmt); err != nil {
+			return err
+		}
+	}
 	g.pop()
 	g.line("done")
 	g.undeclareLoopVar(s.VarName)
