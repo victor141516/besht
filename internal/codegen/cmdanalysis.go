@@ -291,6 +291,14 @@ func (ca *CmdAnalysis) phase1Expr(expr ast.Expression, scope *cmdScope, bindName
 	case *ast.BinaryExpr:
 		ca.phase1Expr(e.Left, scope, "")
 		ca.phase1Expr(e.Right, scope, "")
+	case *ast.ArrowExpr:
+		inner := ca.arrowScope(e, scope)
+		if e.Body != nil {
+			ca.phase1Expr(e.Body, inner, "")
+		}
+		if e.BlockBody != nil {
+			ca.phase1Stmts(e.BlockBody.Statements, inner)
+		}
 	case *ast.UnaryExpr:
 		ca.phase1Expr(e.Expr, scope, "")
 	case *ast.UpdateExpr:
@@ -366,6 +374,14 @@ func (ca *CmdAnalysis) extractIdentityFromExpr(expr ast.Expression, scope *cmdSc
 		}
 	}
 	return -1
+}
+
+func (ca *CmdAnalysis) arrowScope(e *ast.ArrowExpr, parent *cmdScope) *cmdScope {
+	inner := newCmdScope(parent)
+	for _, param := range e.Params {
+		inner.define(param.Name, -1)
+	}
+	return inner
 }
 
 // ─── Phase 2: usage scanning ──────────────────────────────────────────────────
@@ -475,6 +491,14 @@ func (ca *CmdAnalysis) phase2Expr(expr ast.Expression, scope *cmdScope) {
 		case *ast.BinaryExpr:
 			ca.phase2Expr(e.Left, scope)
 			ca.phase2Expr(e.Right, scope)
+		case *ast.ArrowExpr:
+			inner := ca.arrowScope(e, scope)
+			if e.Body != nil {
+				ca.phase2Expr(e.Body, inner)
+			}
+			if e.BlockBody != nil {
+				ca.phase2Stmts(e.BlockBody.Statements, inner)
+			}
 		case *ast.UnaryExpr:
 			ca.phase2Expr(e.Expr, scope)
 		case *ast.UpdateExpr:
