@@ -1825,6 +1825,37 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 	return words, true
 }
 
+func staticListLiteralValue(list *ast.ListLit) (string, bool) {
+	values := make([]string, 0, len(list.Elements))
+	for _, elem := range list.Elements {
+		switch e := elem.(type) {
+		case *ast.StringLit:
+			if strings.Contains(e.Value, "\n") {
+				return "", false
+			}
+			values = append(values, e.Value)
+		case *ast.RawStringLit:
+			if strings.Contains(e.Value, "\n") {
+				return "", false
+			}
+			values = append(values, e.Value)
+		case *ast.IntLit:
+			values = append(values, strconv.FormatInt(e.Value, 10))
+		case *ast.FloatLit:
+			values = append(values, e.Value)
+		case *ast.BoolLit:
+			if e.Value {
+				values = append(values, "1")
+			} else {
+				values = append(values, "0")
+			}
+		default:
+			return "", false
+		}
+	}
+	return strings.Join(values, "\n"), true
+}
+
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	if len(words) == 0 {
 		return nil
@@ -3132,6 +3163,9 @@ func (g *Generator) genOptionalMethodCall(e *ast.MethodCallExpr) (string, error)
 func (g *Generator) genListLiteral(e *ast.ListLit) (string, error) {
 	if len(e.Elements) == 0 {
 		return "\"\"", nil
+	}
+	if value, ok := staticListLiteralValue(e); ok {
+		return shellQuote(value), nil
 	}
 	var cmds []string
 	for _, elem := range e.Elements {
