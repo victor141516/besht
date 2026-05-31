@@ -803,6 +803,20 @@ let last: number = words.lastIndexOf("a")`},
 		{"Array.of", `let made: string[] = Array.of("x", "y", "z")`},
 		{"Array.isArray list", `let ok: boolean = Array.isArray(["x", "y"])`},
 		{"Array.isArray non-list", `let ok: boolean = Array.isArray("x")`},
+		{"Object.keys object", `let user = { id: 1, name: "Victor" }
+let keys: string[] = Object.keys(user)`},
+		{"Object.keys literal", `let keys: string[] = Object.keys({ id: 1, name: "Victor" })`},
+		{"Object.values object", `let user = { id: 1, name: "Victor" }
+let values: string[] = Object.values(user)`},
+		{"Object.values literal", `let values: string[] = Object.values({ id: 1, name: "Victor" })`},
+		{"Object.entries object", `let user = { id: 1, name: "Victor" }
+let entries: string[][] = Object.entries(user)`},
+		{"Object.entries literal", `let entries: string[][] = Object.entries({ id: 1, name: "Victor" })`},
+		{"Object.hasOwn object", `let user = { id: 1, name: "Victor" }
+let ok: boolean = Object.hasOwn(user, "name")`},
+		{"Object.hasOwn literal", `let ok: boolean = Object.hasOwn({ id: 1, name: "Victor" }, "name")`},
+		{"Boolean value", `let ok: boolean = Boolean("x")`},
+		{"Boolean nullable", `let ok: boolean = Boolean(undefined)`},
 		{"Number.isSafeInteger", `let safe: boolean = Number.isSafeInteger(42)`},
 		{"Number.isSafeInteger string predicate", `let safe: boolean = Number.isSafeInteger("1")`},
 		{"Number.isNaN", `let nan: boolean = Number.isNaN(0)`},
@@ -843,6 +857,38 @@ let i: number = s.indexOf("a", "1")`, "indexOf() second argument must be number"
 		{"isNaN arity", `let ok: boolean = Number.isNaN()`, "Number.isNaN() takes 1 argument"},
 		{"isArray arity", `let ok: boolean = Array.isArray()`, "Array.isArray() takes 1 argument"},
 		{"isArray extra arg", `let ok: boolean = Array.isArray([], [])`, "Array.isArray() takes 1 argument"},
+		{"Object.keys arity", `let keys: string[] = Object.keys()`, "Object.keys() takes 1 argument"},
+		{"Object.keys type", `let keys: string[] = Object.keys("x")`, "Object.keys() argument must be object"},
+		{"Object.keys process.env alias", `let envObj = process.env
+let keys: string[] = Object.keys(envObj)`, "Object.keys() requires an object literal or named object"},
+		{"Object.values arity", `let values: string[] = Object.values()`, "Object.values() takes 1 argument"},
+		{"Object.values type", `let values: string[] = Object.values("x")`, "Object.values() argument must be object"},
+		{"Object.values process.env alias", `let envObj = process.env
+let values: string[] = Object.values(envObj)`, "Object.values() requires an object literal or named object"},
+		{"Object.entries arity", `let entries: string[][] = Object.entries()`, "Object.entries() takes 1 argument"},
+		{"Object.entries type", `let entries: string[][] = Object.entries("x")`, "Object.entries() argument must be object"},
+		{"Object.entries process.env alias", `let envObj = process.env
+let entries: string[][] = Object.entries(envObj)`, "Object.entries() requires an object literal or named object"},
+		{"Object.hasOwn arity", `let ok: boolean = Object.hasOwn({ a: 1 })`, "Object.hasOwn() takes 2 arguments"},
+		{"Object.hasOwn type", `let ok: boolean = Object.hasOwn("x", "name")`, "Object.hasOwn() argument must be object"},
+		{"Object.hasOwn process.env alias", `let envObj = process.env
+let ok: boolean = Object.hasOwn(envObj, "HOME")`, "Object.hasOwn() requires an object literal or named object"},
+		{"Object.hasOwn key type", `let user = { id: 1 }
+let ok: boolean = Object.hasOwn(user, ["id"])`, "Object.hasOwn() key must be string-compatible"},
+		{"Boolean arity zero", `let ok: boolean = Boolean()`, "Boolean() takes 1 argument"},
+		{"Boolean arity two", `let ok: boolean = Boolean("x", "y")`, "Boolean() takes 1 argument"},
+		{"forEach arity", `let l: string[] = ["a"]
+l.forEach()`, "forEach() takes 1 arrow callback"},
+		{"forEach non-arrow", `let l: string[] = ["a"]
+l.forEach("noop")`, "forEach() callback must be an arrow expression"},
+		{"forEach return", `let l: string[] = ["a"]
+l.forEach(x => { return x })`, "forEach() callback does not support return"},
+		{"forEach break", `let l: string[] = ["a"]
+l.forEach(x => { break })`, "forEach() callback does not support break"},
+		{"forEach pure expression", `let l: string[] = ["a"]
+l.forEach(x => x + "!")`, "forEach() callback expression must be side-effecting"},
+		{"forEach value position", `let l: string[] = ["a"]
+let result = l.forEach(x => console.log(x))`, "forEach() must be used as a statement"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -856,9 +902,12 @@ func TestChecker_MathMethodRejectsNonNumber(t *testing.T) {
 let n: number = Math.abs(s)`, "arguments must be numbers")
 }
 
-func TestChecker_ListForEachUnsupportedUntilCallbacks(t *testing.T) {
-	expectError(t, `let l: list<string> = ["a"]
-l.forEach("noop")`, `list has no method "forEach"`)
+func TestChecker_ListForEach(t *testing.T) {
+	mustCheck(t, `let l: list<string> = ["a", "b"]
+l.forEach((item, index) => console.log(index.toString() + ":" + item))
+l.forEach(item => {
+    console.log(item)
+})`)
 }
 
 func TestChecker_CmdExprEnv(t *testing.T) {

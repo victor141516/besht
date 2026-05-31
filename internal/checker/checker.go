@@ -47,14 +47,15 @@ func (s *Scope) lookup(name string) (*ast.Type, bool) {
 }
 
 type Checker struct {
-	strict     bool
-	fns        map[string]*FnSig
-	scope      *Scope
-	currentFn  *FnSig
-	inFunction bool
-	inLoop     bool
-	consts     map[string]bool
-	classProps map[string]*ast.Type
+	strict            bool
+	fns               map[string]*FnSig
+	scope             *Scope
+	currentFn         *FnSig
+	inFunction        bool
+	inLoop            bool
+	consts            map[string]bool
+	classProps        map[string]*ast.Type
+	processEnvAliases map[string]bool
 }
 
 type Options struct {
@@ -71,11 +72,12 @@ func NewStrict() *Checker {
 
 func NewWithOptions(opts Options) *Checker {
 	return &Checker{
-		strict:     opts.Strict,
-		fns:        make(map[string]*FnSig),
-		scope:      newScope(nil),
-		consts:     make(map[string]bool),
-		classProps: make(map[string]*ast.Type),
+		strict:            opts.Strict,
+		fns:               make(map[string]*FnSig),
+		scope:             newScope(nil),
+		consts:            make(map[string]bool),
+		classProps:        make(map[string]*ast.Type),
+		processEnvAliases: make(map[string]bool),
 	}
 }
 
@@ -185,8 +187,7 @@ func (c *Checker) checkStmt(stmt ast.Statement) error {
 	case *ast.ExitStmt:
 		return nil
 	case *ast.ExprStmt:
-		_, err := c.checkExpr(s.Expr)
-		return err
+		return c.checkExprStmt(s.Expr)
 	case *ast.Block:
 		return c.checkBlock(s)
 	case *ast.CStyleForStmt:
@@ -203,6 +204,27 @@ func (c *Checker) checkStmt(stmt ast.Statement) error {
 		return nil
 	}
 	return nil
+}
+
+func (c *Checker) checkExprStmt(expr ast.Expression) error {
+	if e, ok := expr.(*ast.MethodCallExpr); ok && e.Method == "forEach" {
+		recvType, err := c.checkExpr(e.Receiver)
+		if err != nil {
+			return err
+		}
+		if recvType.Kind == ast.TypeList {
+			return c.checkForEachMethod(e, recvType)
+		}
+	}
+	_, err := c.checkExpr(expr)
+	return err
+}
+
+func (c *Checker) checkForEachMethod(e *ast.MethodCallExpr, listType *ast.Type) error {
+	if len(e.Args) != 1 {
+		return &CheckError{Pos: e.Pos, Message: "forEach() takes 1 arrow callback"}
+	}
+	return c.checkForEachCallback(e.Args[0], listType.Elem)
 }
 
 func (c *Checker) checkDestructureDecl(s *ast.DestructureDecl) error {
@@ -280,6 +302,7 @@ func (c *Checker) checkLetDecl(s *ast.LetDecl) error {
 
 	s.ResolvedTy = declared
 	c.scope.define(s.Name, declared)
+	c.trackProcessEnvAlias(s.Name, s.Value)
 	if s.IsConst {
 		c.consts[s.Name] = true
 	}
@@ -303,6 +326,7 @@ func (c *Checker) checkAssignment(s *ast.Assignment) error {
 	if !c.typesCompatible(existing, valType) {
 		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign %s to variable of type %s", valType, existing)}
 	}
+	c.trackProcessEnvAlias(s.Name, s.Value)
 	return nil
 }
 
@@ -512,14 +536,18 @@ func classStmtMutatesThis(stmt ast.Statement) bool {
 
 func (c *Checker) checkBlock(block *ast.Block) error {
 	outer := c.scope
+	outerProcessEnvAliases := c.processEnvAliases
 	c.scope = newScope(outer)
+	c.processEnvAliases = cloneBoolMap(outerProcessEnvAliases)
 	for _, stmt := range block.Statements {
 		if err := c.checkStmt(stmt); err != nil {
 			c.scope = outer
+			c.processEnvAliases = outerProcessEnvAliases
 			return err
 		}
 	}
 	c.scope = outer
+	c.processEnvAliases = outerProcessEnvAliases
 	return nil
 }
 
@@ -713,6 +741,9 @@ func (c *Checker) checkExpr(expr ast.Expression) (*ast.Type, error) {
 		t, err = c.checkListLit(e)
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if err := validateObjectKey(field.Key); err != nil {
+				return nil, &CheckError{Pos: field.Pos, Message: err.Error()}
+			}
 			if _, err := c.checkExpr(field.Value); err != nil {
 				return nil, err
 			}
@@ -1225,6 +1256,15 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCallExpr) (*ast.Type, error) {
 		}
 		return &ast.Type{Kind: ast.TypeString}, nil
 
+	case "Boolean":
+		if len(e.Args) != 1 {
+			return nil, &CheckError{Pos: e.Pos, Message: "Boolean() takes 1 argument"}
+		}
+		if _, err := c.checkExpr(e.Args[0]); err != nil {
+			return nil, err
+		}
+		return &ast.Type{Kind: ast.TypeBoolean}, nil
+
 	case "to_int":
 		if len(e.Args) != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: "int() takes 1 argument"}
@@ -1300,6 +1340,55 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCallExpr) (*ast.Type, error) {
 		}
 		return &ast.Type{Kind: ast.TypeBoolean}, nil
 
+	case "Object.keys", "Object.values", "Object.entries", "Object.hasOwn":
+		wantArgs := 1
+		if e.Name == "Object.hasOwn" {
+			wantArgs = 2
+		}
+		if len(e.Args) != wantArgs {
+			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes %d argument%s", e.Name, wantArgs, pluralSuffix(wantArgs))}
+		}
+		if c.isProcessEnvValue(e.Args[0]) {
+			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() requires an object literal or named object", e.Name)}
+		}
+		argType, err := c.checkExpr(e.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		if argType.Kind != ast.TypeObject {
+			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() argument must be object, got %s", e.Name, argType)}
+		}
+		if e.Name == "Object.hasOwn" {
+			keyType, err := c.checkExpr(e.Args[1])
+			if err != nil {
+				return nil, err
+			}
+			if !isObjectKeyCompatibleType(keyType) {
+				return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Object.hasOwn() key must be string-compatible, got %s", keyType)}
+			}
+			return &ast.Type{Kind: ast.TypeBoolean}, nil
+		}
+		if e.Name == "Object.entries" {
+			if obj, ok := unwrapAsExpr(e.Args[0]).(*ast.ObjectLit); ok {
+				for _, field := range obj.Fields {
+					if unsupportedObjectValueType(field.Value.GetType()) {
+						return nil, &CheckError{Pos: e.Pos, Message: "Object.entries() only supports scalar object values"}
+					}
+				}
+			}
+			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}}, nil
+		}
+		if e.Name == "Object.values" {
+			if obj, ok := unwrapAsExpr(e.Args[0]).(*ast.ObjectLit); ok {
+				for _, field := range obj.Fields {
+					if unsupportedObjectValueType(field.Value.GetType()) {
+						return nil, &CheckError{Pos: e.Pos, Message: "Object.values() only supports scalar object values"}
+					}
+				}
+			}
+		}
+		return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}, nil
+
 	case "Number.isFinite", "Number.isInteger":
 		if len(e.Args) != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
@@ -1369,7 +1458,7 @@ func (c *Checker) checkMethodCall(e *ast.MethodCallExpr) (*ast.Type, error) {
 	if err != nil {
 		return nil, err
 	}
-	if recvType.Kind == ast.TypeList && (e.Method == "map" || e.Method == "filter" || e.Method == "reduce" || e.Method == "findIndex" || e.Method == "some" || e.Method == "every" || e.Method == "find") {
+	if recvType.Kind == ast.TypeList && (e.Method == "map" || e.Method == "filter" || e.Method == "reduce" || e.Method == "findIndex" || e.Method == "some" || e.Method == "every" || e.Method == "find" || e.Method == "forEach") {
 		return c.checkListMethod(e, recvType)
 	}
 	for _, arg := range e.Args {
@@ -1442,6 +1531,40 @@ func (c *Checker) checkProcessMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
 	return &ast.Type{Kind: ast.TypeVoid}, nil
 }
 
+func isObjectKeyCompatibleType(typ *ast.Type) bool {
+	if typ == nil {
+		return true
+	}
+	switch typ.Kind {
+	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean, ast.TypeStatus:
+		return true
+	}
+	return false
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func (c *Checker) trackProcessEnvAlias(name string, expr ast.Expression) {
+	if c.isProcessEnvValue(expr) {
+		c.processEnvAliases[name] = true
+		return
+	}
+	delete(c.processEnvAliases, name)
+}
+
+func (c *Checker) isProcessEnvValue(expr ast.Expression) bool {
+	if isProcessEnvExpr(expr) {
+		return true
+	}
+	ident, ok := expr.(*ast.IdentExpr)
+	return ok && c.processEnvAliases[ident.Name]
+}
+
 func isProcessEnvExpr(expr ast.Expression) bool {
 	prop, ok := expr.(*ast.PropertyExpr)
 	if !ok || prop.Property != "env" {
@@ -1449,6 +1572,19 @@ func isProcessEnvExpr(expr ast.Expression) bool {
 	}
 	ident, ok := prop.Receiver.(*ast.IdentExpr)
 	return ok && ident.Name == "process"
+}
+
+func validateObjectKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("object keys must not be empty")
+	}
+	for _, r := range key {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return fmt.Errorf("object key %q is not supported; keys must match [A-Za-z0-9_]", key)
+	}
+	return nil
 }
 
 func (c *Checker) checkArgsMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
@@ -1664,6 +1800,8 @@ func (c *Checker) checkListMethod(e *ast.MethodCallExpr, listType *ast.Type) (*a
 			return nil, &CheckError{Pos: arrow.Pos, Message: "find() predicate callback must be expression-bodied"}
 		}
 		return listType.Elem, nil
+	case "forEach":
+		return nil, &CheckError{Pos: e.Pos, Message: "forEach() must be used as a statement"}
 	case "lastIndexOf":
 		if nargs != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: "lastIndexOf() takes 1 argument"}
@@ -1756,6 +1894,106 @@ func (c *Checker) checkArrowCallback(expr ast.Expression, elemType *ast.Type) (*
 		return nil, &CheckError{Pos: ast.Pos{}, Message: "list callback must be an arrow expression"}
 	}
 	return c.checkArrowWithParamType(arrow, elemType)
+}
+
+func (c *Checker) checkForEachCallback(expr ast.Expression, elemType *ast.Type) error {
+	arrow, ok := expr.(*ast.ArrowExpr)
+	if !ok {
+		return &CheckError{Pos: ast.Pos{}, Message: "forEach() callback must be an arrow expression"}
+	}
+	if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
+		return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+	}
+	old := c.scope
+	inner := newScope(c.scope)
+	param := arrow.Params[0]
+	pt := elemType
+	if param.Type != nil {
+		if !c.typesCompatible(param.Type, elemType) {
+			return &CheckError{Pos: param.Pos, Message: fmt.Sprintf("arrow parameter %q expects %s, got %s", param.Name, param.Type, elemType)}
+		}
+		pt = param.Type
+	}
+	inner.define(param.Name, pt)
+	if len(arrow.Params) == 2 {
+		p2 := arrow.Params[1]
+		p2t := &ast.Type{Kind: ast.TypeNumber}
+		if p2.Type != nil {
+			if !c.typesCompatible(p2.Type, p2t) {
+				return &CheckError{Pos: p2.Pos, Message: fmt.Sprintf("arrow index parameter %q expects %s, got %s", p2.Name, p2.Type, p2t)}
+			}
+			p2t = p2.Type
+		}
+		inner.define(p2.Name, p2t)
+	}
+	c.scope = inner
+	defer func() { c.scope = old }()
+	if arrow.BlockBody == nil {
+		return c.checkForEachCallbackExpr(arrow.Body)
+	}
+	for _, stmt := range arrow.BlockBody.Statements {
+		if err := c.checkForEachCallbackStmt(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Checker) checkForEachCallbackStmt(stmt ast.Statement) error {
+	switch s := stmt.(type) {
+	case *ast.ExprStmt:
+		return c.checkForEachCallbackExpr(s.Expr)
+	case *ast.ReturnStmt:
+		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support return"}
+	case *ast.BreakStmt:
+		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support break"}
+	case *ast.ContinueStmt:
+		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support continue"}
+	case *ast.IfStmt:
+		if _, err := c.checkExpr(s.Condition); err != nil {
+			return err
+		}
+		if err := c.checkForEachCallbackBlock(s.Then); err != nil {
+			return err
+		}
+		for _, ei := range s.ElseIfs {
+			if _, err := c.checkExpr(ei.Condition); err != nil {
+				return err
+			}
+			if err := c.checkForEachCallbackBlock(ei.Body); err != nil {
+				return err
+			}
+		}
+		return c.checkForEachCallbackBlock(s.Else)
+	default:
+		return c.checkStmt(stmt)
+	}
+}
+
+func (c *Checker) checkForEachCallbackExpr(expr ast.Expression) error {
+	t, err := c.checkExpr(expr)
+	if err != nil {
+		return err
+	}
+	if t != nil && t.Kind == ast.TypeVoid {
+		return nil
+	}
+	if me, ok := expr.(*ast.MethodCallExpr); ok && me.Method == "run" {
+		return nil
+	}
+	return &CheckError{Pos: ast.Pos{}, Message: "forEach() callback expression must be side-effecting"}
+}
+
+func (c *Checker) checkForEachCallbackBlock(block *ast.Block) error {
+	if block == nil {
+		return nil
+	}
+	for _, stmt := range block.Statements {
+		if err := c.checkForEachCallbackStmt(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Checker) checkArrowWithParamType(e *ast.ArrowExpr, elemType *ast.Type) (*ast.Type, error) {
