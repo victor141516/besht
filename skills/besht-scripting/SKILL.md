@@ -396,6 +396,7 @@ All external commands use `$()` expressions. Arguments are separate strings. The
 // Capture stdout explicitly
 let user: string = $("whoami").run().readStdout()
 let branch: string = $("git", "rev-parse", "--abbrev-ref", "HEAD").run().readStdout()
+console.log($("pwd").run().readStdout()) // inline reads can compile directly to "$(pwd)"
 
 // Capture stdout → list of lines
 let logsCmd = $("find", "/var/log", "-name", "*.log")
