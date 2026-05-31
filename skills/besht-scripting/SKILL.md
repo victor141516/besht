@@ -627,7 +627,7 @@ let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
 ```
 
-Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
+Static string literal and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`. Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
 
 ## Imports and Modules
 

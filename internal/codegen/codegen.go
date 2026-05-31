@@ -1825,6 +1825,40 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 	return words, true
 }
 
+func staticStringByteLength(expr ast.Expression) (int, bool) {
+	switch e := expr.(type) {
+	case *ast.StringLit:
+		return len(e.Value), true
+	case *ast.RawStringLit:
+		return len(e.Value), true
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return len(strings.Join(e.Parts, "")), true
+		}
+	case *ast.AsExpr:
+		return staticStringByteLength(e.Expr)
+	}
+	return 0, false
+}
+
+func staticScalarListLength(expr ast.Expression) (int, bool) {
+	switch e := expr.(type) {
+	case *ast.ListLit:
+		for _, elem := range e.Elements {
+			switch elem.(type) {
+			case *ast.StringLit, *ast.RawStringLit, *ast.IntLit, *ast.FloatLit, *ast.BoolLit:
+				continue
+			default:
+				return 0, false
+			}
+		}
+		return len(e.Elements), true
+	case *ast.AsExpr:
+		return staticScalarListLength(e.Expr)
+	}
+	return 0, false
+}
+
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	if len(words) == 0 {
 		return nil
@@ -3585,6 +3619,14 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 			if _, hasProp := g.objPropTypeMap[ident.Name+"."+e.Property]; hasProp {
 				return fmt.Sprintf("\"$%s\"", objectPropVar(ident.Name, e.Property)), nil
 			}
+		}
+	}
+	if e.Property == "length" {
+		if n, ok := staticScalarListLength(e.Receiver); ok {
+			return strconv.Itoa(n), nil
+		}
+		if n, ok := staticStringByteLength(e.Receiver); ok {
+			return strconv.Itoa(n), nil
 		}
 	}
 	recv, err := g.genExprValue(e.Receiver)
