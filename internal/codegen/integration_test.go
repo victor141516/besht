@@ -1310,12 +1310,14 @@ console.log(yes.toString())
 console.log(no.toString())
 console.log(Number.parseInt("42"))
 console.log(Number.parseInt("42", 10))
+console.log(Number.parseInt("2a", 10))
+console.log(Number.parseInt("ff", 16))
 try {
     $("false").run()
 } catch (code: status) {
     console.log(code.toString())
 }`)
-	want := "x\ntrue\nfalse\n42\n42\n1\n"
+	want := "x\ntrue\nfalse\n42\n42\n2\n255\n1\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

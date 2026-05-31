@@ -1825,6 +1825,82 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 	return words, true
 }
 
+func staticStringText(expr ast.Expression) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.StringLit:
+		return e.Value, true
+	case *ast.RawStringLit:
+		return e.Value, true
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return strings.Join(e.Parts, ""), true
+		}
+	case *ast.AsExpr:
+		return staticStringText(e.Expr)
+	}
+	return "", false
+}
+
+func staticIntLiteral(expr ast.Expression) (int, bool) {
+	switch e := expr.(type) {
+	case *ast.IntLit:
+		return int(e.Value), true
+	case *ast.AsExpr:
+		return staticIntLiteral(e.Expr)
+	}
+	return 0, false
+}
+
+func staticParseIntValue(input string, radixArg *int) (string, bool) {
+	s := strings.TrimLeft(input, " \t\n\r\f\v")
+	sign := int64(1)
+	if strings.HasPrefix(s, "+") {
+		s = s[1:]
+	} else if strings.HasPrefix(s, "-") {
+		sign = -1
+		s = s[1:]
+	}
+
+	radix := 10
+	if radixArg != nil {
+		radix = *radixArg
+	}
+	if radix == 0 {
+		radix = 10
+	}
+	if radix == 16 && (strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
+		s = s[2:]
+	} else if radixArg == nil && (strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
+		radix = 16
+		s = s[2:]
+	}
+	if radix < 2 || radix > 36 {
+		return "", false
+	}
+
+	var value int64
+	digits := 0
+	for _, r := range s {
+		digit := -1
+		switch {
+		case r >= '0' && r <= '9':
+			digit = int(r - '0')
+		case r >= 'a' && r <= 'z':
+			digit = int(r-'a') + 10
+		case r >= 'A' && r <= 'Z':
+			digit = int(r-'A') + 10
+		default:
+			return strconv.FormatInt(sign*value, 10), digits > 0
+		}
+		if digit >= radix {
+			return strconv.FormatInt(sign*value, 10), digits > 0
+		}
+		value = value*int64(radix) + int64(digit)
+		digits++
+	}
+	return strconv.FormatInt(sign*value, 10), digits > 0
+}
+
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	if len(words) == 0 {
 		return nil
@@ -3434,6 +3510,20 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 		return g.genBooleanCapture(e.Args[0])
 
 	case "Number.parseInt":
+		if value, ok := staticStringText(e.Args[0]); ok {
+			var radixArg *int
+			if len(e.Args) == 2 {
+				if radix, ok := staticIntLiteral(e.Args[1]); ok {
+					radixArg = &radix
+				} else {
+					goto dynamicParseInt
+				}
+			}
+			if parsed, ok := staticParseIntValue(value, radixArg); ok {
+				return parsed, nil
+			}
+		}
+	dynamicParseInt:
 		argStr, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err

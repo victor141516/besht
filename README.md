@@ -90,6 +90,7 @@ Files use the `.bsh` extension.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - String equality preserves spaces and newlines, including multiline template literals.
+- Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls keep the shell arithmetic path.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
 - `for (... of [...])` over static scalar list literals compiles to a compact shell `for` loop when values do not contain newlines; dynamic lists keep the newline-safe read loop.
@@ -479,6 +480,7 @@ When a variable is reassigned, besht updates its float-tracking metadata from th
 ```ts
 Number.parseInt("42");        // parse string to integer
 Number.parseInt("42", 10);    // optional radix argument
+Number.parseInt("2a", 10);    // 2; static parseable prefixes compile to constants
 Number.parseFloat("3.14");    // parse string to float
 Number.isFinite(n);           // true (no NaN/Infinity in shell)
 Number.isInteger(n);          // check if value is integer
