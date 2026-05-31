@@ -30,6 +30,8 @@ besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to
 besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
 ```
 
+Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators.
+
 ## Variable Declarations
 
 Types are optional. Use `let` for mutable variables and `const` for immutable ones. Besht accepts annotations for TypeScript-compatible syntax, editor support, and representation hints, but never validates them as types.

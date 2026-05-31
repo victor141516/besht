@@ -121,6 +121,35 @@ console.log("[" + value + "]")`
 	}
 }
 
+func TestIntegration_SingleModuleOutputOmitsModuleMarker(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `console.log("hello")`)
+	out, err := codegen.CompileFile(path, codegen.Options{NoCheck: true, NoSourceMap: true})
+	if err != nil {
+		t.Fatalf("CompileFile: %v", err)
+	}
+	if strings.Contains(out, "# --- module:") {
+		t.Fatalf("single-module output should omit module marker:\n%s", out)
+	}
+	if !strings.Contains(out, "printf '%s\\n' 'hello'") {
+		t.Fatalf("output missing compiled body:\n%s", out)
+	}
+}
+
+func TestIntegration_MultiModuleOutputKeepsModuleMarkers(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "lib.bsh", `export function msg(): string { return "hello" }`)
+	path := writeFile(t, dir, "main.bsh", `import { msg } from "./lib"
+console.log(msg())`)
+	out, err := codegen.CompileFile(path, codegen.Options{NoCheck: true, NoSourceMap: true})
+	if err != nil {
+		t.Fatalf("CompileFile: %v", err)
+	}
+	if !strings.Contains(out, "# --- module: lib ---") || !strings.Contains(out, "# --- module: main ---") {
+		t.Fatalf("multi-module output should keep module markers:\n%s", out)
+	}
+}
+
 func TestIntegration_ProcessExitRuntime(t *testing.T) {
 	out, err := runCompiledShellWithEnv(t, `process.exit(7)`, os.Environ())
 	if err == nil {

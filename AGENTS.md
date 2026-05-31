@@ -202,6 +202,8 @@ internal/
           or (codegen.CompileFileSplit)   ← split mode: one .sh per .bsh
 ```
 
+Bundled output omits `# --- module: name ---` separator comments when only one Besht module emits code. Keep separators for multi-module bundled output so generated files remain navigable.
+
 **Split mode output structure:**
 
 - Entry point `.sh`: `#!/bin/sh`, sets `_BESHT_ROOT`, then `. "$_BESHT_ROOT"/'lib/x.sh'` per Besht or copied shell import

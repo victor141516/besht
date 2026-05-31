@@ -249,12 +249,15 @@ func (c *Compiler) emit() (string, error) {
 
 	importedFnMap, importedVarMap, importedVarTypeMap := c.buildImportedMaps()
 	argsOptions, argsFlags := c.collectArgsSchema()
+	emittedModules := c.emittedModuleCount()
 
 	for _, mod := range c.modules {
 		if len(mod.Prog.Statements) == 0 && len(mod.Prog.Imports) == 0 {
 			continue
 		}
-		body.WriteString(fmt.Sprintf("# --- module: %s ---\n", mod.ModName))
+		if emittedModules > 1 {
+			body.WriteString(fmt.Sprintf("# --- module: %s ---\n", mod.ModName))
+		}
 		body.WriteString(c.shellImportSources(mod))
 
 		importMap := importedFnMap[mod.Path]
@@ -298,6 +301,17 @@ func (c *Compiler) emit() (string, error) {
 	sb.WriteString("\n")
 	sb.WriteString(body.String())
 	return sb.String(), nil
+}
+
+func (c *Compiler) emittedModuleCount() int {
+	count := 0
+	for _, mod := range c.modules {
+		if len(mod.Prog.Statements) == 0 && len(mod.Prog.Imports) == 0 {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func (c *Compiler) emitSplit(outDir string) error {

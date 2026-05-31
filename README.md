@@ -42,6 +42,8 @@ besht script.bsh | sh
 
 All imported Besht modules are inlined into a single `.sh` file. Explicit `.sh` imports are sourced from the generated script. Good for one-file scripts and piping to `sh`.
 
+One-file bundled output omits module separator comments for a more natural small-script shape. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators between modules.
+
 ### Split (`--split`)
 
 Each `.bsh` file compiles to its own `.sh` file in the output directory, preserving the source directory structure. Besht imports become POSIX source (`. file.sh`) calls at runtime. Explicit `.sh` imports are copied into the output directory and sourced with include guards.
