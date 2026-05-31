@@ -418,6 +418,7 @@ let result: string = $("cat", "/etc/passwd")
 // Redirect stdout
 $("make", "build").stdout("/tmp/build.log").run()
 $("echo", "line").stdout("/tmp/out.txt", "append").run()
+// Single-command redirects compile directly; pipeline redirects are grouped.
 
 // Redirect stderr
 $("make", "build").stderr("null").run()     // 2>/dev/null
