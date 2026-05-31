@@ -1905,7 +1905,11 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 				if err != nil {
 					return nil, err
 				}
-				return &ast.BuiltinCallExpr{Pos: pos, Name: "Number." + memberTok.Literal, Args: args}, nil
+				switch memberTok.Literal {
+				case "parseInt", "parseFloat", "isFinite", "isInteger", "isSafeInteger", "isNaN":
+					return &ast.BuiltinCallExpr{Pos: pos, Name: "Number." + memberTok.Literal, Args: args}, nil
+				}
+				return &ast.MethodCallExpr{Pos: pos, Receiver: &ast.IdentExpr{Pos: pos, Name: name}, Method: memberTok.Literal, Args: args}, nil
 			}
 			switch memberTok.Literal {
 			case "MAX_SAFE_INTEGER":

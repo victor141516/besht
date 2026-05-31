@@ -2,7 +2,6 @@ package checker
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/victor141516/besht/internal/ast"
 )
@@ -47,37 +46,19 @@ func (s *Scope) lookup(name string) (*ast.Type, bool) {
 }
 
 type Checker struct {
-	strict            bool
-	fns               map[string]*FnSig
-	scope             *Scope
-	currentFn         *FnSig
-	inFunction        bool
-	inLoop            bool
-	consts            map[string]bool
-	classProps        map[string]*ast.Type
-	processEnvAliases map[string]bool
-}
-
-type Options struct {
-	Strict bool
+	fns        map[string]*FnSig
+	scope      *Scope
+	inFunction bool
+	inLoop     bool
+	inCallback bool
+	consts     map[string]bool
 }
 
 func New() *Checker {
-	return NewWithOptions(Options{})
-}
-
-func NewStrict() *Checker {
-	return NewWithOptions(Options{Strict: true})
-}
-
-func NewWithOptions(opts Options) *Checker {
 	return &Checker{
-		strict:            opts.Strict,
-		fns:               make(map[string]*FnSig),
-		scope:             newScope(nil),
-		consts:            make(map[string]bool),
-		classProps:        make(map[string]*ast.Type),
-		processEnvAliases: make(map[string]bool),
+		fns:    make(map[string]*FnSig),
+		scope:  newScope(nil),
+		consts: make(map[string]bool),
 	}
 }
 
@@ -98,15 +79,1035 @@ func (c *Checker) RegisterVar(name string, typ *ast.Type) {
 
 func (c *Checker) Check(prog *ast.Program) error {
 	collectFnSigs(prog.Statements, c.fns)
-	if !c.strict {
-		return nil
+	c.predeclareTopLevel(prog.Statements)
+	if err := c.checkSemanticStmts(prog.Statements); err != nil {
+		return err
 	}
-	for _, stmt := range prog.Statements {
-		if err := c.checkStmt(stmt); err != nil {
+	varTypes := c.semanticVarTypes()
+	if err := ValidateFetchSurfaceWithTypes(prog.Statements, varTypes); err != nil {
+		return err
+	}
+	if err := ValidateObjectSurfaceWithTypes(prog.Statements, varTypes); err != nil {
+		return err
+	}
+	if err := ValidateForEachSurfaceWithTypes(prog.Statements, varTypes); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Checker) semanticVarTypes() map[string]*ast.Type {
+	out := make(map[string]*ast.Type)
+	for scope := c.scope; scope != nil; scope = scope.parent {
+		for name, typ := range scope.vars {
+			if _, exists := out[name]; !exists {
+				out[name] = typ
+			}
+		}
+	}
+	return out
+}
+
+func (c *Checker) predeclareTopLevel(stmts []ast.Statement) {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.LetDecl:
+			typ := s.TypeAnnot
+			if typ == nil && s.Value != nil {
+				typ = s.Value.GetType()
+			}
+			c.scope.define(s.Name, typ)
+			if s.IsConst {
+				c.consts[s.Name] = true
+			}
+		case *ast.DestructureDecl:
+			for _, name := range s.Names {
+				c.scope.define(name, &ast.Type{Kind: ast.TypeString})
+				if s.IsConst {
+					c.consts[name] = true
+				}
+			}
+		case *ast.ClassDecl:
+			c.scope.define(s.Name, &ast.Type{Kind: ast.TypeObject})
+		}
+	}
+}
+
+func (c *Checker) checkSemanticStmts(stmts []ast.Statement) error {
+	for _, stmt := range stmts {
+		if err := c.checkSemanticStmt(stmt); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (c *Checker) checkSemanticBlock(block *ast.Block) error {
+	if block == nil {
+		return nil
+	}
+	prev := c.scope
+	c.scope = newScope(prev)
+	defer func() { c.scope = prev }()
+	return c.checkSemanticStmts(block.Statements)
+}
+
+func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
+	switch s := stmt.(type) {
+	case nil, *ast.ImportDecl, *ast.DeclareStmt, *ast.DeclareFnStmt:
+		return nil
+	case *ast.BreakStmt:
+		if !c.inLoop && !c.inCallback {
+			return &CheckError{Pos: s.Pos, Message: "'break' outside of loop"}
+		}
+		return nil
+	case *ast.ContinueStmt:
+		if !c.inLoop && !c.inCallback {
+			return &CheckError{Pos: s.Pos, Message: "'continue' outside of loop"}
+		}
+		return nil
+	case *ast.LetDecl:
+		if _, ok := s.Value.(*ast.ArrowExpr); ok {
+			return &CheckError{Pos: s.Pos, Message: "arrow expressions can only be used as list callbacks"}
+		}
+		if err := c.checkSemanticExpr(s.Value); err != nil {
+			return err
+		}
+		typ := s.TypeAnnot
+		if typ == nil {
+			typ = c.semanticExprType(s.Value)
+		}
+		c.scope.define(s.Name, typ)
+		if s.IsConst {
+			c.consts[s.Name] = true
+		}
+	case *ast.DestructureDecl:
+		if err := c.checkSemanticExpr(s.Value); err != nil {
+			return err
+		}
+		for _, name := range s.Names {
+			c.scope.define(name, &ast.Type{Kind: ast.TypeString})
+			if s.IsConst {
+				c.consts[name] = true
+			}
+		}
+	case *ast.Assignment:
+		if c.consts[s.Name] {
+			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Name)}
+		}
+		if _, ok := c.scope.lookup(s.Name); !ok {
+			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
+		}
+		if _, ok := s.Value.(*ast.ArrowExpr); ok {
+			return &CheckError{Pos: s.Pos, Message: "arrow expressions can only be used as list callbacks"}
+		}
+		return c.checkSemanticExpr(s.Value)
+	case *ast.IndexAssignStmt:
+		if c.consts[s.Name] {
+			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Name)}
+		}
+		if _, ok := c.scope.lookup(s.Name); !ok {
+			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
+		}
+		if err := c.checkSemanticExpr(s.Index); err != nil {
+			return err
+		}
+		return c.checkSemanticExpr(s.Value)
+	case *ast.PropertyAssignStmt:
+		if s.Object != "this" {
+			if c.consts[s.Object] {
+				return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Object)}
+			}
+			if _, ok := c.scope.lookup(s.Object); !ok {
+				return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Object)}
+			}
+		}
+		return c.checkSemanticExpr(s.Value)
+	case *ast.FnDecl:
+		prev := c.scope
+		prevInFunction := c.inFunction
+		c.scope = newScope(prev)
+		c.inFunction = true
+		for _, param := range s.Params {
+			c.scope.define(param.Name, param.Type)
+		}
+		err := c.checkSemanticStmts(s.Body.Statements)
+		c.scope = prev
+		c.inFunction = prevInFunction
+		return err
+	case *ast.ClassDecl:
+		c.scope.define(s.Name, &ast.Type{Kind: ast.TypeObject})
+		fieldNames := make(map[string]bool)
+		accessorNames := make(map[string]map[ast.ClassAccessorKind]bool)
+		for _, prop := range s.Properties {
+			fieldNames[prop.Name] = true
+			if err := c.checkSemanticExpr(prop.Value); err != nil {
+				return err
+			}
+		}
+		for _, prop := range s.StaticProps {
+			fieldNames[prop.Name] = true
+			if err := c.checkSemanticExpr(prop.Value); err != nil {
+				return err
+			}
+		}
+		for _, accessor := range s.Accessors {
+			if fieldNames[accessor.Name] {
+				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("class accessor %q conflicts with field", accessor.Name)}
+			}
+			if accessorNames[accessor.Name] == nil {
+				accessorNames[accessor.Name] = make(map[ast.ClassAccessorKind]bool)
+			}
+			if accessorNames[accessor.Name][accessor.Kind] {
+				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("duplicate %s accessor %q", accessor.Kind, accessor.Name)}
+			}
+			accessorNames[accessor.Name][accessor.Kind] = true
+		}
+		for _, method := range s.Methods {
+			for name := range accessorNames {
+				if method.Name == "get_"+name || method.Name == "set_"+name {
+					return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("method %q conflicts with accessor %q", method.Name, name)}
+				}
+			}
+		}
+		if s.Constructor != nil {
+			if err := c.checkSemanticClassMethod(s.Constructor, true); err != nil {
+				return err
+			}
+		}
+		for i := range s.Methods {
+			method := &s.Methods[i]
+			if semanticBodyReturnsValue(method.Body.Statements) && classBodyMutatesThis(method.Body.Statements) {
+				return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("class method %q returns a value and cannot assign to this properties", method.Name)}
+			}
+			if err := c.checkSemanticClassMethod(&s.Methods[i], false); err != nil {
+				return err
+			}
+		}
+		for i := range s.Accessors {
+			accessor := &s.Accessors[i]
+			if accessor.Kind == ast.AccessorGet && len(accessor.Params) != 0 {
+				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not take parameters", accessor.Name)}
+			}
+			if accessor.Kind == ast.AccessorSet && len(accessor.Params) != 1 {
+				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must take exactly one parameter", accessor.Name)}
+			}
+			if accessor.Kind == ast.AccessorSet && accessor.ReturnType != nil && accessor.ReturnType.Kind != ast.TypeVoid {
+				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must not declare a return type", accessor.Name)}
+			}
+			if accessor.Kind == ast.AccessorGet && classBodyMutatesThis(accessor.Body.Statements) {
+				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not assign to this properties", accessor.Name)}
+			}
+			method := &ast.ClassMethod{Pos: accessor.Pos, Name: string(accessor.Kind) + "_" + accessor.Name, IsStatic: accessor.IsStatic, Params: accessor.Params, Body: accessor.Body}
+			if err := c.checkSemanticClassMethod(method, false); err != nil {
+				return err
+			}
+		}
+	case *ast.Block:
+		return c.checkSemanticBlock(s)
+	case *ast.IfStmt:
+		if err := c.checkSemanticExpr(s.Condition); err != nil {
+			return err
+		}
+		if err := c.checkSemanticBlock(s.Then); err != nil {
+			return err
+		}
+		for _, elseif := range s.ElseIfs {
+			if err := c.checkSemanticExpr(elseif.Condition); err != nil {
+				return err
+			}
+			if err := c.checkSemanticBlock(elseif.Body); err != nil {
+				return err
+			}
+		}
+		return c.checkSemanticBlock(s.Else)
+	case *ast.ForStmt:
+		if err := c.checkSemanticExpr(s.Iterator); err != nil {
+			return err
+		}
+		prev := c.scope
+		prevInLoop := c.inLoop
+		c.scope = newScope(prev)
+		c.inLoop = true
+		c.scope.define(s.VarName, &ast.Type{Kind: ast.TypeString})
+		err := c.checkSemanticStmts(s.Body.Statements)
+		c.scope = prev
+		c.inLoop = prevInLoop
+		return err
+	case *ast.CStyleForStmt:
+		prev := c.scope
+		prevInLoop := c.inLoop
+		c.scope = newScope(prev)
+		if assign, ok := s.Init.(*ast.Assignment); ok {
+			c.scope.define(assign.Name, &ast.Type{Kind: ast.TypeNumber})
+		}
+		if err := c.checkSemanticStmt(s.Init); err != nil {
+			c.scope = prev
+			return err
+		}
+		if err := c.checkSemanticExpr(s.Condition); err != nil {
+			c.scope = prev
+			return err
+		}
+		if err := c.checkSemanticStmt(s.Update); err != nil {
+			c.scope = prev
+			return err
+		}
+		c.inLoop = true
+		err := c.checkSemanticStmts(s.Body.Statements)
+		c.scope = prev
+		c.inLoop = prevInLoop
+		return err
+	case *ast.WhileStmt:
+		if err := c.checkSemanticExpr(s.Condition); err != nil {
+			return err
+		}
+		prevInLoop := c.inLoop
+		c.inLoop = true
+		err := c.checkSemanticBlock(s.Body)
+		c.inLoop = prevInLoop
+		return err
+	case *ast.TryStmt:
+		if err := c.checkSemanticBlock(s.Body); err != nil {
+			return err
+		}
+		prev := c.scope
+		c.scope = newScope(prev)
+		if s.CatchVar != "" {
+			c.scope.define(s.CatchVar, &ast.Type{Kind: ast.TypeStatus})
+		}
+		err := c.checkSemanticStmts(s.Catch.Statements)
+		c.scope = prev
+		return err
+	case *ast.SwitchStmt:
+		if err := c.checkSemanticExpr(s.Value); err != nil {
+			return err
+		}
+		prevInLoop := c.inLoop
+		c.inLoop = true
+		defer func() { c.inLoop = prevInLoop }()
+		for _, swCase := range s.Cases {
+			if !swCase.IsDefault {
+				if err := c.checkSemanticExpr(swCase.Value); err != nil {
+					return err
+				}
+			}
+			if err := c.checkSemanticBlock(swCase.Body); err != nil {
+				return err
+			}
+		}
+	case *ast.ReturnStmt:
+		if !c.inFunction && !c.inCallback {
+			return &CheckError{Pos: s.Pos, Message: "'return' outside of function"}
+		}
+		return c.checkSemanticExpr(s.Value)
+	case *ast.ExitStmt:
+		return c.checkSemanticExpr(s.Code)
+	case *ast.ExprStmt:
+		return c.checkSemanticExpr(s.Expr)
+	}
+	return nil
+}
+
+func (c *Checker) checkSemanticClassMethod(method *ast.ClassMethod, isConstructor bool) error {
+	prev := c.scope
+	prevInFunction := c.inFunction
+	c.scope = newScope(prev)
+	c.inFunction = true
+	if !method.IsStatic || isConstructor {
+		c.scope.define("this", &ast.Type{Kind: ast.TypeObject})
+	}
+	for _, param := range method.Params {
+		c.scope.define(param.Name, param.Type)
+	}
+	err := c.checkSemanticStmts(method.Body.Statements)
+	c.scope = prev
+	c.inFunction = prevInFunction
+	return err
+}
+
+func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.(type) {
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.RawStringLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.ThisExpr:
+		return nil
+	case *ast.IdentExpr:
+		if isSemanticGlobalIdent(e.Name) {
+			return nil
+		}
+		if _, ok := c.scope.lookup(e.Name); !ok {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("variable %q not declared", e.Name)}
+		}
+	case *ast.TemplateLit:
+		for _, part := range e.Exprs {
+			if err := c.checkSemanticExpr(part); err != nil {
+				return err
+			}
+		}
+	case *ast.ListLit:
+		for _, elem := range e.Elements {
+			if err := c.checkSemanticExpr(elem); err != nil {
+				return err
+			}
+		}
+	case *ast.ObjectLit:
+		for _, field := range e.Fields {
+			if err := c.checkSemanticExpr(field.Value); err != nil {
+				return err
+			}
+		}
+	case *ast.NewExpr:
+		if e.ClassName == "Set" && len(e.Args) != 0 {
+			return &CheckError{Pos: e.Pos, Message: "Set constructor takes no runtime arguments"}
+		}
+		for _, arg := range e.Args {
+			if err := c.checkSemanticExpr(arg); err != nil {
+				return err
+			}
+		}
+	case *ast.FnCallExpr:
+		if _, ok := c.fns[e.Name]; !ok {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("function %q not declared", e.Name)}
+		}
+		for _, arg := range e.Args {
+			if err := c.checkSemanticExpr(arg); err != nil {
+				return err
+			}
+		}
+	case *ast.BuiltinCallExpr:
+		if err := c.checkBuiltinArity(e); err != nil {
+			return err
+		}
+		for _, arg := range e.Args {
+			if err := c.checkSemanticExpr(arg); err != nil {
+				return err
+			}
+		}
+	case *ast.MethodCallExpr:
+		if err := c.checkMethodArity(e); err != nil {
+			return err
+		}
+		if err := c.checkSemanticExpr(e.Receiver); err != nil {
+			return err
+		}
+		for _, arg := range e.Args {
+			if err := c.checkSemanticExpr(arg); err != nil {
+				return err
+			}
+		}
+	case *ast.PropertyExpr:
+		if err := c.checkSemanticExpr(e.Receiver); err != nil {
+			return err
+		}
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
+			switch ident.Name {
+			case "process":
+				if e.Property != "env" {
+					return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no property %q", e.Property)}
+				}
+			case "Besht":
+				switch e.Property {
+				case "fs", "strings", "args", "iter":
+				default:
+					return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht has no property %q", e.Property)}
+				}
+			}
+		}
+		if recvType := c.semanticExprType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeFetchResponse {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", e.Property)}
+		}
+		return nil
+	case *ast.IndexExpr:
+		if err := c.checkSemanticExpr(e.Expr); err != nil {
+			return err
+		}
+		return c.checkSemanticExpr(e.Index)
+	case *ast.BinaryExpr:
+		if err := c.checkSemanticExpr(e.Left); err != nil {
+			return err
+		}
+		return c.checkSemanticExpr(e.Right)
+	case *ast.TernaryExpr:
+		if err := c.checkSemanticExpr(e.Condition); err != nil {
+			return err
+		}
+		if err := c.checkSemanticExpr(e.Then); err != nil {
+			return err
+		}
+		return c.checkSemanticExpr(e.Else)
+	case *ast.UnaryExpr:
+		return c.checkSemanticExpr(e.Expr)
+	case *ast.UpdateExpr:
+		if c.consts[e.Name] {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("cannot assign to const %q", e.Name)}
+		}
+		if _, ok := c.scope.lookup(e.Name); !ok {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("variable %q not declared", e.Name)}
+		}
+	case *ast.CmdExpr:
+		for i, arg := range e.Args {
+			if spread, ok := arg.(*ast.SpreadExpr); ok && i == 0 && len(e.Args) > 1 {
+				return &CheckError{Pos: spread.Pos, Message: "command-name spread must be the only $() argument"}
+			}
+		}
+		for _, arg := range e.Args {
+			if err := c.checkSemanticExpr(arg); err != nil {
+				return err
+			}
+		}
+	case *ast.PipeExpr:
+		if err := c.checkSemanticExpr(e.Left); err != nil {
+			return err
+		}
+		return c.checkSemanticExpr(e.Right)
+	case *ast.PropagateExpr:
+		return c.checkSemanticExpr(e.Expr)
+	case *ast.ArrowExpr:
+		prev := c.scope
+		prevInCallback := c.inCallback
+		c.scope = newScope(prev)
+		c.inCallback = true
+		for _, param := range e.Params {
+			c.scope.define(param.Name, param.Type)
+		}
+		var err error
+		if e.Body != nil {
+			err = c.checkSemanticExpr(e.Body)
+		} else {
+			err = c.checkSemanticBlock(e.BlockBody)
+		}
+		c.scope = prev
+		c.inCallback = prevInCallback
+		return err
+	case *ast.SpreadExpr:
+		return c.checkSemanticExpr(e.Expr)
+	case *ast.AsExpr:
+		return c.checkSemanticExpr(e.Expr)
+	case *ast.RangeExpr:
+		if err := c.checkSemanticExpr(e.Start); err != nil {
+			return err
+		}
+		return c.checkSemanticExpr(e.End)
+	}
+	return nil
+}
+
+func isSemanticGlobalIdent(name string) bool {
+	switch name {
+	case "Besht", "process", "Math", "Number", "Object", "Array", "Boolean", "console", "Set":
+		return true
+	}
+	return false
+}
+
+func (c *Checker) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
+	switch e.Name {
+	case "fetch":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
+		}
+	case "Boolean", "Array.isArray":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes 1 argument", e.Name)}
+		}
+	case "Number.parseInt", "Number.parseFloat":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 or 2 arguments"}
+		}
+	case "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
+		}
+	case "Array.from":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "Array.from() takes 1 argument"}
+		}
+	case "Object.keys", "Object.values", "Object.entries":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
+		}
+	case "Object.hasOwn":
+		if len(e.Args) != 2 {
+			return &CheckError{Pos: e.Pos, Message: "Object.hasOwn() takes 2 arguments"}
+		}
+	}
+	return nil
+}
+
+func (c *Checker) checkMethodArity(e *ast.MethodCallExpr) error {
+	if builtinName, ok := ast.BeshtMethodBuiltinName(e.Receiver, e.Method); ok {
+		want := 1
+		if builtinName == "Besht.iter.range" {
+			want = 2
+		}
+		if len(e.Args) != want {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s.%s() takes %d argument%s", beshtReceiverName(e.Receiver), e.Method, want, pluralSuffix(want))}
+		}
+		return nil
+	}
+	if ast.IsBeshtArgsReceiver(e.Receiver) {
+		switch e.Method {
+		case "argv":
+			if len(e.Args) != 0 {
+				return &CheckError{Pos: e.Pos, Message: "Besht.args.argv() takes no arguments"}
+			}
+		case "positional":
+			if len(e.Args) != 1 {
+				return &CheckError{Pos: e.Pos, Message: "Besht.args.positional() takes 1 argument"}
+			}
+		case "option":
+			if len(e.Args) < 1 || len(e.Args) > 2 {
+				return &CheckError{Pos: e.Pos, Message: "Besht.args.option() takes 1 or 2 arguments"}
+			}
+		case "flag":
+			if len(e.Args) < 1 || len(e.Args) > 2 {
+				return &CheckError{Pos: e.Pos, Message: "Besht.args.flag() takes 1 or 2 arguments"}
+			}
+		default:
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.args has no method %q", e.Method)}
+		}
+		return nil
+	}
+	if group, ok := ast.BeshtGroupReceiver(e.Receiver); ok {
+		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.%s has no method %q", group, e.Method)}
+	}
+	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+		return c.checkMathMethodArity(e)
+	}
+	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" {
+		if e.Method != "exit" {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no method %q", e.Method)}
+		}
+		if len(e.Args) > 1 {
+			return &CheckError{Pos: e.Pos, Message: "process.exit() takes 0 or 1 argument"}
+		}
+		return nil
+	}
+	recvType := c.semanticExprType(e.Receiver)
+	if recvType == nil {
+		return nil
+	}
+	switch recvType.Kind {
+	case ast.TypeCommand:
+		return c.checkCommandMethodArity(e)
+	case ast.TypeFetchResponse:
+		if e.Method != "text" {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)}
+		}
+		if len(e.Args) != 0 {
+			return &CheckError{Pos: e.Pos, Message: "FetchResponse.text() takes no arguments"}
+		}
+	case ast.TypeSet:
+		switch e.Method {
+		case "has", "add":
+			if len(e.Args) != 1 {
+				return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Set.%s() takes 1 argument", e.Method)}
+			}
+		default:
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Set has no method %q", e.Method)}
+		}
+	case ast.TypeList:
+		return c.checkListMethodArity(e)
+	case ast.TypeString:
+		return c.checkStringMethodArity(e)
+	case ast.TypeNumber:
+		return c.checkNumberMethodArity(e)
+	case ast.TypeBoolean, ast.TypeStatus:
+		if e.Method != "toString" {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
+		}
+		if len(e.Args) != 0 {
+			return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+		}
+	}
+	return nil
+}
+
+func (c *Checker) checkMathMethodArity(e *ast.MethodCallExpr) error {
+	want := 1
+	switch e.Method {
+	case "min", "max", "pow":
+		want = 2
+	case "round", "floor", "ceil", "abs", "sqrt", "trunc", "sign":
+	default:
+		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Math has no method %q", e.Method)}
+	}
+	if len(e.Args) != want {
+		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Math.%s() takes %d argument(s)", e.Method, want)}
+	}
+	return nil
+}
+
+func (c *Checker) checkCommandMethodArity(e *ast.MethodCallExpr) error {
+	switch e.Method {
+	case "pipe":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "pipe() takes 1 argument"}
+		}
+	case "run", "readStdout", "readStdoutLines", "readStderr", "exitCode", "clone":
+		if len(e.Args) != 0 {
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
+		}
+	case "stdout":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return &CheckError{Pos: e.Pos, Message: "stdout() takes 1 or 2 arguments: (path[, \"append\"])"}
+		}
+	case "stderr":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "stderr() takes 1 argument: \"null\", \"&1\", or a file path"}
+		}
+	case "workdir":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "workdir() takes 1 argument: path"}
+		}
+	case "env":
+		if len(e.Args) != 2 {
+			return &CheckError{Pos: e.Pos, Message: "env() on command takes 2 arguments: (name, value)"}
+		}
+		name, err := commandEnvName(e.Args[0])
+		if err != nil {
+			return &CheckError{Pos: e.Pos, Message: err.Error()}
+		}
+		if !isShellIdentifier(name) {
+			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("invalid command env name %q", name)}
+		}
+	default:
+		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("command has no method %q (available: run, pipe, readStdout, readStdoutLines, readStderr, exitCode, stdout, stderr, workdir, env, clone)", e.Method)}
+	}
+	return nil
+}
+
+func (c *Checker) checkListMethodArity(e *ast.MethodCallExpr) error {
+	switch e.Method {
+	case "push", "unshift", "includes", "indexOf", "lastIndexOf", "join":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
+		}
+	case "pop", "shift", "reverse", "toString":
+		if len(e.Args) != 0 {
+			if e.Method == "toString" {
+				return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			}
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
+		}
+	case "concat":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "concat() takes 1 argument"}
+		}
+	case "slice":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return &CheckError{Pos: e.Pos, Message: "slice() takes 1 or 2 arguments"}
+		}
+	case "map", "filter", "some", "every", "find", "findIndex":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
+		}
+		arrow, ok := e.Args[0].(*ast.ArrowExpr)
+		if !ok {
+			return &CheckError{Pos: e.Pos, Message: "list callback must be an arrow expression"}
+		}
+		if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
+			return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+		}
+		if (e.Method == "some" || e.Method == "every" || e.Method == "find") && arrow.BlockBody != nil {
+			return &CheckError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
+		}
+	case "forEach":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "forEach() takes 1 arrow callback"}
+		}
+		arrow, ok := e.Args[0].(*ast.ArrowExpr)
+		if !ok {
+			return &CheckError{Pos: e.Pos, Message: "forEach() callback must be an arrow expression"}
+		}
+		if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
+			return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+		}
+	case "reduce":
+		if len(e.Args) != 2 {
+			return &CheckError{Pos: e.Pos, Message: "reduce() takes 2 arguments: callback and initial value"}
+		}
+		arrow, ok := e.Args[0].(*ast.ArrowExpr)
+		if !ok {
+			return &CheckError{Pos: e.Pos, Message: "reduce() callback must be an arrow expression"}
+		}
+		if len(arrow.Params) != 2 {
+			return &CheckError{Pos: arrow.Pos, Message: "reduce() callback must take 2 parameters (accumulator, current)"}
+		}
+	default:
+		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("list has no method %q", e.Method)}
+	}
+	return nil
+}
+
+func (c *Checker) checkStringMethodArity(e *ast.MethodCallExpr) error {
+	switch e.Method {
+	case "toString", "trim", "trimStart", "trimEnd", "toUpperCase", "toLowerCase":
+		if len(e.Args) != 0 {
+			if e.Method == "toString" {
+				return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			}
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
+		}
+	case "split", "repeat", "at", "charAt":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
+		}
+	case "includes", "startsWith", "endsWith", "indexOf", "lastIndexOf", "slice", "substring", "padStart", "padEnd":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 or 2 arguments"}
+		}
+	case "replace", "replaceAll":
+		if len(e.Args) != 2 {
+			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 2 arguments"}
+		}
+	case "concat":
+		if len(e.Args) < 1 {
+			return &CheckError{Pos: e.Pos, Message: "concat() takes at least 1 argument"}
+		}
+	default:
+		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("string has no method %q", e.Method)}
+	}
+	return nil
+}
+
+func (c *Checker) checkNumberMethodArity(e *ast.MethodCallExpr) error {
+	switch e.Method {
+	case "toString":
+		if len(e.Args) != 0 {
+			return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+		}
+	case "toFixed":
+		if len(e.Args) > 1 {
+			return &CheckError{Pos: e.Pos, Message: "toFixed() takes 0 or 1 arguments"}
+		}
+	default:
+		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("number has no method %q", e.Method)}
+	}
+	return nil
+}
+
+func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
+	strType := &ast.Type{Kind: ast.TypeString}
+	numType := &ast.Type{Kind: ast.TypeNumber}
+	boolType := &ast.Type{Kind: ast.TypeBoolean}
+	voidType := &ast.Type{Kind: ast.TypeVoid}
+	listStrType := &ast.Type{Kind: ast.TypeList, Elem: strType}
+
+	switch e := expr.(type) {
+	case nil:
+		return nil
+	case *ast.AsExpr:
+		if e.Type != nil {
+			return e.Type
+		}
+		return c.semanticExprType(e.Expr)
+	case *ast.IntLit, *ast.FloatLit, *ast.UpdateExpr:
+		return numType
+	case *ast.StringLit, *ast.RawStringLit, *ast.TemplateLit:
+		return strType
+	case *ast.BoolLit:
+		return boolType
+	case *ast.NullLit, *ast.UndefinedLit:
+		return strType
+	case *ast.IdentExpr:
+		if typ, ok := c.scope.lookup(e.Name); ok {
+			return typ
+		}
+		return strType
+	case *ast.ListLit:
+		elemType := strType
+		if len(e.Elements) > 0 {
+			elemType = c.semanticExprType(e.Elements[0])
+			if elemType == nil {
+				elemType = strType
+			}
+		}
+		return &ast.Type{Kind: ast.TypeList, Elem: elemType}
+	case *ast.ObjectLit, *ast.ThisExpr:
+		return &ast.Type{Kind: ast.TypeObject}
+	case *ast.NewExpr:
+		if e.ClassName == "Set" {
+			elemType := strType
+			if len(e.TypeArgs) > 0 && e.TypeArgs[0] != nil {
+				elemType = e.TypeArgs[0]
+			}
+			return &ast.Type{Kind: ast.TypeSet, Elem: elemType}
+		}
+		return &ast.Type{Kind: ast.TypeObject}
+	case *ast.CmdExpr, *ast.PipeExpr:
+		return &ast.Type{Kind: ast.TypeCommand}
+	case *ast.PropagateExpr:
+		return c.semanticExprType(e.Expr)
+	case *ast.FnCallExpr:
+		if sig, ok := c.fns[e.Name]; ok && sig.ReturnType != nil {
+			return sig.ReturnType
+		}
+		return strType
+	case *ast.BuiltinCallExpr:
+		switch e.Name {
+		case "fetch":
+			return &ast.Type{Kind: ast.TypeFetchResponse}
+		case "Boolean", "Array.isArray", "Object.hasOwn", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+			return boolType
+		case "Number.parseInt", "Number.parseFloat":
+			return numType
+		case "Array.from", "Array.of", "Object.keys", "Object.values":
+			return listStrType
+		case "Object.entries":
+			return &ast.Type{Kind: ast.TypeList, Elem: listStrType}
+		case "console.log", "console.error":
+			return voidType
+		}
+		return strType
+	case *ast.MethodCallExpr:
+		if builtinName, ok := ast.BeshtMethodBuiltinName(e.Receiver, e.Method); ok {
+			if builtinName == "Besht.iter.range" {
+				return &ast.Type{Kind: ast.TypeList, Elem: numType}
+			}
+			return boolType
+		}
+		if ast.IsBeshtArgsReceiver(e.Receiver) {
+			switch e.Method {
+			case "argv":
+				return listStrType
+			case "flag":
+				return boolType
+			case "positional", "option":
+				return strType
+			}
+		}
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
+			if ident.Name == "Math" {
+				return numType
+			}
+			if ident.Name == "process" && e.Method == "exit" {
+				return voidType
+			}
+		}
+		recvType := c.semanticExprType(e.Receiver)
+		if recvType == nil {
+			return strType
+		}
+		switch recvType.Kind {
+		case ast.TypeCommand:
+			switch e.Method {
+			case "readStdout", "readStderr":
+				return strType
+			case "readStdoutLines":
+				return listStrType
+			case "exitCode":
+				return numType
+			default:
+				return recvType
+			}
+		case ast.TypeFetchResponse:
+			if e.Method == "text" {
+				return strType
+			}
+		case ast.TypeSet:
+			if e.Method == "has" {
+				return boolType
+			}
+			if e.Method == "add" {
+				return voidType
+			}
+		case ast.TypeList:
+			switch e.Method {
+			case "length":
+				return numType
+			case "join", "toString":
+				return strType
+			case "includes":
+				return boolType
+			case "indexOf", "lastIndexOf", "findIndex":
+				return numType
+			case "some", "every":
+				return boolType
+			case "find":
+				return recvType.Elem
+			case "map":
+				return &ast.Type{Kind: ast.TypeList, Elem: strType}
+			case "pop", "shift", "push", "unshift", "concat", "slice", "filter", "reverse":
+				return recvType
+			case "reduce":
+				if len(e.Args) == 2 {
+					return c.semanticExprType(e.Args[1])
+				}
+			}
+		case ast.TypeString:
+			switch e.Method {
+			case "includes", "startsWith", "endsWith":
+				return boolType
+			case "indexOf", "lastIndexOf":
+				return numType
+			case "split":
+				return listStrType
+			default:
+				return strType
+			}
+		case ast.TypeNumber:
+			if e.Method == "toString" || e.Method == "toFixed" {
+				return strType
+			}
+			return numType
+		case ast.TypeBoolean, ast.TypeStatus:
+			if e.Method == "toString" {
+				return strType
+			}
+		}
+		return strType
+	case *ast.PropertyExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" && e.Property == "env" {
+			return &ast.Type{Kind: ast.TypeObject}
+		}
+		recvType := c.semanticExprType(e.Receiver)
+		if recvType != nil && (recvType.Kind == ast.TypeList || recvType.Kind == ast.TypeString) && e.Property == "length" {
+			return numType
+		}
+		return nil
+	case *ast.IndexExpr:
+		recvType := c.semanticExprType(e.Expr)
+		if recvType != nil && recvType.Kind == ast.TypeList && recvType.Elem != nil {
+			return recvType.Elem
+		}
+		return strType
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case "==", "!=", "===", "!==", "<", ">", "<=", ">=", "&&", "||":
+			return boolType
+		case "-", "*", "/", "%":
+			return numType
+		case "??":
+			if left := c.semanticExprType(e.Left); left != nil {
+				return left
+			}
+			return c.semanticExprType(e.Right)
+		case "+":
+			left := c.semanticExprType(e.Left)
+			right := c.semanticExprType(e.Right)
+			if left != nil && right != nil && left.Kind == ast.TypeNumber && right.Kind == ast.TypeNumber {
+				return numType
+			}
+			return strType
+		}
+	case *ast.TernaryExpr:
+		return c.semanticExprType(e.Then)
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			return boolType
+		}
+		return c.semanticExprType(e.Expr)
+	case *ast.ArrowExpr:
+		return strType
+	case *ast.SpreadExpr:
+		return c.semanticExprType(e.Expr)
+	case *ast.RangeExpr:
+		return &ast.Type{Kind: ast.TypeList, Elem: numType}
+	}
+	return strType
 }
 
 func collectFnSigs(stmts []ast.Statement, fns map[string]*FnSig) {
@@ -141,343 +1142,6 @@ func collectFnSigs(stmts []ast.Statement, fns map[string]*FnSig) {
 			}
 		}
 	}
-}
-
-func (c *Checker) checkStmt(stmt ast.Statement) error {
-	switch s := stmt.(type) {
-	case *ast.ImportDecl:
-		return nil
-	case *ast.LetDecl:
-		return c.checkLetDecl(s)
-	case *ast.DestructureDecl:
-		return c.checkDestructureDecl(s)
-	case *ast.Assignment:
-		return c.checkAssignment(s)
-	case *ast.IndexAssignStmt:
-		return c.checkIndexAssign(s)
-	case *ast.PropertyAssignStmt:
-		if s.Object != "this" {
-			if _, ok := c.scope.lookup(s.Object); !ok {
-				return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Object)}
-			}
-		} else if _, ok := c.scope.lookup("this"); !ok {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Object)}
-		}
-		_, err := c.checkExpr(s.Value)
-		return err
-	case *ast.FnDecl:
-		return c.checkFnDecl(s)
-	case *ast.ClassDecl:
-		c.scope.define(s.Name, &ast.Type{Kind: ast.TypeObject})
-		return c.checkClassDecl(s)
-	case *ast.DeclareFnStmt:
-		return nil
-	case *ast.IfStmt:
-		return c.checkIf(s)
-	case *ast.ForStmt:
-		return c.checkFor(s)
-	case *ast.WhileStmt:
-		return c.checkWhile(s)
-	case *ast.TryStmt:
-		return c.checkTry(s)
-	case *ast.SwitchStmt:
-		return c.checkSwitch(s)
-	case *ast.ReturnStmt:
-		return c.checkReturn(s)
-	case *ast.ExitStmt:
-		return nil
-	case *ast.ExprStmt:
-		return c.checkExprStmt(s.Expr)
-	case *ast.Block:
-		return c.checkBlock(s)
-	case *ast.CStyleForStmt:
-		return c.checkCStyleFor(s)
-	case *ast.BreakStmt:
-		if !c.inLoop {
-			return &CheckError{Pos: s.Pos, Message: "'break' outside of loop"}
-		}
-		return nil
-	case *ast.ContinueStmt:
-		if !c.inLoop {
-			return &CheckError{Pos: s.Pos, Message: "'continue' outside of loop"}
-		}
-		return nil
-	}
-	return nil
-}
-
-func (c *Checker) checkExprStmt(expr ast.Expression) error {
-	if e, ok := expr.(*ast.MethodCallExpr); ok && e.Method == "forEach" {
-		recvType, err := c.checkExpr(e.Receiver)
-		if err != nil {
-			return err
-		}
-		if recvType.Kind == ast.TypeList {
-			return c.checkForEachMethod(e, recvType)
-		}
-	}
-	_, err := c.checkExpr(expr)
-	return err
-}
-
-func (c *Checker) checkForEachMethod(e *ast.MethodCallExpr, listType *ast.Type) error {
-	if len(e.Args) != 1 {
-		return &CheckError{Pos: e.Pos, Message: "forEach() takes 1 arrow callback"}
-	}
-	return c.checkForEachCallback(e.Args[0], listType.Elem)
-}
-
-func (c *Checker) checkDestructureDecl(s *ast.DestructureDecl) error {
-	valType, err := c.checkExpr(s.Value)
-	if err != nil {
-		return err
-	}
-	elemType := &ast.Type{Kind: ast.TypeString}
-	if valType != nil && valType.Kind == ast.TypeList && valType.Elem != nil {
-		elemType = valType.Elem
-	}
-	for _, name := range s.Names {
-		if _, exists := c.scope.vars[name]; exists {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q already declared in this scope", name)}
-		}
-		c.scope.define(name, elemType)
-		if s.IsConst {
-			c.consts[name] = true
-		}
-	}
-	return nil
-}
-
-func (c *Checker) checkIndexAssign(s *ast.IndexAssignStmt) error {
-	existing, ok := c.scope.lookup(s.Name)
-	if !ok {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
-	}
-	if existing.Kind == ast.TypeObject {
-		if _, err := c.checkExpr(s.Index); err != nil {
-			return err
-		}
-		if _, err := c.checkExpr(s.Value); err != nil {
-			return err
-		}
-		return nil
-	}
-	if existing.Kind != ast.TypeList {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("index assignment requires list<T> or object, got %s", existing)}
-	}
-	idxType, err := c.checkExpr(s.Index)
-	if err != nil {
-		return err
-	}
-	if idxType.Kind != ast.TypeNumber {
-		return &CheckError{Pos: s.Pos, Message: "list index must be int"}
-	}
-	valType, err := c.checkExpr(s.Value)
-	if err != nil {
-		return err
-	}
-	if !c.typesCompatible(existing.Elem, valType) {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign %s to list element of type %s", valType, existing.Elem)}
-	}
-	return nil
-}
-
-func (c *Checker) checkLetDecl(s *ast.LetDecl) error {
-	if _, exists := c.scope.vars[s.Name]; exists {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q already declared in this scope", s.Name)}
-	}
-
-	valType, err := c.checkExpr(s.Value)
-	if err != nil {
-		return err
-	}
-
-	declared := s.TypeAnnot
-	if !c.typesCompatible(declared, valType) {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("type mismatch: declared %s, got %s", declared, valType)}
-	}
-	if declared == nil {
-		declared = valType
-	}
-
-	s.ResolvedTy = declared
-	c.scope.define(s.Name, declared)
-	c.trackProcessEnvAlias(s.Name, s.Value)
-	if s.IsConst {
-		c.consts[s.Name] = true
-	}
-	return nil
-}
-
-func (c *Checker) checkAssignment(s *ast.Assignment) error {
-	existing, ok := c.scope.lookup(s.Name)
-	if !ok {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared (use 'let' to declare)", s.Name)}
-	}
-	if c.consts[s.Name] {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Name)}
-	}
-
-	valType, err := c.checkExpr(s.Value)
-	if err != nil {
-		return err
-	}
-
-	if !c.typesCompatible(existing, valType) {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign %s to variable of type %s", valType, existing)}
-	}
-	c.trackProcessEnvAlias(s.Name, s.Value)
-	return nil
-}
-
-func (c *Checker) checkFnDecl(s *ast.FnDecl) error {
-	prevFn := c.currentFn
-	prevInFn := c.inFunction
-
-	retType := s.ReturnType
-	if retType == nil {
-		retType = &ast.Type{Kind: ast.TypeVoid}
-	}
-	sig := &FnSig{Params: s.Params, ReturnType: retType}
-	c.currentFn = sig
-	c.inFunction = true
-
-	outer := c.scope
-	c.scope = newScope(outer)
-	for _, param := range s.Params {
-		c.scope.define(param.Name, param.Type)
-	}
-
-	err := c.checkBlock(s.Body)
-
-	c.scope = outer
-	c.currentFn = prevFn
-	c.inFunction = prevInFn
-
-	return err
-}
-
-func (c *Checker) checkClassDecl(s *ast.ClassDecl) error {
-	fieldNames := make(map[string]bool)
-	accessorNames := make(map[string]map[ast.ClassAccessorKind]bool)
-	for _, prop := range s.Properties {
-		fieldNames[prop.Name] = true
-	}
-	for _, prop := range s.StaticProps {
-		fieldNames[prop.Name] = true
-	}
-	for _, accessor := range s.Accessors {
-		if fieldNames[accessor.Name] {
-			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("class accessor %q conflicts with field", accessor.Name)}
-		}
-		if accessorNames[accessor.Name] == nil {
-			accessorNames[accessor.Name] = make(map[ast.ClassAccessorKind]bool)
-		}
-		if accessorNames[accessor.Name][accessor.Kind] {
-			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("duplicate %s accessor %q", accessor.Kind, accessor.Name)}
-		}
-		accessorNames[accessor.Name][accessor.Kind] = true
-	}
-	for _, method := range s.Methods {
-		for name := range accessorNames {
-			if method.Name == "get_"+name || method.Name == "set_"+name {
-				return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("method %q conflicts with accessor %q", method.Name, name)}
-			}
-		}
-	}
-	for _, prop := range s.StaticProps {
-		pt := prop.Type
-		if pt == nil && prop.Value != nil {
-			var err error
-			pt, err = c.checkExpr(prop.Value)
-			if err != nil {
-				return err
-			}
-		}
-		if pt == nil {
-			pt = &ast.Type{Kind: ast.TypeString}
-		}
-		c.classProps[s.Name+"."+prop.Name] = pt
-	}
-	for _, accessor := range s.Accessors {
-		if accessor.IsStatic && accessor.Kind == ast.AccessorGet && accessor.ReturnType != nil && accessor.ReturnType.Kind != ast.TypeVoid {
-			c.classProps[s.Name+"."+accessor.Name] = accessor.ReturnType
-		}
-	}
-	for _, prop := range s.Properties {
-		if prop.Value != nil {
-			if _, err := c.checkExpr(prop.Value); err != nil {
-				return err
-			}
-		}
-	}
-	if s.Constructor != nil {
-		if err := c.checkClassMethod(s.Constructor, true); err != nil {
-			return err
-		}
-	}
-	for i := range s.Methods {
-		if err := c.checkClassMethod(&s.Methods[i], false); err != nil {
-			return err
-		}
-	}
-	for i := range s.Accessors {
-		if err := c.checkClassAccessor(&s.Accessors[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *Checker) checkClassAccessor(accessor *ast.ClassAccessor) error {
-	switch accessor.Kind {
-	case ast.AccessorGet:
-		if len(accessor.Params) != 0 {
-			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q takes no parameters", accessor.Name)}
-		}
-		if accessor.ReturnType == nil || accessor.ReturnType.Kind == ast.TypeVoid {
-			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must declare a return type", accessor.Name)}
-		}
-		if classBodyMutatesThis(accessor.Body.Statements) {
-			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not assign to this properties", accessor.Name)}
-		}
-	case ast.AccessorSet:
-		if len(accessor.Params) != 1 {
-			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q takes exactly one parameter", accessor.Name)}
-		}
-		if accessor.ReturnType != nil && accessor.ReturnType.Kind != ast.TypeVoid {
-			return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must not declare a return type", accessor.Name)}
-		}
-	}
-	method := &ast.ClassMethod{Pos: accessor.Pos, Name: string(accessor.Kind) + "_" + accessor.Name, IsStatic: accessor.IsStatic, Params: accessor.Params, ReturnType: accessor.ReturnType, Body: accessor.Body}
-	return c.checkClassMethod(method, false)
-}
-
-func (c *Checker) checkClassMethod(method *ast.ClassMethod, isConstructor bool) error {
-	retType := method.ReturnType
-	if retType == nil || isConstructor {
-		retType = &ast.Type{Kind: ast.TypeVoid}
-	}
-	if !isConstructor && retType.Kind != ast.TypeVoid && classBodyMutatesThis(method.Body.Statements) {
-		return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("class method %q returns a value and cannot assign to this properties", method.Name)}
-	}
-	prevFn := c.currentFn
-	prevInFn := c.inFunction
-	c.currentFn = &FnSig{Params: method.Params, ReturnType: retType}
-	c.inFunction = true
-	outer := c.scope
-	c.scope = newScope(outer)
-	if !method.IsStatic || isConstructor {
-		c.scope.define("this", &ast.Type{Kind: ast.TypeObject})
-	}
-	for _, param := range method.Params {
-		c.scope.define(param.Name, param.Type)
-	}
-	err := c.checkBlock(method.Body)
-	c.scope = outer
-	c.currentFn = prevFn
-	c.inFunction = prevInFn
-	return err
 }
 
 func classBodyMutatesThis(stmts []ast.Statement) bool {
@@ -534,1012 +1198,65 @@ func classStmtMutatesThis(stmt ast.Statement) bool {
 	return classBodyMutatesThis([]ast.Statement{stmt})
 }
 
-func (c *Checker) checkBlock(block *ast.Block) error {
-	outer := c.scope
-	outerProcessEnvAliases := c.processEnvAliases
-	c.scope = newScope(outer)
-	c.processEnvAliases = cloneBoolMap(outerProcessEnvAliases)
-	for _, stmt := range block.Statements {
-		if err := c.checkStmt(stmt); err != nil {
-			c.scope = outer
-			c.processEnvAliases = outerProcessEnvAliases
-			return err
-		}
-	}
-	c.scope = outer
-	c.processEnvAliases = outerProcessEnvAliases
-	return nil
-}
-
-func (c *Checker) checkIf(s *ast.IfStmt) error {
-	condType, err := c.checkExpr(s.Condition)
-	if err != nil {
-		return err
-	}
-	if condType.Kind != ast.TypeBoolean && condType.Kind != ast.TypeStatus && condType.Kind != ast.TypeCommand {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("if condition must be bool or status, got %s", condType)}
-	}
-	if err := c.checkBlock(s.Then); err != nil {
-		return err
-	}
-	for _, ei := range s.ElseIfs {
-		eiType, err := c.checkExpr(ei.Condition)
-		if err != nil {
-			return err
-		}
-		if eiType.Kind != ast.TypeBoolean && eiType.Kind != ast.TypeStatus && eiType.Kind != ast.TypeCommand {
-			return &CheckError{Pos: ei.Pos, Message: "else-if condition must be bool or status"}
-		}
-		if err := c.checkBlock(ei.Body); err != nil {
-			return err
-		}
-	}
-	if s.Else != nil {
-		if err := c.checkBlock(s.Else); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *Checker) checkCStyleFor(s *ast.CStyleForStmt) error {
-	outer := c.scope
-	c.scope = newScope(outer)
-
-	if assign, ok := s.Init.(*ast.Assignment); ok {
-		valType, err := c.checkExpr(assign.Value)
-		if err != nil {
-			c.scope = outer
-			return err
-		}
-		c.scope.define(assign.Name, valType)
-	} else if err := c.checkStmt(s.Init); err != nil {
-		c.scope = outer
-		return err
-	}
-	condType, err := c.checkExpr(s.Condition)
-	if err != nil {
-		c.scope = outer
-		return err
-	}
-	if condType.Kind != ast.TypeBoolean && condType.Kind != ast.TypeNumber && condType.Kind != ast.TypeCommand {
-		c.scope = outer
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("for condition must be boolean, got %s", condType)}
-	}
-	if err := c.checkStmt(s.Update); err != nil {
-		c.scope = outer
-		return err
-	}
-
-	prevInLoop := c.inLoop
-	c.inLoop = true
-	err = c.checkBlock(s.Body)
-	c.inLoop = prevInLoop
-	c.scope = outer
-	return err
-}
-
-func (c *Checker) checkFor(s *ast.ForStmt) error {
-	iterType, err := c.checkExpr(s.Iterator)
-	if err != nil {
-		return err
-	}
-
-	var elemType *ast.Type
-	switch iterType.Kind {
-	case ast.TypeList:
-		elemType = iterType.Elem
-	case ast.TypeString:
-		elemType = &ast.Type{Kind: ast.TypeString}
-	default:
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot iterate over %s; expected list<T> or string (from shell)", iterType)}
-	}
-
-	prevInLoop := c.inLoop
-	c.inLoop = true
-	outer := c.scope
-	c.scope = newScope(outer)
-	c.scope.define(s.VarName, elemType)
-	err = c.checkBlock(s.Body)
-	c.scope = outer
-	c.inLoop = prevInLoop
-	return err
-}
-
-func (c *Checker) checkWhile(s *ast.WhileStmt) error {
-	condType, err := c.checkExpr(s.Condition)
-	if err != nil {
-		return err
-	}
-	if condType.Kind != ast.TypeBoolean && condType.Kind != ast.TypeStatus && condType.Kind != ast.TypeCommand {
-		return &CheckError{Pos: s.Pos, Message: "while condition must be bool or status"}
-	}
-	prevInLoop := c.inLoop
-	c.inLoop = true
-	err = c.checkBlock(s.Body)
-	c.inLoop = prevInLoop
-	return err
-}
-
-func (c *Checker) checkTry(s *ast.TryStmt) error {
-	if err := c.checkBlock(s.Body); err != nil {
-		return err
-	}
-	outer := c.scope
-	c.scope = newScope(outer)
-	c.scope.define(s.CatchVar, &ast.Type{Kind: ast.TypeStatus})
-	err := c.checkBlock(s.Catch)
-	c.scope = outer
-	return err
-}
-
-func (c *Checker) checkSwitch(s *ast.SwitchStmt) error {
-	if _, err := c.checkExpr(s.Value); err != nil {
-		return err
-	}
-	prevInLoop := c.inLoop
-	c.inLoop = true
-	for _, swCase := range s.Cases {
-		if !swCase.IsDefault {
-			if _, err := c.checkExpr(swCase.Value); err != nil {
-				c.inLoop = prevInLoop
-				return err
+func semanticBodyReturnsValue(stmts []ast.Statement) bool {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.ReturnStmt:
+			if s.Value != nil {
+				return true
+			}
+		case *ast.Block:
+			if semanticBodyReturnsValue(s.Statements) {
+				return true
+			}
+		case *ast.IfStmt:
+			if semanticBodyReturnsValue(s.Then.Statements) || (s.Else != nil && semanticBodyReturnsValue(s.Else.Statements)) {
+				return true
+			}
+			for _, ei := range s.ElseIfs {
+				if semanticBodyReturnsValue(ei.Body.Statements) {
+					return true
+				}
+			}
+		case *ast.ForStmt:
+			if semanticBodyReturnsValue(s.Body.Statements) {
+				return true
+			}
+		case *ast.CStyleForStmt:
+			if semanticStmtReturnsValue(s.Init) || semanticStmtReturnsValue(s.Update) || semanticBodyReturnsValue(s.Body.Statements) {
+				return true
+			}
+		case *ast.WhileStmt:
+			if semanticBodyReturnsValue(s.Body.Statements) {
+				return true
+			}
+		case *ast.TryStmt:
+			if semanticBodyReturnsValue(s.Body.Statements) || semanticBodyReturnsValue(s.Catch.Statements) {
+				return true
+			}
+		case *ast.SwitchStmt:
+			for _, swCase := range s.Cases {
+				if semanticBodyReturnsValue(swCase.Body.Statements) {
+					return true
+				}
 			}
 		}
-		if err := c.checkBlock(swCase.Body); err != nil {
-			c.inLoop = prevInLoop
-			return err
-		}
-	}
-	c.inLoop = prevInLoop
-	return nil
-}
-
-func (c *Checker) checkReturn(s *ast.ReturnStmt) error {
-	if !c.inFunction {
-		return &CheckError{Pos: s.Pos, Message: "'return' outside of function"}
-	}
-	if s.Value == nil {
-		if c.currentFn.ReturnType.Kind != ast.TypeVoid {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("function returns %s, but bare return found", c.currentFn.ReturnType)}
-		}
-		return nil
-	}
-	valType, err := c.checkExpr(s.Value)
-	if err != nil {
-		return err
-	}
-	if !c.typesCompatible(c.currentFn.ReturnType, valType) {
-		return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("return type mismatch: function returns %s, got %s", c.currentFn.ReturnType, valType)}
-	}
-	return nil
-}
-
-func (c *Checker) checkExpr(expr ast.Expression) (*ast.Type, error) {
-	var t *ast.Type
-	var err error
-
-	switch e := expr.(type) {
-	case *ast.IntLit:
-		t = &ast.Type{Kind: ast.TypeNumber}
-	case *ast.FloatLit:
-		t = &ast.Type{Kind: ast.TypeNumber}
-	case *ast.StringLit:
-		t = &ast.Type{Kind: ast.TypeString}
-	case *ast.RawStringLit:
-		t = &ast.Type{Kind: ast.TypeString}
-	case *ast.TemplateLit:
-		t = &ast.Type{Kind: ast.TypeString}
-		err = c.checkTemplateInterpolation(e)
-	case *ast.BoolLit:
-		t = &ast.Type{Kind: ast.TypeBoolean}
-	case *ast.UndefinedLit:
-		t = &ast.Type{Kind: ast.TypeString}
-	case *ast.NullLit:
-		t = &ast.Type{Kind: ast.TypeString}
-	case *ast.ListLit:
-		t, err = c.checkListLit(e)
-	case *ast.ObjectLit:
-		for _, field := range e.Fields {
-			if err := validateObjectKey(field.Key); err != nil {
-				return nil, &CheckError{Pos: field.Pos, Message: err.Error()}
-			}
-			if _, err := c.checkExpr(field.Value); err != nil {
-				return nil, err
-			}
-		}
-		t = &ast.Type{Kind: ast.TypeObject}
-	case *ast.IdentExpr:
-		t, err = c.checkIdent(e)
-	case *ast.ArrowExpr:
-		t, err = c.checkStandaloneArrow(e)
-	case *ast.NewExpr:
-		for _, arg := range e.Args {
-			if _, err := c.checkExpr(arg); err != nil {
-				return nil, err
-			}
-		}
-		if e.ClassName == "Set" {
-			if len(e.Args) != 0 {
-				return nil, &CheckError{Pos: e.Pos, Message: "Set constructor takes no runtime arguments"}
-			}
-			if len(e.TypeArgs) > 1 {
-				return nil, &CheckError{Pos: e.Pos, Message: "Set constructor takes at most 1 type argument"}
-			}
-			elem := &ast.Type{Kind: ast.TypeString}
-			if len(e.TypeArgs) > 0 {
-				elem = e.TypeArgs[0]
-			}
-			t = &ast.Type{Kind: ast.TypeSet, Elem: elem}
-		} else {
-			t = &ast.Type{Kind: ast.TypeObject}
-		}
-	case *ast.ThisExpr:
-		t = &ast.Type{Kind: ast.TypeObject}
-	case *ast.BinaryExpr:
-		t, err = c.checkBinary(e)
-	case *ast.TernaryExpr:
-		t, err = c.checkTernary(e)
-	case *ast.UnaryExpr:
-		t, err = c.checkUnary(e)
-	case *ast.UpdateExpr:
-		t, err = c.checkUpdate(e)
-	case *ast.PipeExpr:
-		t = &ast.Type{Kind: ast.TypeCommand}
-	case *ast.CmdExpr:
-		t, err = c.checkCmdExpr(e)
-	case *ast.FnCallExpr:
-		t, err = c.checkFnCall(e)
-	case *ast.BuiltinCallExpr:
-		t, err = c.checkBuiltinCall(e)
-	case *ast.RangeExpr:
-		t, err = c.checkRange(e)
-	case *ast.PropagateExpr:
-		t, err = c.checkPropagate(e)
-	case *ast.IndexExpr:
-		t, err = c.checkIndexExpr(e)
-	case *ast.MethodCallExpr:
-		t, err = c.checkMethodCall(e)
-	case *ast.PropertyExpr:
-		t, err = c.checkProperty(e)
-	case *ast.SpreadExpr:
-		t, err = c.checkExpr(e.Expr)
-	case *ast.AsExpr:
-		if _, err := c.checkExpr(e.Expr); err != nil {
-			return nil, err
-		}
-		t = e.Type
-	default:
-		return nil, fmt.Errorf("unknown expression type %T", expr)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-	if setter, ok := expr.(interface{ SetType(*ast.Type) }); ok {
-		setter.SetType(t)
-	}
-	return t, nil
-}
-
-func (c *Checker) checkTemplateInterpolation(e *ast.TemplateLit) error {
-	for _, expr := range e.Exprs {
-		if _, err := c.checkExpr(expr); err != nil {
-			return err
-		}
-	}
-	if len(e.Exprs) > 0 {
-		return nil
-	}
-	refs := extractVarRefs(e.Value)
-	for _, ref := range refs {
-		if ref == "" || strings.HasPrefix(ref, "(") {
-			continue
-		}
-		name := ref
-		if idx := strings.IndexAny(ref, ":-+=?#%"); idx >= 0 {
-			name = ref[:idx]
-		}
-		name = strings.TrimSpace(name)
-		if isShellSpecialVar(name) {
-			continue
-		}
-		if _, ok := c.scope.lookup(name); !ok {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("undefined variable %q in template literal", name)}
-		}
-	}
-	return nil
-}
-
-func (c *Checker) checkStringInterpolation(e *ast.StringLit) error {
-	refs := extractVarRefs(e.Value)
-	for _, ref := range refs {
-		if ref == "" || strings.HasPrefix(ref, "(") {
-			continue
-		}
-		name := ref
-		if idx := strings.IndexAny(ref, ":-+=?#%"); idx >= 0 {
-			name = ref[:idx]
-		}
-		name = strings.TrimSpace(name)
-		if isShellSpecialVar(name) {
-			continue
-		}
-		if _, ok := c.scope.lookup(name); !ok {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("undefined variable %q in string interpolation", name)}
-		}
-	}
-	return nil
-}
-
-func extractVarRefs(s string) []string {
-	var refs []string
-	i := 0
-	for i < len(s) {
-		if s[i] == '$' && i+1 < len(s) && s[i+1] == '{' {
-			j := i + 2
-			for j < len(s) && s[j] != '}' {
-				j++
-			}
-			if j < len(s) {
-				refs = append(refs, s[i+2:j])
-			}
-			i = j + 1
-		} else {
-			i++
-		}
-	}
-	return refs
-}
-
-func (c *Checker) checkListLit(e *ast.ListLit) (*ast.Type, error) {
-	if len(e.Elements) == 0 {
-		return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}, nil
-	}
-	firstType, err := c.checkListElementType(e.Elements[0])
-	if err != nil {
-		return nil, err
-	}
-	for _, elem := range e.Elements[1:] {
-		elemType, err := c.checkListElementType(elem)
-		if err != nil {
-			return nil, err
-		}
-		if !c.typesCompatible(firstType, elemType) {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("list elements must have consistent type, got %s and %s", firstType, elemType)}
-		}
-	}
-	return &ast.Type{Kind: ast.TypeList, Elem: firstType}, nil
-}
-
-func (c *Checker) checkListElementType(expr ast.Expression) (*ast.Type, error) {
-	t, err := c.checkExpr(expr)
-	if err != nil {
-		return nil, err
-	}
-	if _, ok := expr.(*ast.SpreadExpr); ok && t.Kind == ast.TypeList {
-		return t.Elem, nil
-	}
-	return t, nil
-}
-
-func (c *Checker) checkIdent(e *ast.IdentExpr) (*ast.Type, error) {
-	t, ok := c.scope.lookup(e.Name)
-	if !ok {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("undefined variable %q", e.Name)}
-	}
-	return t, nil
-}
-
-func (c *Checker) checkBinary(e *ast.BinaryExpr) (*ast.Type, error) {
-	leftType, err := c.checkExpr(e.Left)
-	if err != nil {
-		return nil, err
-	}
-	rightType, err := c.checkExpr(e.Right)
-	if err != nil {
-		return nil, err
-	}
-
-	switch e.Op {
-	case "??":
-		if _, ok := e.Left.(*ast.UndefinedLit); ok {
-			return rightType, nil
-		}
-		if _, ok := e.Left.(*ast.NullLit); ok {
-			return rightType, nil
-		}
-		if leftType.Kind == rightType.Kind || c.typesCompatible(leftType, rightType) {
-			return leftType, nil
-		}
-		return rightType, nil
-	case "&&", "||":
-		if leftType.Kind == rightType.Kind {
-			return leftType, nil
-		}
-		if c.typesCompatible(leftType, rightType) {
-			return leftType, nil
-		}
-		return &ast.Type{Kind: ast.TypeString}, nil
-	case "+":
-		if leftType.Kind == ast.TypeString || rightType.Kind == ast.TypeString {
-			return &ast.Type{Kind: ast.TypeString}, nil
-		}
-		if leftType.Kind != ast.TypeNumber || rightType.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("operator + requires int or string operands, got %s and %s", leftType, rightType)}
-		}
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-	case "-", "*", "/", "%":
-		if leftType.Kind != ast.TypeNumber || rightType.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("arithmetic operator %q requires int operands, got %s and %s", e.Op, leftType, rightType)}
-		}
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-	case "==", "!=":
-		if !c.typesCompatible(leftType, rightType) {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("cannot compare %s and %s", leftType, rightType)}
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-	case ">", "<", ">=", "<=":
-		if leftType.Kind != ast.TypeNumber || rightType.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("comparison %q requires int operands; use == for string comparison", e.Op)}
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("unknown operator %q", e.Op)}
-}
-
-func (c *Checker) checkUpdate(e *ast.UpdateExpr) (*ast.Type, error) {
-	existing, ok := c.scope.lookup(e.Name)
-	if !ok {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("undefined variable %q", e.Name)}
-	}
-	if c.consts[e.Name] {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("cannot assign to const %q", e.Name)}
-	}
-	if existing.Kind != ast.TypeNumber {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("prefix update requires number, got %s", existing)}
-	}
-	return &ast.Type{Kind: ast.TypeNumber}, nil
-}
-
-func (c *Checker) checkUnary(e *ast.UnaryExpr) (*ast.Type, error) {
-	inner, err := c.checkExpr(e.Expr)
-	if err != nil {
-		return nil, err
-	}
-	switch e.Op {
-	case "!":
-		if inner.Kind != ast.TypeBoolean && inner.Kind != ast.TypeStatus && inner.Kind != ast.TypeCommand {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("'!' requires bool or status operand, got %s", inner)}
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-	case "-":
-		if inner.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("unary '-' requires number operand, got %s", inner)}
-		}
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("unknown unary operator %q", e.Op)}
-}
-
-func (c *Checker) checkCmdExpr(e *ast.CmdExpr) (*ast.Type, error) {
-	if len(e.Args) == 0 {
-		return nil, &CheckError{Pos: e.Pos, Message: "$() requires at least a command name"}
-	}
-	for i, arg := range e.Args {
-		if spread, ok := arg.(*ast.SpreadExpr); ok {
-			if i == 0 && len(e.Args) != 1 {
-				return nil, &CheckError{Pos: spread.Pos, Message: "command-name spread must be the only $() argument"}
-			}
-			argType, err := c.checkExpr(spread.Expr)
-			if err != nil {
-				return nil, err
-			}
-			if argType.Kind != ast.TypeList {
-				return nil, &CheckError{Pos: spread.Pos, Message: "spread arguments require list<T>"}
-			}
-			continue
-		}
-		if _, err := c.checkExpr(arg); err != nil {
-			return nil, err
-		}
-	}
-	return &ast.Type{Kind: ast.TypeCommand}, nil
-}
-
-func isShellSpecialVar(name string) bool {
-	switch name {
-	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-		"@", "*", "#", "?", "$", "!", "-", "_",
-		"HOME", "PATH", "PWD", "OLDPWD", "IFS", "PS1", "PS2",
-		"SHELL", "TERM", "USER", "LOGNAME", "LANG", "LC_ALL",
-		"TMPDIR", "TMP", "TEMP", "HOSTNAME":
-		return true
-	}
-	if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
-		return true
 	}
 	return false
 }
 
-func (c *Checker) checkFnCall(e *ast.FnCallExpr) (*ast.Type, error) {
-	sig, ok := c.fns[e.Name]
-	if !ok {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("undefined function %q", e.Name)}
+func semanticStmtReturnsValue(stmt ast.Statement) bool {
+	if stmt == nil {
+		return false
 	}
-	if sig.VarArgs {
-		for _, arg := range e.Args {
-			if _, err := c.checkExpr(arg); err != nil {
-				return nil, err
-			}
-		}
-		return sig.ReturnType, nil
-	}
-	if len(e.Args) != len(sig.Params) {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("function %q expects %d arguments, got %d", e.Name, len(sig.Params), len(e.Args))}
-	}
-	for i, arg := range e.Args {
-		argType, err := c.checkExpr(arg)
-		if err != nil {
-			return nil, err
-		}
-		expected := sig.Params[i].Type
-		if !c.typesCompatible(expected, argType) {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("argument %d of %q: expected %s, got %s", i+1, e.Name, expected, argType)}
-		}
-	}
-	return sig.ReturnType, nil
+	return semanticBodyReturnsValue([]ast.Statement{stmt})
 }
 
-func (c *Checker) checkBuiltinCall(e *ast.BuiltinCallExpr) (*ast.Type, error) {
-	switch e.Name {
-	case "file_exists", "is_dir", "is_readable", "is_writable", "is_executable":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes 1 argument", e.Name)}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "is_empty", "is_set":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes 1 argument", e.Name)}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "len":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "len() takes 1 argument"}
-		}
-		argType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeList {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("len() requires list<T>, got %s", argType)}
-		}
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-
-	case "head":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "head() takes 1 argument"}
-		}
-		argType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeList {
-			return nil, &CheckError{Pos: e.Pos, Message: "head() requires a list"}
-		}
-		return argType.Elem, nil
-
-	case "tail":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "tail() takes 1 argument"}
-		}
-		argType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeList {
-			return nil, &CheckError{Pos: e.Pos, Message: "tail() requires a list"}
-		}
-		return argType, nil
-
-	case "append":
-		if len(e.Args) != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "append() takes 2 arguments: list and element"}
-		}
-		listType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if listType.Kind != ast.TypeList {
-			return nil, &CheckError{Pos: e.Pos, Message: "append() first argument must be a list"}
-		}
-		elemType, err := c.checkExpr(e.Args[1])
-		if err != nil {
-			return nil, err
-		}
-		if !c.typesCompatible(listType.Elem, elemType) {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("append() type mismatch: list<%s> cannot hold %s", listType.Elem, elemType)}
-		}
-		return listType, nil
-
-	case "contains":
-		if len(e.Args) != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "contains() takes 2 arguments"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		if _, err := c.checkExpr(e.Args[1]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "range":
-		if len(e.Args) != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "range() takes 2 arguments: start, end"}
-		}
-		for _, arg := range e.Args {
-			argType, err := c.checkExpr(arg)
-			if err != nil {
-				return nil, err
-			}
-			if argType.Kind != ast.TypeNumber {
-				return nil, &CheckError{Pos: e.Pos, Message: "range() arguments must be int"}
-			}
-		}
-		return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeNumber}}, nil
-
-	case "exit":
-		if len(e.Args) > 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "exit() takes 0 or 1 argument"}
-		}
-		if len(e.Args) == 1 {
-			argType, err := c.checkExpr(e.Args[0])
-			if err != nil {
-				return nil, err
-			}
-			if argType.Kind != ast.TypeNumber && argType.Kind != ast.TypeStatus {
-				return nil, &CheckError{Pos: e.Pos, Message: "exit() argument must be int or status"}
-			}
-		}
-		return &ast.Type{Kind: ast.TypeVoid}, nil
-
-	case "env":
-		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "env() takes 1 or 2 arguments: env(NAME) or env(NAME, default)"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		if len(e.Args) == 2 {
-			if _, err := c.checkExpr(e.Args[1]); err != nil {
-				return nil, err
-			}
-		}
-		return &ast.Type{Kind: ast.TypeString}, nil
-
-	case "fetch":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
-		}
-		argType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeString {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("fetch() URL must be string, got %s", argType)}
-		}
-		return &ast.Type{Kind: ast.TypeFetchResponse}, nil
-
-	case "console.log", "console.error":
-		for _, arg := range e.Args {
-			if _, err := c.checkExpr(arg); err != nil {
-				return nil, err
-			}
-		}
-		return &ast.Type{Kind: ast.TypeVoid}, nil
-
-	case "to_str", "String":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "str() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeString}, nil
-
-	case "Boolean":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "Boolean() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "to_int":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "int() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-
-	case "Number.parseInt", "Number.parseFloat":
-		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 or 2 arguments"}
-		}
-		for _, arg := range e.Args {
-			if _, err := c.checkExpr(arg); err != nil {
-				return nil, err
-			}
-		}
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-
-	case "Array.from":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "Array.from() takes 1 argument"}
-		}
-		obj, ok := e.Args[0].(*ast.ObjectLit)
-		if !ok {
-			return nil, &CheckError{Pos: e.Pos, Message: "Array.from() currently supports only { length: number }"}
-		}
-		foundLength := false
-		for _, field := range obj.Fields {
-			if field.Key != "length" {
-				continue
-			}
-			foundLength = true
-			lengthType, err := c.checkExpr(field.Value)
-			if err != nil {
-				return nil, err
-			}
-			if lengthType.Kind != ast.TypeNumber {
-				return nil, &CheckError{Pos: field.Pos, Message: fmt.Sprintf("Array.from({ length }) requires number length, got %s", lengthType)}
-			}
-		}
-		if !foundLength {
-			return nil, &CheckError{Pos: e.Pos, Message: "Array.from() requires a length field"}
-		}
-		return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeNumber}}, nil
-
-	case "Array.of":
-		if len(e.Args) == 0 {
-			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}, nil
-		}
-		firstType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		for _, arg := range e.Args[1:] {
-			argType, err := c.checkExpr(arg)
-			if err != nil {
-				return nil, err
-			}
-			if !c.typesCompatible(firstType, argType) {
-				return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Array.of() elements must have consistent type, got %s and %s", firstType, argType)}
-			}
-		}
-		return &ast.Type{Kind: ast.TypeList, Elem: firstType}, nil
-
-	case "Array.isArray":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "Array.isArray() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "Object.keys", "Object.values", "Object.entries", "Object.hasOwn":
-		wantArgs := 1
-		if e.Name == "Object.hasOwn" {
-			wantArgs = 2
-		}
-		if len(e.Args) != wantArgs {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes %d argument%s", e.Name, wantArgs, pluralSuffix(wantArgs))}
-		}
-		if c.isProcessEnvValue(e.Args[0]) {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() requires an object literal or named object", e.Name)}
-		}
-		argType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeObject {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() argument must be object, got %s", e.Name, argType)}
-		}
-		if e.Name == "Object.hasOwn" {
-			keyType, err := c.checkExpr(e.Args[1])
-			if err != nil {
-				return nil, err
-			}
-			if !isObjectKeyCompatibleType(keyType) {
-				return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Object.hasOwn() key must be string-compatible, got %s", keyType)}
-			}
-			return &ast.Type{Kind: ast.TypeBoolean}, nil
-		}
-		if e.Name == "Object.entries" {
-			if obj, ok := unwrapAsExpr(e.Args[0]).(*ast.ObjectLit); ok {
-				for _, field := range obj.Fields {
-					if unsupportedObjectValueType(field.Value.GetType()) {
-						return nil, &CheckError{Pos: e.Pos, Message: "Object.entries() only supports scalar object values"}
-					}
-				}
-			}
-			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}}, nil
-		}
-		if e.Name == "Object.values" {
-			if obj, ok := unwrapAsExpr(e.Args[0]).(*ast.ObjectLit); ok {
-				for _, field := range obj.Fields {
-					if unsupportedObjectValueType(field.Value.GetType()) {
-						return nil, &CheckError{Pos: e.Pos, Message: "Object.values() only supports scalar object values"}
-					}
-				}
-			}
-		}
-		return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}, nil
-
-	case "Number.isFinite", "Number.isInteger":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "Number.isSafeInteger":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "Number.isSafeInteger() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "Number.isNaN":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "Number.isNaN() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-
-	case "concat":
-		if len(e.Args) != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "concat() takes 2 list arguments"}
-		}
-		aType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		bType, err := c.checkExpr(e.Args[1])
-		if err != nil {
-			return nil, err
-		}
-		if aType.Kind != ast.TypeList {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("concat() first argument must be list, got %s", aType)}
-		}
-		if bType.Kind != ast.TypeList {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("concat() second argument must be list, got %s", bType)}
-		}
-		return aType, nil
+func beshtReceiverName(expr ast.Expression) string {
+	if group, ok := ast.BeshtGroupReceiver(expr); ok {
+		return "Besht." + group
 	}
-
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("unknown builtin %q", e.Name)}
-}
-
-func (c *Checker) checkMethodCall(e *ast.MethodCallExpr) (*ast.Type, error) {
-	if ast.IsBeshtConditionsReceiver(e.Receiver) {
-		return c.checkBeshtConditionsMethod(e)
-	}
-	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "args" {
-		return c.checkArgsMethod(e)
-	}
-	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
-		return c.checkMathMethod(e)
-	}
-	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" {
-		return c.checkProcessMethod(e)
-	}
-
-	recvType, err := c.checkExpr(e.Receiver)
-	if err != nil {
-		return nil, err
-	}
-	if recvType.Kind == ast.TypeList && (e.Method == "map" || e.Method == "filter" || e.Method == "reduce" || e.Method == "findIndex" || e.Method == "some" || e.Method == "every" || e.Method == "find" || e.Method == "forEach") {
-		return c.checkListMethod(e, recvType)
-	}
-	for _, arg := range e.Args {
-		if _, err := c.checkExpr(arg); err != nil {
-			return nil, err
-		}
-	}
-
-	switch recvType.Kind {
-	case ast.TypeSet:
-		return c.checkSetMethod(e, recvType)
-	case ast.TypeList:
-		return c.checkListMethod(e, recvType)
-	case ast.TypeString:
-		return c.checkStringMethod(e)
-	case ast.TypeNumber:
-		return c.checkNumberMethod(e)
-	case ast.TypeBoolean, ast.TypeStatus:
-		return c.checkPrimitiveToStringMethod(e, recvType)
-	case ast.TypeCommand:
-		return c.checkCommandMethod(e)
-	case ast.TypeFetchResponse:
-		return c.checkFetchResponseMethod(e)
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
-}
-
-func (c *Checker) checkFetchResponseMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	for _, arg := range e.Args {
-		if _, err := c.checkExpr(arg); err != nil {
-			return nil, err
-		}
-	}
-	if e.Method != "text" {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)}
-	}
-	if len(e.Args) != 0 {
-		return nil, &CheckError{Pos: e.Pos, Message: "FetchResponse.text() takes no arguments"}
-	}
-	return &ast.Type{Kind: ast.TypeString}, nil
-}
-
-func (c *Checker) checkBeshtConditionsMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	builtinName, ok := ast.BeshtConditionBuiltinName(e.Method)
-	if !ok {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.conditions has no method %q", e.Method)}
-	}
-	if len(e.Args) != 1 {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.conditions.%s() takes 1 argument", e.Method)}
-	}
-	return c.checkBuiltinCall(&ast.BuiltinCallExpr{Pos: e.Pos, Name: builtinName, Args: e.Args})
-}
-
-func (c *Checker) checkProcessMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	if e.Method != "exit" {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no method %q", e.Method)}
-	}
-	if len(e.Args) > 1 {
-		return nil, &CheckError{Pos: e.Pos, Message: "process.exit() takes 0 or 1 argument"}
-	}
-	if len(e.Args) == 1 {
-		argType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeNumber && argType.Kind != ast.TypeStatus {
-			return nil, &CheckError{Pos: e.Pos, Message: "process.exit() argument must be number or status"}
-		}
-	}
-	return &ast.Type{Kind: ast.TypeVoid}, nil
-}
-
-func isObjectKeyCompatibleType(typ *ast.Type) bool {
-	if typ == nil {
-		return true
-	}
-	switch typ.Kind {
-	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean, ast.TypeStatus:
-		return true
-	}
-	return false
+	return "Besht"
 }
 
 func pluralSuffix(n int) string {
@@ -1547,31 +1264,6 @@ func pluralSuffix(n int) string {
 		return ""
 	}
 	return "s"
-}
-
-func (c *Checker) trackProcessEnvAlias(name string, expr ast.Expression) {
-	if c.isProcessEnvValue(expr) {
-		c.processEnvAliases[name] = true
-		return
-	}
-	delete(c.processEnvAliases, name)
-}
-
-func (c *Checker) isProcessEnvValue(expr ast.Expression) bool {
-	if isProcessEnvExpr(expr) {
-		return true
-	}
-	ident, ok := expr.(*ast.IdentExpr)
-	return ok && c.processEnvAliases[ident.Name]
-}
-
-func isProcessEnvExpr(expr ast.Expression) bool {
-	prop, ok := expr.(*ast.PropertyExpr)
-	if !ok || prop.Property != "env" {
-		return false
-	}
-	ident, ok := prop.Receiver.(*ast.IdentExpr)
-	return ok && ident.Name == "process"
 }
 
 func validateObjectKey(key string) error {
@@ -1587,736 +1279,13 @@ func validateObjectKey(key string) error {
 	return nil
 }
 
-func (c *Checker) checkArgsMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	strType := &ast.Type{Kind: ast.TypeString}
-	switch e.Method {
-	case "argv":
-		if len(e.Args) != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "args.argv() takes no arguments"}
-		}
-		return &ast.Type{Kind: ast.TypeList, Elem: strType}, nil
-	case "positional":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "args.positional() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return strType, nil
-	case "option":
-		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "args.option() takes 1 or 2 arguments"}
-		}
-		for _, arg := range e.Args {
-			if _, err := c.checkExpr(arg); err != nil {
-				return nil, err
-			}
-		}
-		return strType, nil
-	case "flag":
-		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "args.flag() takes 1 or 2 arguments"}
-		}
-		for _, arg := range e.Args {
-			if _, err := c.checkExpr(arg); err != nil {
-				return nil, err
-			}
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
+func isProcessEnvExpr(expr ast.Expression) bool {
+	prop, ok := expr.(*ast.PropertyExpr)
+	if !ok || prop.Property != "env" {
+		return false
 	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("args has no method %q", e.Method)}
-}
-
-func (c *Checker) checkSetMethod(e *ast.MethodCallExpr, setType *ast.Type) (*ast.Type, error) {
-	switch e.Method {
-	case "has":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "Set.has() takes 1 argument"}
-		}
-		return &ast.Type{Kind: ast.TypeBoolean}, nil
-	case "add":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "Set.add() takes 1 argument"}
-		}
-		return &ast.Type{Kind: ast.TypeVoid}, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Set has no method %q", e.Method)}
-}
-
-func (c *Checker) checkCommandMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	cmdType := &ast.Type{Kind: ast.TypeCommand}
-	strType := &ast.Type{Kind: ast.TypeString}
-	listStrType := &ast.Type{Kind: ast.TypeList, Elem: strType}
-
-	switch e.Method {
-	case "pipe":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "pipe() takes 1 argument"}
-		}
-		if _, err := c.checkExpr(e.Args[0]); err != nil {
-			return nil, err
-		}
-		return cmdType, nil
-	case "run":
-		if len(e.Args) != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "run() takes no arguments"}
-		}
-		return cmdType, nil
-	case "readStdout":
-		if len(e.Args) != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "readStdout() takes no arguments"}
-		}
-		return strType, nil
-	case "readStdoutLines":
-		if len(e.Args) != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "readStdoutLines() takes no arguments"}
-		}
-		return listStrType, nil
-	case "readStderr":
-		if len(e.Args) != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "readStderr() takes no arguments"}
-		}
-		return strType, nil
-	case "exitCode":
-		if len(e.Args) != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "exitCode() takes no arguments"}
-		}
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-	case "clone":
-		if len(e.Args) != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "clone() takes no arguments"}
-		}
-		return cmdType, nil
-	case "stdout":
-		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "stdout() takes 1 or 2 arguments: (path[, \"append\"])"}
-		}
-		return cmdType, nil
-	case "stderr":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "stderr() takes 1 argument: \"null\", \"&1\", or a file path"}
-		}
-		return cmdType, nil
-	case "workdir":
-		if len(e.Args) != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "workdir() takes 1 argument: path"}
-		}
-		return cmdType, nil
-	case "env":
-		if len(e.Args) != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "env() on command takes 2 arguments: (name, value)"}
-		}
-		name, err := commandEnvName(e.Args[0])
-		if err != nil {
-			return nil, &CheckError{Pos: e.Pos, Message: err.Error()}
-		}
-		if !isShellIdentifier(name) {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("invalid command env name %q", name)}
-		}
-		return cmdType, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("command has no method %q (available: run, pipe, readStdout, readStdoutLines, readStderr, exitCode, stdout, stderr, workdir, env, clone)", e.Method)}
-}
-
-func (c *Checker) checkListMethod(e *ast.MethodCallExpr, listType *ast.Type) (*ast.Type, error) {
-	nargs := len(e.Args)
-	strType := &ast.Type{Kind: ast.TypeString}
-	intType := &ast.Type{Kind: ast.TypeNumber}
-	boolType := &ast.Type{Kind: ast.TypeBoolean}
-
-	switch e.Method {
-	case "push", "unshift":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
-		}
-		return listType, nil
-	case "pop":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "pop() takes no arguments"}
-		}
-		return listType, nil
-	case "shift":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "shift() takes no arguments"}
-		}
-		return listType, nil
-	case "concat":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "concat() takes 1 argument"}
-		}
-		return listType, nil
-	case "slice":
-		if nargs < 1 || nargs > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "slice() takes 1 or 2 arguments"}
-		}
-		return listType, nil
-	case "join":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "join() takes 1 argument (separator)"}
-		}
-		return strType, nil
-	case "toString":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
-		}
-		return strType, nil
-	case "includes":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "includes() takes 1 argument"}
-		}
-		return boolType, nil
-	case "indexOf":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "indexOf() takes 1 argument"}
-		}
-		return intType, nil
-	case "findIndex":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "findIndex() takes 1 arrow callback"}
-		}
-		if _, err := c.checkArrowCallback(e.Args[0], listType.Elem); err != nil {
-			return nil, err
-		}
-		return intType, nil
-	case "some", "every":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
-		}
-		if _, err := c.checkArrowCallback(e.Args[0], listType.Elem); err != nil {
-			return nil, err
-		}
-		if arrow := e.Args[0].(*ast.ArrowExpr); arrow.BlockBody != nil {
-			return nil, &CheckError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
-		}
-		return boolType, nil
-	case "find":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "find() takes 1 arrow callback"}
-		}
-		if _, err := c.checkArrowCallback(e.Args[0], listType.Elem); err != nil {
-			return nil, err
-		}
-		if arrow := e.Args[0].(*ast.ArrowExpr); arrow.BlockBody != nil {
-			return nil, &CheckError{Pos: arrow.Pos, Message: "find() predicate callback must be expression-bodied"}
-		}
-		return listType.Elem, nil
-	case "forEach":
-		return nil, &CheckError{Pos: e.Pos, Message: "forEach() must be used as a statement"}
-	case "lastIndexOf":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "lastIndexOf() takes 1 argument"}
-		}
-		return intType, nil
-	case "reverse":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "reverse() takes no arguments"}
-		}
-		return listType, nil
-	case "map":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "map() takes 1 arrow callback"}
-		}
-		bodyType, err := c.checkArrowCallback(e.Args[0], listType.Elem)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.Type{Kind: ast.TypeList, Elem: bodyType}, nil
-	case "filter":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "filter() takes 1 arrow callback"}
-		}
-		if _, err := c.checkArrowCallback(e.Args[0], listType.Elem); err != nil {
-			return nil, err
-		}
-		return listType, nil
-	case "reduce":
-		if nargs != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "reduce() takes 2 arguments: callback and initial value"}
-		}
-		arrow, ok := e.Args[0].(*ast.ArrowExpr)
-		if !ok {
-			return nil, &CheckError{Pos: e.Pos, Message: "reduce() callback must be an arrow expression"}
-		}
-		if len(arrow.Params) != 2 {
-			return nil, &CheckError{Pos: arrow.Pos, Message: "reduce() callback must take 2 parameters (accumulator, current)"}
-		}
-		initType, err := c.checkExpr(e.Args[1])
-		if err != nil {
-			return nil, err
-		}
-		accType := initType
-		if arrow.Params[0].Type != nil {
-			accType = arrow.Params[0].Type
-		}
-		old := c.scope
-		inner := newScope(c.scope)
-		inner.define(arrow.Params[0].Name, accType)
-		elemT := listType.Elem
-		if len(arrow.Params) > 1 {
-			if arrow.Params[1].Type != nil {
-				elemT = arrow.Params[1].Type
-			}
-			inner.define(arrow.Params[1].Name, elemT)
-		}
-		c.scope = inner
-		if arrow.BlockBody != nil {
-			prevFn := c.currentFn
-			prevInFn := c.inFunction
-			c.currentFn = &FnSig{Params: arrow.Params, ReturnType: accType}
-			c.inFunction = true
-			if err := c.checkBlock(arrow.BlockBody); err != nil {
-				c.currentFn = prevFn
-				c.inFunction = prevInFn
-				c.scope = old
-				return nil, err
-			}
-			c.currentFn = prevFn
-			c.inFunction = prevInFn
-		} else {
-			if _, err := c.checkExpr(arrow.Body); err != nil {
-				c.scope = old
-				return nil, err
-			}
-		}
-		c.scope = old
-		return accType, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("list has no method %q", e.Method)}
-}
-
-func (c *Checker) checkStandaloneArrow(e *ast.ArrowExpr) (*ast.Type, error) {
-	return nil, &CheckError{Pos: e.Pos, Message: "arrow expressions can only be used as list callbacks"}
-}
-
-func (c *Checker) checkArrowCallback(expr ast.Expression, elemType *ast.Type) (*ast.Type, error) {
-	arrow, ok := expr.(*ast.ArrowExpr)
-	if !ok {
-		return nil, &CheckError{Pos: ast.Pos{}, Message: "list callback must be an arrow expression"}
-	}
-	return c.checkArrowWithParamType(arrow, elemType)
-}
-
-func (c *Checker) checkForEachCallback(expr ast.Expression, elemType *ast.Type) error {
-	arrow, ok := expr.(*ast.ArrowExpr)
-	if !ok {
-		return &CheckError{Pos: ast.Pos{}, Message: "forEach() callback must be an arrow expression"}
-	}
-	if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
-		return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
-	}
-	old := c.scope
-	inner := newScope(c.scope)
-	param := arrow.Params[0]
-	pt := elemType
-	if param.Type != nil {
-		if !c.typesCompatible(param.Type, elemType) {
-			return &CheckError{Pos: param.Pos, Message: fmt.Sprintf("arrow parameter %q expects %s, got %s", param.Name, param.Type, elemType)}
-		}
-		pt = param.Type
-	}
-	inner.define(param.Name, pt)
-	if len(arrow.Params) == 2 {
-		p2 := arrow.Params[1]
-		p2t := &ast.Type{Kind: ast.TypeNumber}
-		if p2.Type != nil {
-			if !c.typesCompatible(p2.Type, p2t) {
-				return &CheckError{Pos: p2.Pos, Message: fmt.Sprintf("arrow index parameter %q expects %s, got %s", p2.Name, p2.Type, p2t)}
-			}
-			p2t = p2.Type
-		}
-		inner.define(p2.Name, p2t)
-	}
-	c.scope = inner
-	defer func() { c.scope = old }()
-	if arrow.BlockBody == nil {
-		return c.checkForEachCallbackExpr(arrow.Body)
-	}
-	for _, stmt := range arrow.BlockBody.Statements {
-		if err := c.checkForEachCallbackStmt(stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *Checker) checkForEachCallbackStmt(stmt ast.Statement) error {
-	switch s := stmt.(type) {
-	case *ast.ExprStmt:
-		return c.checkForEachCallbackExpr(s.Expr)
-	case *ast.ReturnStmt:
-		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support return"}
-	case *ast.BreakStmt:
-		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support break"}
-	case *ast.ContinueStmt:
-		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support continue"}
-	case *ast.IfStmt:
-		if _, err := c.checkExpr(s.Condition); err != nil {
-			return err
-		}
-		if err := c.checkForEachCallbackBlock(s.Then); err != nil {
-			return err
-		}
-		for _, ei := range s.ElseIfs {
-			if _, err := c.checkExpr(ei.Condition); err != nil {
-				return err
-			}
-			if err := c.checkForEachCallbackBlock(ei.Body); err != nil {
-				return err
-			}
-		}
-		return c.checkForEachCallbackBlock(s.Else)
-	default:
-		return c.checkStmt(stmt)
-	}
-}
-
-func (c *Checker) checkForEachCallbackExpr(expr ast.Expression) error {
-	t, err := c.checkExpr(expr)
-	if err != nil {
-		return err
-	}
-	if t != nil && t.Kind == ast.TypeVoid {
-		return nil
-	}
-	if me, ok := expr.(*ast.MethodCallExpr); ok && me.Method == "run" {
-		return nil
-	}
-	return &CheckError{Pos: ast.Pos{}, Message: "forEach() callback expression must be side-effecting"}
-}
-
-func (c *Checker) checkForEachCallbackBlock(block *ast.Block) error {
-	if block == nil {
-		return nil
-	}
-	for _, stmt := range block.Statements {
-		if err := c.checkForEachCallbackStmt(stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *Checker) checkArrowWithParamType(e *ast.ArrowExpr, elemType *ast.Type) (*ast.Type, error) {
-	if len(e.Params) < 1 || len(e.Params) > 2 {
-		return nil, &CheckError{Pos: e.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
-	}
-	param := e.Params[0]
-	if param.Type != nil && !c.typesCompatible(param.Type, elemType) {
-		return nil, &CheckError{Pos: param.Pos, Message: fmt.Sprintf("arrow parameter %q expects %s, got %s", param.Name, param.Type, elemType)}
-	}
-	old := c.scope
-	inner := newScope(c.scope)
-	pt := elemType
-	if param.Type != nil {
-		pt = param.Type
-	}
-	inner.define(param.Name, pt)
-	if len(e.Params) == 2 {
-		p2 := e.Params[1]
-		p2t := &ast.Type{Kind: ast.TypeNumber}
-		if p2.Type != nil {
-			if !c.typesCompatible(p2.Type, p2t) {
-				return nil, &CheckError{Pos: p2.Pos, Message: fmt.Sprintf("arrow index parameter %q expects %s, got %s", p2.Name, p2.Type, p2t)}
-			}
-			p2t = p2.Type
-		}
-		inner.define(p2.Name, p2t)
-	}
-	c.scope = inner
-	var bodyType *ast.Type
-	var err error
-	if e.BlockBody != nil {
-		bodyType, err = c.checkCallbackBlock(e.BlockBody)
-	} else {
-		bodyType, err = c.checkExpr(e.Body)
-	}
-	c.scope = old
-	if err != nil {
-		return nil, err
-	}
-	return bodyType, nil
-}
-
-func (c *Checker) checkCallbackBlock(block *ast.Block) (*ast.Type, error) {
-	outer := c.scope
-	c.scope = newScope(outer)
-	var returnType *ast.Type
-	for _, stmt := range block.Statements {
-		t, err := c.checkCallbackStmt(stmt)
-		if err != nil {
-			c.scope = outer
-			return nil, err
-		}
-		if t == nil {
-			continue
-		}
-		if returnType == nil {
-			returnType = t
-		} else if !c.typesCompatible(returnType, t) {
-			c.scope = outer
-			return nil, &CheckError{Pos: ast.Pos{}, Message: fmt.Sprintf("callback returns inconsistent types %s and %s", returnType, t)}
-		}
-	}
-	c.scope = outer
-	if returnType == nil {
-		returnType = &ast.Type{Kind: ast.TypeVoid}
-	}
-	return returnType, nil
-}
-
-func (c *Checker) checkCallbackStmt(stmt ast.Statement) (*ast.Type, error) {
-	switch s := stmt.(type) {
-	case *ast.ReturnStmt:
-		if s.Value == nil {
-			return &ast.Type{Kind: ast.TypeVoid}, nil
-		}
-		return c.checkExpr(s.Value)
-	case *ast.IfStmt:
-		if _, err := c.checkExpr(s.Condition); err != nil {
-			return nil, err
-		}
-		var returnType *ast.Type
-		merge := func(t *ast.Type, err error) error {
-			if err != nil || t == nil {
-				return err
-			}
-			if returnType == nil {
-				returnType = t
-				return nil
-			}
-			if !c.typesCompatible(returnType, t) {
-				return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("callback returns inconsistent types %s and %s", returnType, t)}
-			}
-			return nil
-		}
-		if err := merge(c.checkCallbackBlock(s.Then)); err != nil {
-			return nil, err
-		}
-		for _, ei := range s.ElseIfs {
-			if _, err := c.checkExpr(ei.Condition); err != nil {
-				return nil, err
-			}
-			if err := merge(c.checkCallbackBlock(ei.Body)); err != nil {
-				return nil, err
-			}
-		}
-		if s.Else != nil {
-			if err := merge(c.checkCallbackBlock(s.Else)); err != nil {
-				return nil, err
-			}
-		}
-		return returnType, nil
-	default:
-		return nil, c.checkStmt(stmt)
-	}
-}
-
-func (c *Checker) checkStringMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	nargs := len(e.Args)
-	strType := &ast.Type{Kind: ast.TypeString}
-	boolType := &ast.Type{Kind: ast.TypeBoolean}
-	listStrType := &ast.Type{Kind: ast.TypeList, Elem: strType}
-	intType := &ast.Type{Kind: ast.TypeNumber}
-
-	switch e.Method {
-	case "toString":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
-		}
-		return strType, nil
-	case "split":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "split() takes 1 argument (separator)"}
-		}
-		return listStrType, nil
-	case "trim":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "trim() takes no arguments"}
-		}
-		return strType, nil
-	case "trimStart", "trimEnd":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
-		}
-		return strType, nil
-	case "toUpperCase":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "toUpperCase() takes no arguments"}
-		}
-		return strType, nil
-	case "toLowerCase":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "toLowerCase() takes no arguments"}
-		}
-		return strType, nil
-	case "includes":
-		if err := c.checkStringSearchMethodArgs(e, "includes() takes 1 or 2 arguments"); err != nil {
-			return nil, err
-		}
-		return boolType, nil
-	case "startsWith":
-		if err := c.checkStringSearchMethodArgs(e, "startsWith() takes 1 or 2 arguments"); err != nil {
-			return nil, err
-		}
-		return boolType, nil
-	case "endsWith":
-		if err := c.checkStringSearchMethodArgs(e, "endsWith() takes 1 or 2 arguments"); err != nil {
-			return nil, err
-		}
-		return boolType, nil
-	case "replace":
-		if nargs != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "replace() takes 2 arguments (search, replacement)"}
-		}
-		return strType, nil
-	case "replaceAll":
-		if nargs != 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "replaceAll() takes 2 arguments (search, replacement)"}
-		}
-		return strType, nil
-	case "padStart", "padEnd":
-		if nargs < 1 || nargs > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 or 2 arguments (length[, fillChar])"}
-		}
-		return strType, nil
-	case "repeat":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "repeat() takes 1 argument (count)"}
-		}
-		return strType, nil
-	case "at":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "at() takes 1 argument (index)"}
-		}
-		return strType, nil
-	case "charAt":
-		if nargs != 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "charAt() takes 1 argument"}
-		}
-		argType, err := c.checkExpr(e.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: "charAt() argument must be number"}
-		}
-		return strType, nil
-	case "indexOf":
-		if err := c.checkStringSearchMethodArgs(e, "indexOf() takes 1 or 2 arguments"); err != nil {
-			return nil, err
-		}
-		return intType, nil
-	case "lastIndexOf":
-		if err := c.checkStringSearchMethodArgs(e, "lastIndexOf() takes 1 or 2 arguments"); err != nil {
-			return nil, err
-		}
-		return intType, nil
-	case "slice":
-		if nargs < 1 || nargs > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "slice() takes 1 or 2 arguments"}
-		}
-		return strType, nil
-	case "substring":
-		if nargs < 1 || nargs > 2 {
-			return nil, &CheckError{Pos: e.Pos, Message: "substring() takes 1 or 2 arguments"}
-		}
-		for _, arg := range e.Args {
-			argType, err := c.checkExpr(arg)
-			if err != nil {
-				return nil, err
-			}
-			if argType.Kind != ast.TypeNumber {
-				return nil, &CheckError{Pos: e.Pos, Message: "substring() arguments must be numbers"}
-			}
-		}
-		return strType, nil
-	case "concat":
-		if nargs < 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "concat() takes at least 1 argument"}
-		}
-		return strType, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("string has no method %q", e.Method)}
-}
-
-func (c *Checker) checkStringSearchMethodArgs(e *ast.MethodCallExpr, arityMessage string) error {
-	if len(e.Args) < 1 || len(e.Args) > 2 {
-		return &CheckError{Pos: e.Pos, Message: arityMessage}
-	}
-	if len(e.Args) == 2 {
-		argType, err := c.checkExpr(e.Args[1])
-		if err != nil {
-			return err
-		}
-		if argType.Kind != ast.TypeNumber {
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() second argument must be number"}
-		}
-	}
-	return nil
-}
-
-func (c *Checker) checkMathMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	nargs := len(e.Args)
-	want := 1
-	switch e.Method {
-	case "min", "max", "pow":
-		want = 2
-	case "round", "floor", "ceil", "abs", "sqrt", "trunc", "sign":
-		want = 1
-	default:
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Math has no method %q", e.Method)}
-	}
-	if nargs != want {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Math.%s() takes %d argument(s)", e.Method, want)}
-	}
-	for _, arg := range e.Args {
-		argType, err := c.checkExpr(arg)
-		if err != nil {
-			return nil, err
-		}
-		if argType.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Math.%s() arguments must be numbers", e.Method)}
-		}
-	}
-	return &ast.Type{Kind: ast.TypeNumber}, nil
-}
-
-func (c *Checker) checkNumberMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
-	nargs := len(e.Args)
-	strType := &ast.Type{Kind: ast.TypeString}
-
-	switch e.Method {
-	case "toString":
-		if nargs != 0 {
-			return nil, &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
-		}
-		return strType, nil
-	case "toFixed":
-		if nargs > 1 {
-			return nil, &CheckError{Pos: e.Pos, Message: "toFixed() takes 0 or 1 arguments"}
-		}
-		if nargs == 1 {
-			argType, err := c.checkExpr(e.Args[0])
-			if err != nil {
-				return nil, err
-			}
-			if argType.Kind != ast.TypeNumber {
-				return nil, &CheckError{Pos: e.Pos, Message: "toFixed() digits must be a number"}
-			}
-		}
-		return strType, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("number has no method %q", e.Method)}
-}
-
-func (c *Checker) checkPrimitiveToStringMethod(e *ast.MethodCallExpr, recvType *ast.Type) (*ast.Type, error) {
-	if e.Method != "toString" {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
-	}
-	if len(e.Args) != 0 {
-		return nil, &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
-	}
-	return &ast.Type{Kind: ast.TypeString}, nil
+	ident, ok := prop.Receiver.(*ast.IdentExpr)
+	return ok && ident.Name == "process"
 }
 
 func commandEnvName(expr ast.Expression) (string, error) {
@@ -2346,166 +1315,4 @@ func isShellIdentifier(name string) bool {
 		return false
 	}
 	return true
-}
-
-func (c *Checker) checkTernary(e *ast.TernaryExpr) (*ast.Type, error) {
-	condType, err := c.checkExpr(e.Condition)
-	if err != nil {
-		return nil, err
-	}
-	if condType.Kind != ast.TypeBoolean && condType.Kind != ast.TypeStatus && condType.Kind != ast.TypeCommand {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("ternary condition must be bool or status, got %s", condType)}
-	}
-	thenType, err := c.checkExpr(e.Then)
-	if err != nil {
-		return nil, err
-	}
-	elseType, err := c.checkExpr(e.Else)
-	if err != nil {
-		return nil, err
-	}
-	if thenType.Equal(elseType) {
-		return thenType, nil
-	}
-	if !c.strict {
-		if thenType.Kind == ast.TypeString || elseType.Kind == ast.TypeString {
-			return &ast.Type{Kind: ast.TypeString}, nil
-		}
-		if thenType.Kind == ast.TypeNumber && elseType.Kind == ast.TypeNumber {
-			return &ast.Type{Kind: ast.TypeNumber}, nil
-		}
-		if thenType.Kind == ast.TypeBoolean && elseType.Kind == ast.TypeBoolean {
-			return &ast.Type{Kind: ast.TypeBoolean}, nil
-		}
-		return thenType, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("ternary branches must have compatible types, got %s and %s", thenType, elseType)}
-}
-
-func optionalNullishReceiver(expr ast.Expression) bool {
-	switch expr.(type) {
-	case *ast.UndefinedLit, *ast.NullLit:
-		return true
-	}
-	return false
-}
-
-func (c *Checker) checkProperty(e *ast.PropertyExpr) (*ast.Type, error) {
-	if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
-		if ident.Name == "process" {
-			if e.Property == "env" {
-				return &ast.Type{Kind: ast.TypeObject}, nil
-			}
-			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no property %q", e.Property)}
-		}
-		if pt, ok := c.classProps[ident.Name+"."+e.Property]; ok {
-			return pt, nil
-		}
-	}
-	if isProcessEnvExpr(e.Receiver) {
-		return &ast.Type{Kind: ast.TypeString}, nil
-	}
-	recvType, err := c.checkExpr(e.Receiver)
-	if err != nil {
-		return nil, err
-	}
-	if recvType.Kind == ast.TypeFetchResponse {
-		return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", e.Property)}
-	}
-	switch e.Property {
-	case "length":
-		return &ast.Type{Kind: ast.TypeNumber}, nil
-	}
-	if recvType.Kind == ast.TypeObject || (e.Optional && optionalNullishReceiver(e.Receiver)) {
-		return &ast.Type{Kind: ast.TypeString}, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no property %q", recvType, e.Property)}
-}
-
-func (c *Checker) checkIndexExpr(e *ast.IndexExpr) (*ast.Type, error) {
-	exprType, err := c.checkExpr(e.Expr)
-	if err != nil {
-		return nil, err
-	}
-	if exprType.Kind == ast.TypeList {
-		indexType, err := c.checkExpr(e.Index)
-		if err != nil {
-			return nil, err
-		}
-		if indexType.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: "list index must be int"}
-		}
-		return exprType.Elem, nil
-	}
-	if exprType.Kind == ast.TypeObject {
-		if _, err := c.checkExpr(e.Index); err != nil {
-			return nil, err
-		}
-		if exprType.Elem != nil {
-			return exprType.Elem, nil
-		}
-		return &ast.Type{Kind: ast.TypeString}, nil
-	}
-	if e.Optional && optionalNullishReceiver(e.Expr) {
-		indexType, err := c.checkExpr(e.Index)
-		if err != nil {
-			return nil, err
-		}
-		if indexType.Kind != ast.TypeNumber {
-			return nil, &CheckError{Pos: e.Pos, Message: "list index must be int"}
-		}
-		return &ast.Type{Kind: ast.TypeString}, nil
-	}
-	return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("index access requires list<T> or object, got %s", exprType)}
-}
-
-func (c *Checker) checkRange(e *ast.RangeExpr) (*ast.Type, error) {
-	startType, err := c.checkExpr(e.Start)
-	if err != nil {
-		return nil, err
-	}
-	endType, err := c.checkExpr(e.End)
-	if err != nil {
-		return nil, err
-	}
-	if startType.Kind != ast.TypeNumber || endType.Kind != ast.TypeNumber {
-		return nil, &CheckError{Pos: e.Pos, Message: "range() requires int bounds"}
-	}
-	return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeNumber}}, nil
-}
-
-func (c *Checker) checkPropagate(e *ast.PropagateExpr) (*ast.Type, error) {
-	inner, err := c.checkExpr(e.Expr)
-	if err != nil {
-		return nil, err
-	}
-	return inner, nil
-}
-
-func (c *Checker) typesCompatible(expected, got *ast.Type) bool {
-	if expected == nil || got == nil {
-		return true
-	}
-	if expected.Kind == got.Kind {
-		if expected.Kind == ast.TypeList || expected.Kind == ast.TypeSet {
-			return c.typesCompatible(expected.Elem, got.Elem)
-		}
-		return true
-	}
-	if c.strict {
-		return got.Kind == ast.TypeCommand
-	}
-	if expected.Kind == ast.TypeString && got.Kind == ast.TypeNumber {
-		return true
-	}
-	if expected.Kind == ast.TypeNumber && got.Kind == ast.TypeString {
-		return true
-	}
-	if expected.Kind == ast.TypeList && got.Kind == ast.TypeString {
-		return true
-	}
-	if got.Kind == ast.TypeCommand {
-		return true
-	}
-	return false
 }

@@ -101,6 +101,9 @@ func (ca *CmdAnalysis) alloc(rootCmd *ast.CmdExpr, chain ast.Expression, varName
 // resolveIdentity finds the CmdIdentity ID for a receiver expression.
 // Returns -1 if unresolvable (function param, non-command expression, etc.)
 func (ca *CmdAnalysis) resolveIdentityExpr(expr ast.Expression, scope *cmdScope) int {
+	if id, ok := ca.exprToID[expr]; ok {
+		return id
+	}
 	switch e := expr.(type) {
 	case *ast.IdentExpr:
 		if id, ok := scope.lookup(e.Name); ok {

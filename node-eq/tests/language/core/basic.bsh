@@ -20,7 +20,7 @@ console.log(trimmed)
 let upper = trimmed.toUpperCase()
 console.log(upper)
 
-let port = env("BESHT_TEST_PORT", "9000")
+let port = process.env.BESHT_TEST_PORT ?? "9000"
 console.log(`port: ${port}`)
 
 let ecmd = $("true")

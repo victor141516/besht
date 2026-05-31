@@ -14,14 +14,14 @@ func check(t *testing.T, src string) error {
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	chk := checker.NewStrict()
+	chk := checker.New()
 	return chk.Check(prog)
 }
 
 func mustCheck(t *testing.T, src string) {
 	t.Helper()
 	if err := check(t, src); err != nil {
-		t.Fatalf("unexpected type error: %v", err)
+		t.Fatalf("unexpected semantic error: %v", err)
 	}
 }
 
@@ -29,7 +29,7 @@ func expectError(t *testing.T, src, fragment string) {
 	t.Helper()
 	err := check(t, src)
 	if err == nil {
-		t.Fatal("expected type error, got nil")
+		t.Fatal("expected semantic error, got nil")
 	}
 	if fragment != "" && !strings.Contains(err.Error(), fragment) {
 		t.Errorf("error %q does not contain %q", err.Error(), fragment)
@@ -42,10 +42,7 @@ func TestChecker_DefaultModeIsPermissive(t *testing.T) {
 		t.Fatalf("parse error: %v", err)
 	}
 	if err := checker.New().Check(prog); err != nil {
-		t.Fatalf("default checker should be permissive, got %v", err)
-	}
-	if err := checker.NewStrict().Check(prog); err == nil {
-		t.Fatal("strict checker should reject mismatched types")
+		t.Fatalf("checker should ignore type annotations, got %v", err)
 	}
 }
 
@@ -70,13 +67,13 @@ let e: string = " Ada "?.trim()`)
 
 func TestChecker_OptionalChainingChecksSubexpressions(t *testing.T) {
 	expectError(t, `let items: string[] = ["a"]
-let value = items?.[missing]`, "undefined variable")
+let value = items?.[missing]`, `variable "missing" not declared`)
 }
 
-func TestChecker_OptionalChainingRejectsInvalidKnownShapes(t *testing.T) {
-	expectError(t, `let items: string[] = ["a"]
-let value = items?.bogus`, "has no property")
-	expectError(t, `let value = undefined?.["bad"]`, "list index must be int")
+func TestChecker_OptionalChainingIgnoresTypeShapes(t *testing.T) {
+	mustCheck(t, `let items: string[] = ["a"]
+let value = items?.bogus`)
+	mustCheck(t, `let value = undefined?.["bad"]`)
 }
 
 func TestChecker_NullishCoalescing(t *testing.T) {
@@ -102,19 +99,18 @@ func TestChecker_ProcessRejectsInvalidAPI(t *testing.T) {
 	expectError(t, `process.foo()`, `process has no method "foo"`)
 	expectError(t, `let cwd = process.cwd`, `process has no property "cwd"`)
 	expectError(t, `process.exit(1, 2)`, `process.exit() takes 0 or 1 argument`)
-	expectError(t, `process.exit("bad")`, `process.exit() argument must be number or status`)
 }
 
 func TestChecker_ArgsHelpers(t *testing.T) {
-	mustCheck(t, `let all: string[] = args.argv()`)
-	mustCheck(t, `let first: string = args.positional(1) ?? "fallback"`)
-	mustCheck(t, `let branch: string = args.option("branch", "b") ?? "main"`)
-	mustCheck(t, `let dryRun: boolean = args.flag("dry-run", "d")`)
+	mustCheck(t, `let all: string[] = Besht.args.argv()`)
+	mustCheck(t, `let first: string = Besht.args.positional(1) ?? "fallback"`)
+	mustCheck(t, `let branch: string = Besht.args.option("branch", "b") ?? "main"`)
+	mustCheck(t, `let dryRun: boolean = Besht.args.flag("dry-run", "d")`)
 }
 
 func TestChecker_ArgsLongNameRequired(t *testing.T) {
-	expectError(t, `let bad = args.option()`, "args.option() takes 1 or 2 arguments")
-	expectError(t, `let bad = args.flag()`, "args.flag() takes 1 or 2 arguments")
+	expectError(t, `let bad = Besht.args.option()`, "Besht.args.option() takes 1 or 2 arguments")
+	expectError(t, `let bad = Besht.args.flag()`, "Besht.args.flag() takes 1 or 2 arguments")
 }
 
 func TestChecker_FnDeclValid(t *testing.T) {
@@ -151,7 +147,7 @@ if (n > 0) {
 }
 
 func TestChecker_ForRangeValid(t *testing.T) {
-	mustCheck(t, `for (i in range(1, 10)) {
+	mustCheck(t, `for (i in Besht.iter.range(1, 10)) {
     $("echo", "${i}")
 }`)
 }
@@ -211,80 +207,80 @@ if (!b) {
 
 func TestChecker_BuiltinFileExists(t *testing.T) {
 	mustCheck(t, `let p: string = "/tmp/x"
-if (file_exists(p)) {
+if (Besht.fs.isFile(p)) {
     $("echo", "exists")
 }`)
 }
 
 func TestChecker_BuiltinIsDir(t *testing.T) {
 	mustCheck(t, `let p: string = "/tmp"
-if (is_dir(p)) {
+if (Besht.fs.isDir(p)) {
     $("echo", "dir")
 }`)
 }
 
-func TestChecker_BeshtConditionsWrappers(t *testing.T) {
+func TestChecker_BeshtNamespaceWrappers(t *testing.T) {
 	mustCheck(t, `let p: string = "/tmp"
 let s: string = "x"
-let a: boolean = Besht.conditions.fileExists(p)
-let b: boolean = Besht.conditions.isDir(p)
-let c: boolean = Besht.conditions.isReadable(p)
-let d: boolean = Besht.conditions.isWritable(p)
-let e: boolean = Besht.conditions.isExecutable(p)
-let f: boolean = Besht.conditions.isEmpty(s)
-let g: boolean = Besht.conditions.isSet(s)
-if (Besht.conditions.fileExists(p) && Besht.conditions.isSet(s)) {
+let a: boolean = Besht.fs.isFile(p)
+let b: boolean = Besht.fs.isDir(p)
+let c: boolean = Besht.fs.isReadable(p)
+let d: boolean = Besht.fs.isWritable(p)
+let e: boolean = Besht.fs.isExecutable(p)
+let f: boolean = Besht.strings.isEmpty(s)
+let g: boolean = Besht.strings.isNonEmpty(s)
+if (Besht.fs.isFile(p) && Besht.strings.isNonEmpty(s)) {
     $("echo", "ok")
 }`)
 }
 
-func TestChecker_BeshtConditionsErrors(t *testing.T) {
+func TestChecker_BeshtNamespaceErrors(t *testing.T) {
 	expectError(t, `let p: string = "/tmp"
-let ok: boolean = Besht.conditions.unknown(p)`, `Besht.conditions has no method "unknown"`)
-	expectError(t, `let ok: boolean = Besht.conditions.fileExists()`, `Besht.conditions.fileExists() takes 1 argument`)
-	expectError(t, `let ok: boolean = Besht.conditions.fileExists("/tmp", "extra")`, `Besht.conditions.fileExists() takes 1 argument`)
+let ok: boolean = Besht.fs.unknown(p)`, `Besht.fs has no method "unknown"`)
+	expectError(t, `let ok: boolean = Besht.fs.isFile()`, `Besht.fs.isFile() takes 1 argument`)
+	expectError(t, `let ok: boolean = Besht.fs.isFile("/tmp", "extra")`, `Besht.fs.isFile() takes 1 argument`)
 }
 
 func TestChecker_BuiltinLen(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a"]
-let n: number = len(files)`)
+let n: number = files.length`)
 }
 
 func TestChecker_BuiltinHead(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b"]
-let first: string = head(files)`)
+let first: string = files[0]`)
 }
 
 func TestChecker_BuiltinTail(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b"]
-let rest: list<string> = tail(files)`)
+let rest: list<string> = files.slice(1)`)
 }
 
 func TestChecker_BuiltinAppend(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a"]
-files = append(files, "b")`)
+files = files.push("b")`)
 }
 
 func TestChecker_BuiltinContains(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a"]
-if (contains(files, "a")) {
+if (files.includes("a")) {
     $("echo", "found")
 }`)
 }
 
 func TestChecker_BuiltinRangeValid(t *testing.T) {
-	mustCheck(t, `for (i in range(1, 5)) {
+	mustCheck(t, `for (i in Besht.iter.range(1, 5)) {
     $("echo", "${i}")
 }`)
 }
 
 func TestChecker_ExitNoArg(t *testing.T) {
-	mustCheck(t, `exit(0)`)
+	mustCheck(t, `process.exit(0)`)
 }
 
 func TestChecker_ExitWithCode(t *testing.T) {
 	mustCheck(t, `let code: number = 1
-exit(code)`)
+process.exit(code)`)
 }
 
 func TestChecker_ShellExprReturnsString(t *testing.T) {
@@ -421,12 +417,12 @@ func TestChecker_ConstDecl(t *testing.T) {
 	mustCheck(t, `const threshold: number = 90`)
 }
 
-func TestChecker_EnvBuiltin(t *testing.T) {
-	mustCheck(t, `let home: string = env("HOME")`)
+func TestChecker_ProcessEnvDirect(t *testing.T) {
+	mustCheck(t, `let home: string = process.env.HOME`)
 }
 
-func TestChecker_EnvBuiltinWithDefault(t *testing.T) {
-	mustCheck(t, `let port: string = env("PORT", "8080")`)
+func TestChecker_ProcessEnvWithDefault(t *testing.T) {
+	mustCheck(t, `let port: string = process.env.PORT ?? "8080"`)
 }
 
 func TestChecker_FetchTextSlice(t *testing.T) {
@@ -438,7 +434,6 @@ let body2: string = response.text()`)
 
 func TestChecker_FetchRejectsDeferredSurface(t *testing.T) {
 	expectError(t, `let body = fetch("file:///tmp/data.txt", { method: "POST" }).text()`, "fetch() takes 1 URL argument")
-	expectError(t, `let body = fetch(42).text()`, "fetch() URL must be string")
 	expectError(t, `let response = fetch("file:///tmp/data.txt")
 let body = response.text("utf8")`, "FetchResponse.text() takes no arguments")
 	expectError(t, `let response = fetch("file:///tmp/data.txt")
@@ -483,34 +478,34 @@ function run(factory: Factory): string {
 }`)
 }
 
-func TestChecker_SetAddIsStatementOnly(t *testing.T) {
-	expectError(t, `const seen = new Set<string>()
-let x: Set<string> = seen.add("a")`, "type mismatch")
+func TestChecker_SetAddValuePositionIsNotTypeChecked(t *testing.T) {
+	mustCheck(t, `const seen = new Set<string>()
+let x: Set<string> = seen.add("a")`)
 }
 
 func TestChecker_SetConstructorRejectsRuntimeArgs(t *testing.T) {
 	expectError(t, `const seen = new Set<string>("a")`, "Set constructor takes no runtime arguments")
 }
 
-func TestChecker_StrBuiltin(t *testing.T) {
+func TestChecker_ToStringMethod(t *testing.T) {
 	mustCheck(t, `let n: number = 42
-let s: string = to_str(n)`)
+let s: string = n.toString()`)
 }
 
-func TestChecker_StrBuiltinBool(t *testing.T) {
+func TestChecker_BooleanToStringMethod(t *testing.T) {
 	mustCheck(t, `let b: boolean = true
-let s: string = to_str(b)`)
+let s: string = b.toString()`)
 }
 
 func TestChecker_IntBuiltin(t *testing.T) {
 	mustCheck(t, `let s: string = "42"
-let n: number = to_int(s)`)
+let n: number = Number.parseInt(s)`)
 }
 
-func TestChecker_ConcatBuiltin(t *testing.T) {
+func TestChecker_ListConcatMethod(t *testing.T) {
 	mustCheck(t, `let a: list<string> = ["x"]
 let b: list<string> = ["y"]
-let c: list<string> = concat(a, b)`)
+let c: list<string> = a.concat(b)`)
 }
 
 func TestChecker_ListUnshift(t *testing.T) {
@@ -728,7 +723,7 @@ func TestChecker_CmdExprInTryCatch(t *testing.T) {
 	mustCheck(t, `try {
     $("rsync", "-az", "src", "dest")
 } catch (code: status) {
-    console.log("failed: " + to_str(code))
+    console.log("failed: " + code.toString())
 }`)
 }
 
@@ -837,44 +832,37 @@ func TestChecker_FirstPureJSCompatibleAPIBatchRejectsBadCalls(t *testing.T) {
 		src      string
 		fragment string
 	}{
-		{"math trunc type", `let n: number = Math.trunc("x")`, "Math.trunc() arguments must be numbers"},
 		{"math sign arity", `let n: number = Math.sign()`, "Math.sign() takes 1 argument"},
 		{"charAt arity", `let s: string = "abc"
 let c: string = s.charAt()`, "charAt() takes 1 argument"},
 		{"substring arity", `let s: string = "abc"
 let sub: string = s.substring()`, "substring() takes 1 or 2 arguments"},
-		{"substring type", `let s: string = "abc"
-let sub: string = s.substring("x")`, "substring() arguments must be numbers"},
 		{"string lastIndexOf arity", `let s: string = "abc"
 let i: number = s.lastIndexOf()`, "lastIndexOf() takes 1 or 2 arguments"},
 		{"list lastIndexOf arity", `let l: string[] = ["a"]
 let i: number = l.lastIndexOf()`, "lastIndexOf() takes 1 argument"},
 		{"string lastIndexOf arity", `let s: string = "abc"
 let i: number = s.lastIndexOf("a", 1, 2)`, "lastIndexOf() takes 1 or 2 arguments"},
-		{"string search second arg type", `let s: string = "abc"
-let i: number = s.indexOf("a", "1")`, "indexOf() second argument must be number"},
 		{"safe integer arity", `let ok: boolean = Number.isSafeInteger()`, "Number.isSafeInteger() takes 1 argument"},
 		{"isNaN arity", `let ok: boolean = Number.isNaN()`, "Number.isNaN() takes 1 argument"},
 		{"isArray arity", `let ok: boolean = Array.isArray()`, "Array.isArray() takes 1 argument"},
 		{"isArray extra arg", `let ok: boolean = Array.isArray([], [])`, "Array.isArray() takes 1 argument"},
 		{"Object.keys arity", `let keys: string[] = Object.keys()`, "Object.keys() takes 1 argument"},
-		{"Object.keys type", `let keys: string[] = Object.keys("x")`, "Object.keys() argument must be object"},
+		{"Object.keys type", `let keys: string[] = Object.keys("x")`, "Object.keys() requires an object literal or named object"},
 		{"Object.keys process.env alias", `let envObj = process.env
 let keys: string[] = Object.keys(envObj)`, "Object.keys() requires an object literal or named object"},
 		{"Object.values arity", `let values: string[] = Object.values()`, "Object.values() takes 1 argument"},
-		{"Object.values type", `let values: string[] = Object.values("x")`, "Object.values() argument must be object"},
+		{"Object.values type", `let values: string[] = Object.values("x")`, "Object.values() requires an object literal or named object"},
 		{"Object.values process.env alias", `let envObj = process.env
 let values: string[] = Object.values(envObj)`, "Object.values() requires an object literal or named object"},
 		{"Object.entries arity", `let entries: string[][] = Object.entries()`, "Object.entries() takes 1 argument"},
-		{"Object.entries type", `let entries: string[][] = Object.entries("x")`, "Object.entries() argument must be object"},
+		{"Object.entries type", `let entries: string[][] = Object.entries("x")`, "Object.entries() requires an object literal or named object"},
 		{"Object.entries process.env alias", `let envObj = process.env
 let entries: string[][] = Object.entries(envObj)`, "Object.entries() requires an object literal or named object"},
 		{"Object.hasOwn arity", `let ok: boolean = Object.hasOwn({ a: 1 })`, "Object.hasOwn() takes 2 arguments"},
-		{"Object.hasOwn type", `let ok: boolean = Object.hasOwn("x", "name")`, "Object.hasOwn() argument must be object"},
+		{"Object.hasOwn type", `let ok: boolean = Object.hasOwn("x", "name")`, "Object.hasOwn() requires an object literal or named object"},
 		{"Object.hasOwn process.env alias", `let envObj = process.env
 let ok: boolean = Object.hasOwn(envObj, "HOME")`, "Object.hasOwn() requires an object literal or named object"},
-		{"Object.hasOwn key type", `let user = { id: 1 }
-let ok: boolean = Object.hasOwn(user, ["id"])`, "Object.hasOwn() key must be string-compatible"},
 		{"Boolean arity zero", `let ok: boolean = Boolean()`, "Boolean() takes 1 argument"},
 		{"Boolean arity two", `let ok: boolean = Boolean("x", "y")`, "Boolean() takes 1 argument"},
 		{"forEach arity", `let l: string[] = ["a"]
@@ -897,9 +885,9 @@ let result = l.forEach(x => console.log(x))`, "forEach() must be used as a state
 	}
 }
 
-func TestChecker_MathMethodRejectsNonNumber(t *testing.T) {
-	expectError(t, `let s: string = "x"
-let n: number = Math.abs(s)`, "arguments must be numbers")
+func TestChecker_MathMethodIgnoresArgumentTypes(t *testing.T) {
+	mustCheck(t, `let s: string = "x"
+let n: number = Math.abs(s)`)
 }
 
 func TestChecker_ListForEach(t *testing.T) {
@@ -1029,10 +1017,10 @@ let count: number = Metrics.count`)
 func TestChecker_ClassAccessorValidation(t *testing.T) {
 	expectError(t, `class Circle {
     get area(value: number): number { return value }
-}`, `getter "area" takes no parameters`)
+}`, `getter "area" must not take parameters`)
 	expectError(t, `class Circle {
     set area() { }
-}`, `setter "area" takes exactly one parameter`)
+}`, `setter "area" must take exactly one parameter`)
 	expectError(t, `class Circle {
     set area(value: number): number { return value }
 }`, `setter "area" must not declare a return type`)

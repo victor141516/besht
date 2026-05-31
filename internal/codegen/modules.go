@@ -87,10 +87,8 @@ func CheckFile(entryPath string, opts Options) error {
 	}
 	_, _, importedVarTypes := c.buildImportedMaps()
 	for _, mod := range c.modules {
-		if !opts.Strict {
-			if err := checker.ValidateFetchSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
-				return err
-			}
+		if err := checker.ValidateFetchSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
+			return err
 		}
 		if err := checker.ValidateObjectSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
 			return err
@@ -154,7 +152,7 @@ func (c *Compiler) load(absPath string) error {
 
 	modName := pathToModName(absPath, c.root)
 
-	chk := checker.NewWithOptions(checker.Options{Strict: c.opts.Strict})
+	chk := checker.New()
 	for qualName, sig := range c.globalSigs {
 		chk.RegisterFn(qualName, sig)
 	}
@@ -197,10 +195,7 @@ func (c *Compiler) load(absPath string) error {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
 			if fn.Exported {
-				retType := fn.ReturnType
-				if retType == nil {
-					retType = &ast.Type{Kind: ast.TypeVoid}
-				}
+				retType := inferFunctionReturnType(fn.Body.Statements)
 				qualName := modNameToPrefix(modName) + "__" + fn.Name
 				sig := &checker.FnSig{
 					Params:     fn.Params,
@@ -743,6 +738,8 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 		switch e.Name {
 		case "fetch":
 			return &ast.Type{Kind: ast.TypeFetchResponse}
+		case "Besht.iter.range":
+			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeNumber}}
 		case "Object.keys", "Object.values":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
 		case "Object.entries":
@@ -752,11 +749,111 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 		}
 	case *ast.AsExpr:
 		return inferExportValueType(e.Expr)
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=", "&&", "||":
+			return &ast.Type{Kind: ast.TypeBoolean}
+		case "+":
+			left := inferExportValueType(e.Left)
+			right := inferExportValueType(e.Right)
+			if (left != nil && left.Kind == ast.TypeString) || (right != nil && right.Kind == ast.TypeString) {
+				return &ast.Type{Kind: ast.TypeString}
+			}
+			return &ast.Type{Kind: ast.TypeNumber}
+		}
+	case *ast.MethodCallExpr:
+		if builtinName, ok := ast.BeshtMethodBuiltinName(e.Receiver, e.Method); ok {
+			if builtinName == "Besht.iter.range" {
+				return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeNumber}}
+			}
+			return &ast.Type{Kind: ast.TypeBoolean}
+		}
+		if ast.IsBeshtArgsReceiver(e.Receiver) {
+			switch e.Method {
+			case "argv":
+				return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
+			case "flag":
+				return &ast.Type{Kind: ast.TypeBoolean}
+			case "positional", "option":
+				return &ast.Type{Kind: ast.TypeString}
+			}
+		}
+		switch e.Method {
+		case "includes", "startsWith", "endsWith", "has", "some", "every":
+			return &ast.Type{Kind: ast.TypeBoolean}
+		case "map", "filter", "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "split":
+			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
+		case "length", "indexOf", "lastIndexOf", "findIndex":
+			return &ast.Type{Kind: ast.TypeNumber}
+		default:
+			return &ast.Type{Kind: ast.TypeString}
+		}
 	}
 	if t := expr.GetType(); t != nil {
 		return t
 	}
 	return &ast.Type{Kind: ast.TypeString}
+}
+
+func inferFunctionReturnType(stmts []ast.Statement) *ast.Type {
+	if typ, ok := inferReturnTypeFromStatements(stmts); ok {
+		if typ == nil {
+			return &ast.Type{Kind: ast.TypeString}
+		}
+		return typ
+	}
+	return &ast.Type{Kind: ast.TypeVoid}
+}
+
+func inferReturnTypeFromStatements(stmts []ast.Statement) (*ast.Type, bool) {
+	for _, stmt := range stmts {
+		if typ, ok := inferReturnTypeFromStatement(stmt); ok {
+			return typ, true
+		}
+	}
+	return nil, false
+}
+
+func inferReturnTypeFromStatement(stmt ast.Statement) (*ast.Type, bool) {
+	switch s := stmt.(type) {
+	case *ast.ReturnStmt:
+		if s.Value == nil {
+			return &ast.Type{Kind: ast.TypeVoid}, true
+		}
+		return inferExportValueType(s.Value), true
+	case *ast.Block:
+		return inferReturnTypeFromStatements(s.Statements)
+	case *ast.IfStmt:
+		if typ, ok := inferReturnTypeFromStatements(s.Then.Statements); ok {
+			return typ, true
+		}
+		for _, elseif := range s.ElseIfs {
+			if typ, ok := inferReturnTypeFromStatements(elseif.Body.Statements); ok {
+				return typ, true
+			}
+		}
+		if s.Else != nil {
+			return inferReturnTypeFromStatements(s.Else.Statements)
+		}
+	case *ast.ForStmt:
+		return inferReturnTypeFromStatements(s.Body.Statements)
+	case *ast.CStyleForStmt:
+		return inferReturnTypeFromStatements(s.Body.Statements)
+	case *ast.WhileStmt:
+		return inferReturnTypeFromStatements(s.Body.Statements)
+	case *ast.TryStmt:
+		if typ, ok := inferReturnTypeFromStatements(s.Body.Statements); ok {
+			return typ, true
+		}
+		return inferReturnTypeFromStatements(s.Catch.Statements)
+	case *ast.SwitchStmt:
+		for _, swCase := range s.Cases {
+			if typ, ok := inferReturnTypeFromStatements(swCase.Body.Statements); ok {
+				return typ, true
+			}
+		}
+	}
+	return nil, false
 }
 
 func (c *Compiler) buildImportedMaps() (map[string]map[string]string, map[string]map[string]string, map[string]map[string]*ast.Type) {
@@ -1148,6 +1245,7 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.varTypeMap = make(map[string]*ast.Type)
 	g.floatVars = make(map[string]bool)
 	g.paramMap = make(map[string]string)
+	g.globalVarMap = make(map[string]string)
 	g.objAliasMap = make(map[string]objectRef)
 	g.objFieldsMap = make(map[string][]string)
 	g.objPropTypeMap = make(map[string]*ast.Type)
@@ -1168,10 +1266,7 @@ func (g *moduleGenerator) generateModule(prog *ast.Program) (string, error) {
 	for _, stmt := range prog.Statements {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
-			retType := fn.ReturnType
-			if retType == nil {
-				retType = &ast.Type{Kind: ast.TypeVoid}
-			}
+			retType := inferFunctionReturnType(fn.Body.Statements)
 			qualName := g.qualifyFnName(fn.Name)
 			g.fnReturnMap[qualName] = retType
 			g.fnReturnMap[fn.Name] = retType
@@ -1203,6 +1298,7 @@ func (g *moduleGenerator) generateModule(prog *ast.Program) (string, error) {
 	}
 	for importedName, qualName := range g.importVarMap {
 		g.paramMap[importedName] = qualName
+		g.globalVarMap[importedName] = qualName
 		if typ, ok := g.importVarTypeMap[importedName]; ok {
 			g.varTypeMap[importedName] = typ
 			g.varTypeMap[qualName] = typ
@@ -1210,6 +1306,21 @@ func (g *moduleGenerator) generateModule(prog *ast.Program) (string, error) {
 	}
 	for name, qualName := range g.exportedVarAliasMap {
 		g.paramMap[name] = qualName
+	}
+	for _, stmt := range prog.Statements {
+		if s, ok := stmt.(*ast.LetDecl); ok {
+			shellName := s.Name
+			if s.Exported {
+				exportName := s.Name
+				if s.DefaultExport {
+					exportName = "default"
+				}
+				shellName = g.qualifyFnName(exportName)
+			}
+			if _, exists := g.globalVarMap[s.Name]; !exists {
+				g.globalVarMap[s.Name] = shellName
+			}
+		}
 	}
 
 	g.collectObjectTypes(prog.Statements)

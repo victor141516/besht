@@ -24,7 +24,7 @@ console.log(silenced)
 // exitCode of failing command
 let failing = $("sh", "-c", "exit 42")
 failing.run()
-console.log(`code: ${to_str(failing.exitCode())}`)
+console.log(`code: ${failing.exitCode().toString()}`)
 
 // clone and run twice
 let base = $("echo", "cloned")
@@ -32,5 +32,3 @@ let c1 = base.clone()
 let c2 = base.clone()
 c1.run()
 c2.run()
-console.log(c1.readStdout())
-console.log(c2.readStdout())

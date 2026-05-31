@@ -22,6 +22,7 @@ type Generator struct {
 	inLoop         bool
 	topLevel       bool
 	paramMap       map[string]string // besht param name → mangled shell var name
+	globalVarMap   map[string]string // top-level/imported besht name → shell var name
 	objAliasMap    map[string]objectRef
 	objFieldsMap   map[string][]string  // object var name → list of field names
 	objPropTypeMap map[string]*ast.Type // "varName.propName" → property type
@@ -110,7 +111,6 @@ type callbackBinding struct {
 
 type Options struct {
 	NoCheck                   bool
-	Strict                    bool
 	NoSourceMap               bool
 	ResolveTsImports          bool
 	AllowExternalShellImports bool
@@ -121,6 +121,7 @@ func New() *Generator {
 		fnReturnMap:    make(map[string]*ast.Type),
 		varTypeMap:     make(map[string]*ast.Type),
 		paramMap:       make(map[string]string),
+		globalVarMap:   make(map[string]string),
 		objAliasMap:    make(map[string]objectRef),
 		objFieldsMap:   make(map[string][]string),
 		objPropTypeMap: make(map[string]*ast.Type),
@@ -275,8 +276,7 @@ func isArgsMethodCall(expr ast.Expression) bool {
 	if !ok {
 		return false
 	}
-	ident, ok := e.Receiver.(*ast.IdentExpr)
-	return ok && ident.Name == "args"
+	return ast.IsBeshtArgsReceiver(e.Receiver)
 }
 
 func isArgsArgvCall(expr ast.Expression) bool {
@@ -671,13 +671,11 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 		return "", fmt.Errorf("%s: %s", e.Pos, e.Message)
 	}
 
+	g.collectGlobalBindings(prog.Statements)
 	for _, stmt := range prog.Statements {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
-			retType := fn.ReturnType
-			if retType == nil {
-				retType = &ast.Type{Kind: ast.TypeVoid}
-			}
+			retType := inferFunctionReturnType(fn.Body.Statements)
 			g.fnReturnMap[fn.Name] = retType
 			var pnames []string
 			for _, p := range fn.Params {
@@ -715,6 +713,19 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 	out.WriteString("\n")
 	out.WriteString(body)
 	return out.String(), nil
+}
+
+func (g *Generator) collectGlobalBindings(stmts []ast.Statement) {
+	if g.globalVarMap == nil {
+		g.globalVarMap = make(map[string]string)
+	}
+	for _, stmt := range stmts {
+		if s, ok := stmt.(*ast.LetDecl); ok {
+			if _, exists := g.globalVarMap[s.Name]; !exists {
+				g.globalVarMap[s.Name] = s.Name
+			}
+		}
+	}
 }
 
 func (g *Generator) line(s string) {
@@ -868,11 +879,24 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		}
 		g.cmdChains[s.Name] = s.Value
 		if g.cmdScope != nil {
-			if root := findRootCmd(s.Value); root != nil {
-				if id, ok := g.cmdAnalysis.nodeToID[root]; ok {
-					g.cmdScope.define(s.Name, id)
+			id := -1
+			if me, ok := s.Value.(*ast.MethodCallExpr); ok && me.Method == "clone" {
+				id = g.cmdAnalysis.resolveIdentityExpr(s.Value, g.cmdScope)
+			}
+			if id < 0 {
+				if root := findRootCmd(s.Value); root != nil {
+					if rootID, ok := g.cmdAnalysis.nodeToID[root]; ok {
+						id = rootID
+					}
 				}
-			} else if id := g.cmdAnalysis.resolveIdentityExpr(s.Value, g.cmdScope); id >= 0 {
+			}
+			if id < 0 {
+				id = g.cmdAnalysis.resolveIdentityExpr(s.Value, g.cmdScope)
+			}
+			if id >= 0 {
+				if ident := g.cmdAnalysis.identity(id); ident != nil && ident.VarName == "" {
+					ident.VarName = s.Name
+				}
 				g.cmdScope.define(s.Name, id)
 			}
 		}
@@ -1000,8 +1024,15 @@ func (g *Generator) isLazyCommandBinding(expr ast.Expression) bool {
 	if containsRunCall(expr) || g.cmdAnalysis == nil || g.cmdScope == nil {
 		return false
 	}
-	_, ok := expr.(*ast.MethodCallExpr)
-	return ok && g.cmdAnalysis.resolveIdentityExpr(expr, g.cmdScope) >= 0
+	me, ok := expr.(*ast.MethodCallExpr)
+	if !ok {
+		return false
+	}
+	switch me.Method {
+	case "readStdout", "readStdoutLines", "readStderr", "exitCode":
+		return false
+	}
+	return g.cmdAnalysis.resolveIdentityExpr(expr, g.cmdScope) >= 0
 }
 
 func (g *Generator) genDestructureDecl(s *ast.DestructureDecl) error {
@@ -1082,10 +1113,7 @@ func (g *Generator) registerClass(c *ast.ClassDecl) {
 		}
 	}
 	for _, method := range c.Methods {
-		retType := method.ReturnType
-		if retType == nil {
-			retType = &ast.Type{Kind: ast.TypeVoid}
-		}
+		retType := inferFunctionReturnType(method.Body.Statements)
 		fnName := classMethodName(c.Name, method.Name)
 		g.fnReturnMap[fnName] = retType
 		if g.fnReturnsFloat(method.Body.Statements) {
@@ -1094,8 +1122,8 @@ func (g *Generator) registerClass(c *ast.ClassDecl) {
 	}
 	for _, accessor := range c.Accessors {
 		methodName := string(accessor.Kind) + "_" + accessor.Name
-		retType := accessor.ReturnType
-		if accessor.Kind == ast.AccessorSet || retType == nil {
+		retType := inferFunctionReturnType(accessor.Body.Statements)
+		if accessor.Kind == ast.AccessorSet {
 			retType = &ast.Type{Kind: ast.TypeVoid}
 		}
 		fnName := classMethodName(c.Name, methodName)
@@ -1411,6 +1439,9 @@ func (g *Generator) resolveVarName(name string) string {
 	if mangled, ok := g.paramMap[name]; ok {
 		return mangled
 	}
+	if global, ok := g.globalVarMap[name]; ok {
+		return global
+	}
 	if g.inFunction {
 		mangled := fnParamVar(g.currentFn, name)
 		return mangled
@@ -1555,7 +1586,8 @@ func (g *Generator) genClassAccessorDecl(c *ast.ClassDecl, accessor *ast.ClassAc
 
 func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod, isConstructor bool) error {
 	fnName := classMethodName(c.Name, method.Name)
-	if !isConstructor && method.ReturnType != nil && method.ReturnType.Kind != ast.TypeVoid && methodMutatesThis(method.Body.Statements) {
+	retType := inferFunctionReturnType(method.Body.Statements)
+	if !isConstructor && retType.Kind != ast.TypeVoid && methodMutatesThis(method.Body.Statements) {
 		return fmt.Errorf("class method %q returns a value and cannot assign to this properties", method.Name)
 	}
 	g.genSourceComment(method.Pos)
@@ -1672,7 +1704,7 @@ func (g *Generator) genIf(s *ast.IfStmt) error {
 func (g *Generator) genFor(s *ast.ForStmt) error {
 	switch iter := s.Iterator.(type) {
 	case *ast.BuiltinCallExpr:
-		if iter.Name == "range" {
+		if iter.Name == "Besht.iter.range" {
 			return g.genForRange(s, iter)
 		}
 	case *ast.IdentExpr:
@@ -1684,6 +1716,9 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		}
 		return g.genForShell(s, formatCmdForBare(pipeline, redirect))
 	case *ast.MethodCallExpr:
+		if builtin, ok := beshtBuiltinCall(iter); ok && builtin.Name == "Besht.iter.range" {
+			return g.genForRange(s, builtin)
+		}
 		pipeline, redirect, err := g.genCmdChain(iter)
 		if err != nil {
 			return err
@@ -1727,6 +1762,9 @@ func (g *Generator) genCStyleFor(s *ast.CStyleForStmt) error {
 }
 
 func (g *Generator) genForRange(s *ast.ForStmt, r *ast.BuiltinCallExpr) error {
+	if len(r.Args) != 2 {
+		return fmt.Errorf("Besht.iter.range() takes 2 arguments")
+	}
 	startStr, err := g.genExprValue(r.Args[0])
 	if err != nil {
 		return err
@@ -1980,6 +2018,9 @@ func (g *Generator) genExit(s *ast.ExitStmt) error {
 }
 
 func (g *Generator) genProcessExit(e *ast.MethodCallExpr) error {
+	if len(e.Args) > 1 {
+		return fmt.Errorf("process.exit() takes 0 or 1 argument")
+	}
 	if len(e.Args) == 0 {
 		g.line("exit 0")
 		return nil
@@ -2076,14 +2117,6 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 		}
 		return nil
 	case *ast.BuiltinCallExpr:
-		if e.Name == "exit" {
-			return g.genExit(&ast.ExitStmt{Pos: e.Pos, Code: func() ast.Expression {
-				if len(e.Args) > 0 {
-					return e.Args[0]
-				}
-				return nil
-			}()})
-		}
 		stmt, err := g.genBuiltinStmt(e)
 		if err != nil {
 			return err
@@ -2391,13 +2424,13 @@ func (g *Generator) objectBooleanValueCase(varName string) string {
 	var fields []string
 	for _, field := range g.objFieldsMap[varName] {
 		if typ := g.objPropTypeMap[varName+"."+field]; typ != nil && typ.Kind == ast.TypeBoolean {
-			fields = append(fields, field)
+			fields = append(fields, fmt.Sprintf("[ \"$_bst_obj_key\" = %s ]", shellQuote(field)))
 		}
 	}
 	if len(fields) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("case \"$_bst_obj_key\" in %s) if [ \"$_bst_obj_value\" = 1 ]; then _bst_obj_value=true; else _bst_obj_value=false; fi;; esac; ", strings.Join(fields, "|"))
+	return fmt.Sprintf("if %s; then if [ \"$_bst_obj_value\" = 1 ]; then _bst_obj_value=true; else _bst_obj_value=false; fi; fi; ", strings.Join(fields, " || "))
 }
 
 func (g *Generator) objectValuesLoop(varName string) string {
@@ -2583,7 +2616,7 @@ func (g *Generator) staticObjectKeyExpr(expr ast.Expression) (string, bool) {
 }
 
 func objectHasOwnMembershipExpr(keysExpr, keyExpr string) string {
-	return fmt.Sprintf("$(_bst_obj_key=%s; case \"$_bst_obj_key\" in ''|*[!A-Za-z0-9_]*) printf 0;; *) if printf '%%s\n' %s | grep -qxF -- \"$_bst_obj_key\"; then printf 1; else printf 0; fi;; esac)", ensureArgSafe(keyExpr), keysExpr)
+	return fmt.Sprintf("$(_bst_obj_key=%s; if [ -z \"$_bst_obj_key\" ] || printf '%%s\\n' \"$_bst_obj_key\" | grep -q '[^A-Za-z0-9_]'; then printf 0; elif printf '%%s\\n' %s | grep -qxF -- \"$_bst_obj_key\"; then printf 1; else printf 0; fi)", ensureArgSafe(keyExpr), keysExpr)
 }
 
 func objectHasOwnExpr(varName, keyExpr string) string {
@@ -2591,7 +2624,7 @@ func objectHasOwnExpr(varName, keyExpr string) string {
 }
 
 func objectHasOwnSlotExpr(slotExpr, keyExpr string) string {
-	return fmt.Sprintf("$(_bst_obj_slot=%s; %s; eval \"_bst_obj_keys=\\\"\\${_objkeys_${_bst_obj_slot}}\\\"\"; _bst_obj_key=%s; case \"$_bst_obj_key\" in ''|*[!A-Za-z0-9_]*) printf 0;; *) if printf '%%s\n' $_bst_obj_keys | grep -qxF -- \"$_bst_obj_key\"; then printf 1; else printf 0; fi;; esac)", slotExpr, computedKeyValidation("_bst_obj_slot"), ensureArgSafe(keyExpr))
+	return fmt.Sprintf("$(_bst_obj_slot=%s; %s; eval \"_bst_obj_keys=\\\"\\${_objkeys_${_bst_obj_slot}}\\\"\"; _bst_obj_key=%s; if [ -z \"$_bst_obj_key\" ] || printf '%%s\\n' \"$_bst_obj_key\" | grep -q '[^A-Za-z0-9_]'; then printf 0; elif printf '%%s\\n' $_bst_obj_keys | grep -qxF -- \"$_bst_obj_key\"; then printf 1; else printf 0; fi)", slotExpr, computedKeyValidation("_bst_obj_slot"), ensureArgSafe(keyExpr))
 }
 
 func objectHasOwnRefExpr(ref objectRef, keyExpr string) string {
@@ -2893,7 +2926,7 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 		}
 		return g.genIndexExpr(e)
 	case *ast.MethodCallExpr:
-		if builtin, ok := beshtConditionsBuiltinCall(e); ok {
+		if builtin, ok := beshtBuiltinCall(e); ok {
 			return g.genBuiltinCapture(builtin)
 		}
 		if e.Optional {
@@ -3324,76 +3357,15 @@ func arrayFromLengthArg(e *ast.BuiltinCallExpr) (ast.Expression, bool) {
 
 func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	switch e.Name {
-	case "file_exists", "is_dir", "is_readable", "is_writable", "is_executable", "is_empty", "is_set":
+	case "Besht.fs.isFile", "Besht.fs.isDir", "Besht.fs.isReadable", "Besht.fs.isWritable", "Besht.fs.isExecutable", "Besht.strings.isEmpty", "Besht.strings.isNonEmpty":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("%s() takes 1 argument", e.Name)
+		}
 		cond, err := g.genBuiltinCondition(e)
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("$(if %s; then printf 1; else printf 0; fi)", cond), nil
-
-	case "len":
-		argStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("$(printf '%%s\\n' %s | wc -l | tr -d ' ')", argStr), nil
-
-	case "head":
-		argStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("$(printf '%%s\\n' %s | head -n1)", argStr), nil
-
-	case "tail":
-		argStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("$(printf '%%s\\n' %s | tail -n +2)", argStr), nil
-
-	case "append":
-		listStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		elemStr, err := g.genExprValue(e.Args[1])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("$(printf '%%s\\n%%s' %s %s)", listStr, elemStr), nil
-
-	case "contains":
-		listStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		elemStr, err := g.genExprValue(e.Args[1])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("$(printf '%%s\\n' %s | grep -qxF %s && echo 1 || echo 0)", listStr, elemStr), nil
-
-	case "exit":
-		if len(e.Args) == 0 {
-			return "0", nil
-		}
-		return g.genExprValue(e.Args[0])
-
-	case "env":
-		nameLit, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		varName := stripQuotes(nameLit)
-		if len(e.Args) == 2 {
-			defVal, err := g.genExprValue(e.Args[1])
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("\"${%s:-%s}\"", varName, stripQuotes(defVal)), nil
-		}
-		return fmt.Sprintf("\"${%s}\"", varName), nil
 
 	case "console.log", "console.error":
 		parts, err := g.genArgs(e.Args)
@@ -3404,16 +3376,6 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 			return fmt.Sprintf("$(printf '%%s\\n' %s >&2)", strings.Join(parts, " ")), nil
 		}
 		return fmt.Sprintf("$(printf '%%s\\n' %s)", strings.Join(parts, " ")), nil
-
-	case "to_str", "String":
-		argStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		if strings.HasPrefix(argStr, "\"") {
-			return argStr, nil
-		}
-		return fmt.Sprintf("\"%s\"", argStr), nil
 
 	case "Boolean":
 		return g.genBooleanCapture(e.Args[0])
@@ -3463,6 +3425,21 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Array.of":
 		return g.genListLiteral(&ast.ListLit{Pos: e.Pos, Elements: e.Args})
 
+	case "Besht.iter.range":
+		if len(e.Args) != 2 {
+			return "", fmt.Errorf("Besht.iter.range() takes 2 arguments")
+		}
+		startStr, err := g.genExprValue(e.Args[0])
+		if err != nil {
+			return "", err
+		}
+		endStr, err := g.genExprValue(e.Args[1])
+		if err != nil {
+			return "", err
+		}
+		idx := fmt.Sprintf("_range_%d_%d", e.Pos.Line, e.Pos.Column)
+		return fmt.Sprintf("$(%s=%s; while [ \"$%s\" -le %s ]; do printf '%%s\n' \"$%s\"; %s=$(( %s + 1 )); done)", idx, stripQuotes(startStr), idx, stripQuotes(endStr), idx, idx, idx), nil
+
 	case "Array.isArray":
 		if argType := g.inferReceiverType(e.Args[0]); argType != nil && argType.Kind == ast.TypeList {
 			return "1", nil
@@ -3486,26 +3463,8 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("$(case %s in *.*) printf 0;; *) printf 1;; esac)", stripQuotes(argStr)), nil
+		return fmt.Sprintf("$(if printf '%%s\\n' %s | grep -q '[.]'; then printf 0; else printf 1; fi)", argStr), nil
 
-	case "to_int":
-		argStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		clean := stripQuotes(argStr)
-		return fmt.Sprintf("$(( %s + 0 ))", clean), nil
-
-	case "concat":
-		aStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		bStr, err := g.genExprValue(e.Args[1])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("$(printf '%%s\\n%%s' %s %s)", aStr, bStr), nil
 	}
 	return "", fmt.Errorf("builtin %q cannot be used in value position", e.Name)
 }
@@ -3557,6 +3516,14 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 		}
 		if ref, ok := g.objAliasMap[ident.Name]; ok {
 			return g.genObjectRefProperty(ref, e.Property, e.Pos), nil
+		}
+		if _, ok := g.objPropTypeMap[varName+"."+e.Property]; ok {
+			return fmt.Sprintf("\"$%s\"", objectPropVar(varName, e.Property)), nil
+		}
+		if global, ok := g.globalVarMap[ident.Name]; ok && global == varName {
+			if _, hasProp := g.objPropTypeMap[ident.Name+"."+e.Property]; hasProp {
+				return fmt.Sprintf("\"$%s\"", objectPropVar(varName, e.Property)), nil
+			}
 		}
 		if vt, ok := g.varTypeMap[varName]; ok && vt.Kind == ast.TypeObject {
 			return fmt.Sprintf("\"$%s\"", objectPropVar(varName, e.Property)), nil
@@ -3830,10 +3797,8 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: typeString}}
-		case "Number.parseInt", "Number.parseFloat", "to_int":
+		case "Number.parseInt", "Number.parseFloat":
 			return typeNumber
-		case "String", "to_str", "env":
-			return typeString
 		case "Array.from":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeNumber}
 		case "Array.of":
@@ -3890,6 +3855,11 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			if pt, ok := g.objPropTypeMap[varName+"."+e.Property]; ok {
 				return pt
 			}
+			if global, ok := g.globalVarMap[ident.Name]; ok && global == varName {
+				if pt, ok := g.objPropTypeMap[ident.Name+"."+e.Property]; ok {
+					return pt
+				}
+			}
 			if _, isParam := g.paramMap[ident.Name]; isParam {
 				if pt, ok := g.objPropTypeMap[ident.Name+"."+e.Property]; ok {
 					return pt
@@ -3937,10 +3907,13 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			}
 		}
 	case *ast.MethodCallExpr:
-		if _, ok := beshtConditionsBuiltinCall(e); ok {
+		if builtin, ok := beshtBuiltinCall(e); ok {
+			if builtin.Name == "Besht.iter.range" {
+				return &ast.Type{Kind: ast.TypeList, Elem: typeNumber}
+			}
 			return &ast.Type{Kind: ast.TypeBoolean}
 		}
-		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "args" {
+		if ast.IsBeshtArgsReceiver(e.Receiver) {
 			switch e.Method {
 			case "argv":
 				return &ast.Type{Kind: ast.TypeList, Elem: typeString}
@@ -4054,7 +4027,7 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 			return true
 		}
 	case *ast.MethodCallExpr:
-		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "args" && e.Method == "flag" {
+		if ast.IsBeshtArgsReceiver(e.Receiver) && e.Method == "flag" {
 			return true
 		}
 		if className, ok := g.receiverClassName(e.Receiver); ok {
@@ -4107,13 +4080,13 @@ func (g *Generator) fnReturnsFloat(stmts []ast.Statement) bool {
 }
 
 func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
-	if builtin, ok := beshtConditionsBuiltinCall(e); ok {
+	if builtin, ok := beshtBuiltinCall(e); ok {
 		return g.genBuiltinCapture(builtin)
 	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" && e.Method == "exit" {
 		return "", fmt.Errorf("process.exit() cannot be used in value position")
 	}
-	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "args" {
+	if ast.IsBeshtArgsReceiver(e.Receiver) {
 		return g.genArgsMethod(e)
 	}
 	if className, ok := g.receiverClassName(e.Receiver); ok {
@@ -4266,14 +4239,23 @@ func (g *Generator) genArgsMethod(e *ast.MethodCallExpr) (string, error) {
 	g.requireRuntimeHelper("args")
 	switch e.Method {
 	case "argv":
+		if len(e.Args) != 0 {
+			return "", fmt.Errorf("Besht.args.argv() takes no arguments")
+		}
 		return fmt.Sprintf("$(_bst_args_call _bst_args_argv %s %s)", shellWordList(g.argsOptions), shellWordList(g.argsFlags)), nil
 	case "positional":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.args.positional() takes 1 argument")
+		}
 		idx, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("$(_bst_args_call _bst_args_positional %s %s %s)", ensureArgSafe(idx), shellWordList(g.argsOptions), shellWordList(g.argsFlags)), nil
 	case "option":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", fmt.Errorf("Besht.args.option() takes 1 or 2 arguments")
+		}
 		longName, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
@@ -4287,6 +4269,9 @@ func (g *Generator) genArgsMethod(e *ast.MethodCallExpr) (string, error) {
 		}
 		return fmt.Sprintf("$(_bst_args_call _bst_args_option %s %s)", ensureArgSafe(longName), ensureArgSafe(shortName)), nil
 	case "flag":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", fmt.Errorf("Besht.args.flag() takes 1 or 2 arguments")
+		}
 		longName, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
@@ -4300,7 +4285,7 @@ func (g *Generator) genArgsMethod(e *ast.MethodCallExpr) (string, error) {
 		}
 		return fmt.Sprintf("$(_bst_args_call _bst_args_flag %s %s)", ensureArgSafe(longName), ensureArgSafe(shortName)), nil
 	}
-	return "", fmt.Errorf("args has no method %q", e.Method)
+	return "", fmt.Errorf("Besht.args has no method %q", e.Method)
 }
 
 func (g *Generator) argsArgcExpr() string {
@@ -4682,6 +4667,12 @@ func (g *Generator) genForEachCallbackBlock(block *ast.Block) error {
 }
 
 func (g *Generator) genListJoin(recv string, e *ast.MethodCallExpr, sep string) string {
+	if sep == "\n" {
+		if listLen := g.listLengthExpr(e.Receiver); listLen != "" {
+			return fmt.Sprintf("$(printf '%%s\n' %s | awk %s 'NR<=_len{if(NR>1)printf \"\\n\"; if($0==\"__BESHT_NL__\")printf \"\\n\"; else printf \"%%s\",$0}END{for(i=NR+1;i<=_len;i++)printf \"\\n\"}')", ensureArgSafe(recv), awkArg("_len", listLen))
+		}
+		return fmt.Sprintf("$(printf '%%s\n' %s | awk 'NR>1{printf \"\\n\"}{if($0==\"__BESHT_NL__\")printf \"\\n\"; else printf \"%%s\",$0}')", ensureArgSafe(recv))
+	}
 	sepEscaped := strings.ReplaceAll(sep, "'", "'\"'\"'")
 	if listLen := g.listLengthExpr(e.Receiver); listLen != "" {
 		return fmt.Sprintf("$(printf '%%s\n' %s | awk -v s='%s' %s 'NR<=_len{if(NR>1)printf s; if($0==\"__BESHT_NL__\")printf \"\\n\"; else printf \"%%s\",$0}END{for(i=NR+1;i<=_len;i++)printf s}')", ensureArgSafe(recv), sepEscaped, awkArg("_len", listLen))
@@ -5524,7 +5515,7 @@ func (g *Generator) genComputedDynamicPropertyAssign(ref objectRef, s *ast.Index
 }
 
 func computedKeyValidation(varName string) string {
-	return "case \"$" + varName + "\" in ''|*[!A-Za-z0-9_]*) printf '[besht] invalid object key: %s\\n' \"$" + varName + "\" >&2; exit 1;; esac"
+	return "if [ -z \"$" + varName + "\" ] || printf '%s\\n' \"$" + varName + "\" | grep -q '[^A-Za-z0-9_]'; then printf '[besht] invalid object key: %s\\n' \"$" + varName + "\" >&2; exit 1; fi"
 }
 
 func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (string, error) {
@@ -5600,7 +5591,7 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 		}
 		return truthyCondition(call), nil
 	case *ast.MethodCallExpr:
-		if builtin, ok := beshtConditionsBuiltinCall(e); ok {
+		if builtin, ok := beshtBuiltinCall(e); ok {
 			return g.genBuiltinCondition(builtin)
 		}
 		if e.Optional {
@@ -5647,11 +5638,8 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 	return truthyCondition(val), nil
 }
 
-func beshtConditionsBuiltinCall(e *ast.MethodCallExpr) (*ast.BuiltinCallExpr, bool) {
-	if !ast.IsBeshtConditionsReceiver(e.Receiver) {
-		return nil, false
-	}
-	builtinName, ok := ast.BeshtConditionBuiltinName(e.Method)
+func beshtBuiltinCall(e *ast.MethodCallExpr) (*ast.BuiltinCallExpr, bool) {
+	builtinName, ok := ast.BeshtMethodBuiltinName(e.Receiver, e.Method)
 	if !ok {
 		return nil, false
 	}
@@ -5659,6 +5647,13 @@ func beshtConditionsBuiltinCall(e *ast.MethodCallExpr) (*ast.BuiltinCallExpr, bo
 }
 
 func (g *Generator) genMethodCondition(e *ast.MethodCallExpr) (string, error) {
+	if ast.IsBeshtArgsReceiver(e.Receiver) {
+		val, err := g.genMethodCall(e)
+		if err != nil {
+			return "", err
+		}
+		return truthyCondition(val), nil
+	}
 	recv, err := g.genExprValue(e.Receiver)
 	if err != nil {
 		return "", err
@@ -5813,63 +5808,74 @@ func binaryStringTest(left, op, right string) string {
 
 func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) {
 	switch e.Name {
-	case "file_exists":
+	case "Besht.fs.isFile":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.fs.isFile() takes 1 argument")
+		}
 		arg0, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		clean := stripQuotes(arg0)
 		return fmt.Sprintf("[ -f %s ]", clean), nil
-	case "is_dir":
+	case "Besht.fs.isDir":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.fs.isDir() takes 1 argument")
+		}
 		arg0, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		clean := stripQuotes(arg0)
 		return fmt.Sprintf("[ -d %s ]", clean), nil
-	case "is_readable":
+	case "Besht.fs.isReadable":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.fs.isReadable() takes 1 argument")
+		}
 		arg0, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		clean := stripQuotes(arg0)
 		return fmt.Sprintf("[ -r %s ]", clean), nil
-	case "is_writable":
+	case "Besht.fs.isWritable":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.fs.isWritable() takes 1 argument")
+		}
 		arg0, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		clean := stripQuotes(arg0)
 		return fmt.Sprintf("[ -w %s ]", clean), nil
-	case "is_executable":
+	case "Besht.fs.isExecutable":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.fs.isExecutable() takes 1 argument")
+		}
 		arg0, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		clean := stripQuotes(arg0)
 		return fmt.Sprintf("[ -x %s ]", clean), nil
-	case "is_empty":
+	case "Besht.strings.isEmpty":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.strings.isEmpty() takes 1 argument")
+		}
 		arg0, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("[ -z %s ]", arg0), nil
-	case "is_set":
+	case "Besht.strings.isNonEmpty":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Besht.strings.isNonEmpty() takes 1 argument")
+		}
 		arg0, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("[ -n %s ]", arg0), nil
-	case "contains":
-		listStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		elemStr, err := g.genExprValue(e.Args[1])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("printf '%%s\\n' %s | grep -qxF %s", listStr, elemStr), nil
 	case "Number.isFinite":
 		return "true", nil
 	case "Boolean", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
@@ -6194,7 +6200,7 @@ func formatCmdForStderrCapture(pipeline, redirect string) string {
 }
 
 func formatWorkdirCommand(path, command string) string {
-	return "_bst_workdir=" + path + "; case $_bst_workdir in -*) _bst_workdir=./$_bst_workdir;; esac; CDPATH= cd \"$_bst_workdir\" && " + command
+	return "_bst_workdir=" + path + "; if [ \"${_bst_workdir#-}\" != \"$_bst_workdir\" ]; then _bst_workdir=./$_bst_workdir; fi; CDPATH= cd \"$_bst_workdir\" && " + command
 }
 
 func commandSubstitution(cmd string) string {

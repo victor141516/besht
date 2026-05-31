@@ -43,7 +43,7 @@ When a user mentions something that would be a good future improvement but isn't
 - The compiler never errors on type mismatches
 - The `internal/checker/checker.go` file exists but only collects function signatures — it performs no validation
 
-Type checking is opt-in via `--strict` and must never be runtime type checking.
+`--check` performs semantic validation only: imports, names, command lifecycle, unsupported surfaces, and emitter-required syntax. It must not validate annotation/type mismatches.
 
 ---
 
@@ -75,7 +75,7 @@ This is not optional and does not require a prompt. Any time you add, change, re
 
 ## Project Overview
 
-**besht** is a TypeScript-flavored language that compiles to POSIX sh. It provides compile-time types, structured control flow, module imports, and a safe command-execution model over raw shell scripting. The compiler is written in Go.
+**besht** is a TypeScript-flavored language that compiles to POSIX sh. It provides TypeScript-compatible annotations for editor support and compiler representation hints, structured control flow, module imports, and a safe command-execution model over raw shell scripting. The compiler is written in Go.
 
 Source files use `.bsh` extension. The compiler produces a single `.sh` file (POSIX sh, no bashisms).
 
@@ -107,7 +107,6 @@ go run ./cmd/besht/ init --force
 go run ./cmd/besht/ <file.bsh>
 go run ./cmd/besht/ <file.bsh> -o out.sh
 go run ./cmd/besht/ --check <file.bsh>
-go run ./cmd/besht/ --check --strict <file.bsh>
 
 # Split mode — one .sh per .bsh, imports become source calls
 go run ./cmd/besht/ <file.bsh> --split -o <outdir/>
@@ -131,7 +130,6 @@ go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
 | `init --force`                | Overwrite a different existing `./stdlib.d.bsh`                       |
 | `--split`                     | Compile each `.bsh` to its own `.sh`; imports become `. source` calls |
 | `--check`                     | Validate imports, command usage, and unsupported fetch APIs, no output |
-| `--strict`                    | Enable compile-time type validation                                   |
 | `--opt-no-add-binaries-check` | Omit the runtime POSIX utility self-check block                       |
 | `--opt-no-source-map`          | Omit `# besht:file:line:col` source comments from compiled output        |
 | `--opt-resolve-ts-imports`     | Let extensionless imports fall back to `.ts` only when `.bsh` is absent |
@@ -341,7 +339,7 @@ Prefer native list APIs for new user-facing examples and compiler work: `list.le
 ```
 internal/lexer/lexer_test.go       # Token types, keywords, errors, position tracking
 internal/parser/parser_test.go     # Every AST node type; error recovery
-internal/checker/checker_test.go   # Type checking, scope, all builtins
+internal/checker/checker_test.go   # Semantic validation, scope, builtins/surfaces
 internal/codegen/codegen_test.go   # Unit: AST → sh output patterns (uses Generate())
 internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh output
 ```
@@ -423,16 +421,16 @@ b` // multiline-safe string equality
 let bigger: number = a > b ? a : b
 
 // Environment variables
-let home: string = env("HOME")
-let port: string = env("PORT", "8080")
+let home: string = process.env.HOME
+let port: string = process.env.PORT ?? "8080"
 let nodeHome: string = process.env.HOME
 let nodePort: string = process.env.PORT ?? "8080"
 
 // Script arguments
-let argv: string[] = args.argv()
-let input: string = args.positional(1) ?? "-"
-let branchArg: string = args.option("branch", "b") ?? "main"
-let dryRun: boolean = args.flag("dry-run", "d")
+let argv: string[] = Besht.args.argv()
+let input: string = Besht.args.positional(1) ?? "-"
+let branchArg: string = Besht.args.option("branch", "b") ?? "main"
+let dryRun: boolean = Besht.args.flag("dry-run", "d")
 
 // Fetch text-only GETs. Synchronous and curl-backed (`curl -sS -- <url>`).
 let body: string = fetch(url).text()
@@ -446,14 +444,9 @@ let b: string = flag.toString() // true or false
 let n: number = Number.parseInt(s)
 let n10: number = Number.parseInt(s, 10)
 let truthy: boolean = Boolean(s)
-// Older helpers remain supported for now:
-let oldS: string = to_str(count)
-let oldString: string = String(count)
-let oldN: number = to_int(s)
 
 // Boolean(value) returns a primitive boolean using JS-like truthiness for current Besht values.
 // It does not create Boolean object wrappers or add runtime type metadata.
-// String() remains an alias for to_str()
 let label: string = "check:" + name
 let msg: string = `Hello, ${name}!`  // template literal for interpolation
 let sum: string = `sum=${a + b}`
@@ -513,20 +506,20 @@ while (count > 0) count--
 
 // C-style for loop (TypeScript syntax)
 for (let i: number = 0; i < 10; i++) {
-    $("echo", to_str(i)).run()
+    $("echo", i.toString()).run()
 }
 for (let i: number = 0; i < 10; i++) total += i
 
 // Bare init (no let) — i implicitly declared in loop scope
 for (i = 0; i < 10; i++) {
-    $("echo", to_str(i)).run()
+    $("echo", i.toString()).run()
 }
 
 // For range — iterate integers
-for (i in range(1, 10)) {
-    $("echo", to_str(i)).run()
+for (i in Besht.iter.range(1, 10)) {
+    $("echo", i.toString()).run()
 }
-for (i in range(1, 10)) total += i
+for (i in Besht.iter.range(1, 10)) total += i
 
 // For list
 for (f in files) {
@@ -546,7 +539,7 @@ for (let f of files) {
 
 // Break and continue
 for (f in files) {
-    if (is_empty(f)) { continue }
+    if (Besht.strings.isEmpty(f)) { continue }
     if (f == "stop") { break }
     $("echo", f).run()
 }
@@ -704,14 +697,13 @@ cmd.clone().run()   // ← correct
 process.exit()
 process.exit(7)
 process.exit(code) // number or status
-exit(0) // older helper remains supported for now
 
 // Try/catch
 try {
     $("rsync", "-az", src, dest).run()
 } catch (code: status) {
-    console.log("failed: " + to_str(code))
-    exit(1)
+    console.log("failed: " + code.toString())
+    process.exit(1)
 }
 
 // Error propagation
@@ -720,17 +712,14 @@ function read_file(path: string): string {
     return content
 }
 
-// Besht condition helpers — wrappers around older global condition builtins
-if (Besht.conditions.fileExists(path)) console.log("file")
-if (Besht.conditions.isDir(path)) console.log("dir")
-if (Besht.conditions.isReadable(path)) console.log("readable")
-if (Besht.conditions.isWritable(path)) console.log("writable")
-if (Besht.conditions.isExecutable(path)) console.log("executable")
-let empty: boolean = Besht.conditions.isEmpty(value)
-let set: boolean = Besht.conditions.isSet(value)
-
-// Older names remain supported for now
-if (file_exists(path) || is_empty(value)) console.log("old names still work")
+// Besht helper namespaces
+if (Besht.fs.isFile(path)) console.log("file")
+if (Besht.fs.isDir(path)) console.log("dir")
+if (Besht.fs.isReadable(path)) console.log("readable")
+if (Besht.fs.isWritable(path)) console.log("writable")
+if (Besht.fs.isExecutable(path)) console.log("executable")
+let empty: boolean = Besht.strings.isEmpty(value)
+let set: boolean = Besht.strings.isNonEmpty(value)
 
 // Math object methods
 let mn: number = Math.min(a, b)     // → awk comparison
@@ -979,15 +968,15 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`??` uses an internal nullish sentinel, not shell default expansion.** Do not lower it to `${var:-fallback}` because empty string, `0`, and `false` must be preserved. Only `null`, `undefined`, missing `args` values, missing `process.env.NAME` variables, and missing indexes in nullish-left position should trigger the fallback.
 
-**`process.env.NAME ?? fallback` must use unset-only detection.** Lower `process.env.NAME` with `${NAME+x}` and `_BESHT_NULLISH_SENTINEL`; never use `${NAME:-fallback}` for this API because an explicitly empty environment variable must be preserved. The old `env()` and `exit()` builtins remain supported until a later removal decision.
+**`process.env.NAME ?? fallback` must use unset-only detection.** Lower `process.env.NAME` with `${NAME+x}` and `_BESHT_NULLISH_SENTINEL`; never use `${NAME:-fallback}` for this API because an explicitly empty environment variable must be preserved.
 
-**`Besht` is a standard namespace exemption.** Module rewriting must not qualify `Besht` as a class/function-like identifier. `Besht.conditions.*` wrappers are parser-level method calls on `Besht.conditions`, but checker/codegen lower them to the existing condition builtins (`file_exists`, `is_dir`, `is_readable`, `is_writable`, `is_executable`, `is_empty`, `is_set`). In condition position they must emit the same minimal tests (`[ -f ... ]`, `[ -d ... ]`, `[ -r ... ]`, `[ -w ... ]`, `[ -x ... ]`, `[ -z ... ]`, `[ -n ... ]`) and must not introduce runtime helpers.
+**`Besht` is a standard namespace exemption.** Module rewriting must not qualify `Besht` as a class/function-like identifier. `Besht.fs.*`, `Besht.strings.*`, `Besht.args.*`, and `Besht.iter.*` are parser-level method calls on `Besht` groups. In condition position, file/string predicates must emit minimal tests (`[ -f ... ]`, `[ -d ... ]`, `[ -r ... ]`, `[ -w ... ]`, `[ -x ... ]`, `[ -z ... ]`, `[ -n ... ]`) and must not introduce runtime helpers.
 
-**`args.*` helpers parse script arguments in generated POSIX sh.** `args.argv()` returns positional args only, `args.positional(n)` returns a 1-based positional value or nullish, `args.option(long, short?)` supports `--long=value`, `--long value`, and optional `-s value`, and `args.flag(long, short?)` returns boolean `1`/`0`. Keep defaults outside helpers via `??`.
+**`Besht.args.*` helpers parse script arguments in generated POSIX sh.** `Besht.args.argv()` returns positional args only, `Besht.args.positional(n)` returns a 1-based positional value or nullish, `Besht.args.option(long, short?)` supports `--long=value`, `--long value`, and optional `-s value`, and `Besht.args.flag(long, short?)` returns boolean `1`/`0`. Keep defaults outside helpers via `??`.
 
-**`--` stops args option parsing.** After `--`, values that look like options or flags are positional. For example, `script --branch=dev -- -d file` has `args.flag("dry-run", "d") == false` and positional args `-d`, `file`.
+**`--` stops args option parsing.** After `--`, values that look like options or flags are positional. For example, `script --branch=dev -- -d file` has `Besht.args.flag("dry-run", "d") == false` and positional args `-d`, `file`.
 
-**`fetch()` is currently a narrow synchronous text-only builtin.** It returns internal `TypeFetchResponse`, supports only `fetch(url).text()` and `let response = fetch(url); response.text()`, and lowers to `curl -sS -- <url>`. Assigned responses run curl once and store stdout in `_obj_<response>_body`; aliases and reassignments copy or refresh that body slot. `.body` is internal and not a user-facing property. `codegen.CheckFile` enables a narrow non-strict fetch-surface validation pass so `--check` rejects unsupported response properties/methods like `.status` and `.json()` without enabling annotation type mismatch errors. Do not add `await`, options, POST, headers, bodies, `.json()`, `.status`, `.ok`, or `.headers` without a separate design.
+**`fetch()` is currently a narrow synchronous text-only builtin.** It returns internal `TypeFetchResponse`, supports only `fetch(url).text()` and `let response = fetch(url); response.text()`, and lowers to `curl -sS -- <url>`. Assigned responses run curl once and store stdout in `_obj_<response>_body`; aliases and reassignments copy or refresh that body slot. `.body` is internal and not a user-facing property. `codegen.CheckFile` enables a narrow fetch-surface validation pass so `--check` rejects unsupported response properties/methods like `.status` and `.json()` without annotation type checking. Do not add `await`, options, POST, headers, bodies, `.json()`, `.status`, `.ok`, or `.headers` without a separate design.
 
 **Equality conditions bind operands before comparing.** `genBinaryCondition()` must assign both sides to temporary variables and compare `[ "$_bst_left" = "$_bst_right" ]` / `!=`. Direct `[ $(fn) = "multi\nline" ]` breaks POSIX `[ ]` argument parsing when strings contain spaces or newlines.
 
@@ -1023,4 +1012,4 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Blockless `if`/`else` bodies are parsed as one-statement blocks.** `if (cond) return x` and `else expr` should produce the same AST shape as braced single-statement blocks.
 
-**Import value exports, shell imports, declaration files, and .ts fallback.** `export const name = expr` and `export default expr` are module-level value exports. Module codegen qualifies exported values as `<module>__<name>` and default exports as `<module>__default`; imported values are mapped through `moduleGenerator.importVarMap` into `paramMap` so normal identifier and command-spread generation uses the qualified shell variable. Imported value types must also be seeded into `varTypeMap` for both the source import name and qualified shell name so non-strict codegen dispatches imported list/boolean methods and formatting correctly. Keep extensionless import resolution `.bsh`-first. Only `codegen.Options.ResolveTsImports` / `--opt-resolve-ts-imports` may fall back to `.ts`, and `.d.bsh` imports remain declaration-only. `CompileFile`, `CompileFileSplit`, and `CheckFile` auto-load `stdlib.d.bsh` from the entry file directory when present; do not scan imported module directories for their own stdlib files, and do not emit/source declaration files in bundled or split output. Declared function calls must keep the declared external name unqualified; do not rewrite them to `<module>__<name>` because no Besht wrapper is emitted. Explicit `.sh` imports require named imports plus `assert { type: "shell" }`; default shell imports are rejected, shell files are not parsed for exports, and checker registration treats imported shell functions as unchecked varargs returning `string`. `--check` uses the module compiler path so import validation matches compilation. By default shell imports must stay inside the compiler root; `codegen.Options.AllowExternalShellImports` / `--opt-allow-external-shell-imports` permits explicit `.sh` imports outside that root without relaxing `.bsh` module imports. Bundled output sources the resolved shell file with a guard, while split output copies in-root raw shell dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths. External opt-in shell imports in split output are sourced from their original absolute path instead of copied outside the output root. Shell import guard variables are generated from unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
+**Import value exports, shell imports, declaration files, and .ts fallback.** `export const name = expr` and `export default expr` are module-level value exports. Module codegen qualifies exported values as `<module>__<name>` and default exports as `<module>__default`; imported values are mapped through `moduleGenerator.importVarMap` into `paramMap` so normal identifier and command-spread generation uses the qualified shell variable. Imported value representation hints must also be seeded into `varTypeMap` for both the source import name and qualified shell name so codegen dispatches imported list/boolean methods and formatting correctly. Keep extensionless import resolution `.bsh`-first. Only `codegen.Options.ResolveTsImports` / `--opt-resolve-ts-imports` may fall back to `.ts`, and `.d.bsh` imports remain declaration-only. `CompileFile`, `CompileFileSplit`, and `CheckFile` auto-load `stdlib.d.bsh` from the entry file directory when present; do not scan imported module directories for their own stdlib files, and do not emit/source declaration files in bundled or split output. Declared function calls must keep the declared external name unqualified; do not rewrite them to `<module>__<name>` because no Besht wrapper is emitted. Explicit `.sh` imports require named imports plus `assert { type: "shell" }`; default shell imports are rejected, shell files are not parsed for exports, and checker registration treats imported shell functions as unchecked varargs returning `string`. `--check` uses the module compiler path so import validation matches compilation. By default shell imports must stay inside the compiler root; `codegen.Options.AllowExternalShellImports` / `--opt-allow-external-shell-imports` permits explicit `.sh` imports outside that root without relaxing `.bsh` module imports. Bundled output sources the resolved shell file with a guard, while split output copies in-root raw shell dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths. External opt-in shell imports in split output are sourced from their original absolute path instead of copied outside the output root. Shell import guard variables are generated from unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.

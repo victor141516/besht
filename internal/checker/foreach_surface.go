@@ -334,7 +334,7 @@ func (v *forEachSurfaceValidator) forEachCallbackExpr(expr ast.Expression) error
 func (v *forEachSurfaceValidator) isSideEffectExpr(expr ast.Expression) bool {
 	switch e := expr.(type) {
 	case *ast.BuiltinCallExpr:
-		return e.Name == "console.log" || e.Name == "console.error" || e.Name == "exit"
+		return e.Name == "console.log" || e.Name == "console.error"
 	case *ast.MethodCallExpr:
 		return e.Method == "run" || (e.Method == "add" && v.isSetValue(e.Receiver)) || isProcessExitCall(e)
 	case *ast.FnCallExpr:

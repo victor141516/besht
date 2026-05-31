@@ -152,7 +152,7 @@ let user = {
 }
 
 user.name = "Compiler Tester"
-let userLabel = user.name + "#" + String(user.id)
+let userLabel = user.name + "#" + user.id.toString()
 
 if (user.active) {
   userLabel = userLabel + " active"
@@ -175,7 +175,7 @@ if (score >= 90) {
 
 let loopText = ""
 for (let i = 0; i < 5; i++) {
-  loopText = loopText + String(i)
+  loopText = loopText + i.toString()
 }
 
 let index = 0
@@ -204,7 +204,7 @@ function add(a: number, b: number): number {
 }
 
 function makeLabel(prefix: string, value: number): string {
-  return prefix + ": " + String(value)
+  return prefix + ": " + value.toString()
 }
 
 let added = add(10, 20)
@@ -214,7 +214,7 @@ let maybeValue: string | null = "present"
 let safeValue = maybeValue === null ? "missing" : maybeValue
 
 let tuple: [string, number] = ["age", 30]
-let tupleText = tuple[0] + "=" + String(tuple[1])
+let tupleText = tuple[0] + "=" + tuple[1].toString()
 
 let flag = true
 let negated = !flag

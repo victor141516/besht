@@ -1,4 +1,4 @@
-let payloadPath = env("PWD") + "/node-eq/tests/language/core/fetch_payload.txt"
+let payloadPath = process.env.PWD + "/node-eq/tests/language/core/fetch_payload.txt"
 let url = "file://" + payloadPath
 
 let direct = fetch(url).text()

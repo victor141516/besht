@@ -56,6 +56,6 @@ let withVal = empty + "filled"
 console.log(withVal)
 
 let numStr = "42"
-let num = to_int(numStr)
+let num = Number.parseInt(numStr)
 let doubled = num * 2
 console.log(`doubled: ${doubled}`)

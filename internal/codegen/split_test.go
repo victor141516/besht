@@ -65,8 +65,8 @@ func TestSplit_EntryStdlibDeclarationAutoLoadedWithoutOutput(t *testing.T) {
 	writeFile(t, dir, "stdlib.d.bsh", `declare function externalName(name: string): string`)
 	path := writeFile(t, dir, "main.bsh", `let name: string = externalName("world")`)
 	outDir := filepath.Join(dir, "out")
-	if err := codegen.CompileFileSplit(path, outDir, codegen.Options{Strict: true}); err != nil {
-		t.Fatalf("strict CompileFileSplit with entry stdlib.d.bsh: %v", err)
+	if err := codegen.CompileFileSplit(path, outDir, codegen.Options{}); err != nil {
+		t.Fatalf("CompileFileSplit with entry stdlib.d.bsh: %v", err)
 	}
 	files := make(map[string]string)
 	err := filepath.Walk(outDir, func(path string, info os.FileInfo, err error) error {
@@ -377,7 +377,7 @@ console.log(wrapped())
 console.log(legacy("direct"))
 `)
 	outDir := filepath.Join(dir, "out")
-	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{Strict: true}); err != nil {
+	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{}); err != nil {
 		t.Fatalf("CompileFileSplit with shell import: %v", err)
 	}
 
@@ -456,7 +456,7 @@ console.log(dashFunc())
 console.log(underFunc())
 `)
 	outDir := filepath.Join(dir, "out")
-	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{Strict: true}); err != nil {
+	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{}); err != nil {
 		t.Fatalf("CompileFileSplit with colliding shell imports: %v", err)
 	}
 	mainOut, err := os.ReadFile(filepath.Join(outDir, "main.sh"))
@@ -483,7 +483,7 @@ func TestSplit_ShellImportSelfCopyDoesNotTruncateSource(t *testing.T) {
 	writeFile(t, dir, "main.bsh", `import { legacy } from "./lib/legacy.sh" assert { type: "shell" }
 console.log(legacy("ok"))
 `)
-	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), dir, codegen.Options{Strict: true}); err != nil {
+	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), dir, codegen.Options{}); err != nil {
 		t.Fatalf("CompileFileSplit into source root: %v", err)
 	}
 	legacyOut, err := os.ReadFile(filepath.Join(dir, "lib", "legacy.sh"))
@@ -521,7 +521,7 @@ console.log(legacy())
 	if err := os.Symlink(target, filepath.Join(outDir, "lib", "legacy.sh")); err != nil {
 		t.Fatalf("create output symlink: %v", err)
 	}
-	err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{Strict: true})
+	err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{})
 	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite symlink") {
 		t.Fatalf("CompileFileSplit error: got %v, want refusing to overwrite symlink", err)
 	}
@@ -552,7 +552,7 @@ console.log(legacy())
 	if err := os.Symlink(escaped, filepath.Join(outDir, "lib")); err != nil {
 		t.Fatalf("create output dir symlink: %v", err)
 	}
-	err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{Strict: true})
+	err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{})
 	if err == nil || !strings.Contains(err.Error(), "refusing to write through symlinked output dir") {
 		t.Fatalf("CompileFileSplit error: got %v, want symlinked output dir rejection", err)
 	}
@@ -579,7 +579,7 @@ console.log(legacy())
 	if err := os.Symlink(escaped, filepath.Join(outDir, "lib")); err != nil {
 		t.Fatalf("create output dir symlink: %v", err)
 	}
-	err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{Strict: true})
+	err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{})
 	if err == nil {
 		t.Fatalf("expected symlinked output dir rejection")
 	}
@@ -599,7 +599,7 @@ func TestSplit_ShellImportSpecialPathSourceIsSafe(t *testing.T) {
 console.log(legacy("ok"))
 `)
 	outDir := filepath.Join(dir, "out")
-	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{Strict: true}); err != nil {
+	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{}); err != nil {
 		t.Fatalf("CompileFileSplit with special shell import path: %v", err)
 	}
 	mainOut, err := os.ReadFile(filepath.Join(outDir, "main.sh"))

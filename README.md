@@ -2,7 +2,7 @@
 
 A TypeScript-flavored language that compiles to POSIX sh.
 
-Write shell scripts that are readable and portable. By default, besht accepts TypeScript-style annotations for editor help and compiles without type validation; pass `--strict` to enable compile-time type checking.
+Write shell scripts that are readable and portable. Besht accepts TypeScript-style annotations for editor help and representation hints, but it does not type-check them.
 
 ---
 
@@ -20,7 +20,7 @@ brew install victor141516/tap/besht
 # Compile to stdout (single bundled file)
 besht script.bsh
 
-# Generate editor/strict-check declarations in ./stdlib.d.bsh
+# Generate editor declarations in ./stdlib.d.bsh
 besht init
 
 # Compile to a single bundled file
@@ -31,9 +31,6 @@ besht script.bsh --split -o build/
 
 # Validate imports, command usage, and unsupported fetch APIs
 besht --check script.bsh
-
-# Type-check and validate annotations
-besht --check --strict script.bsh
 
 # Run directly
 besht script.bsh | sh
@@ -82,7 +79,7 @@ Files use the `.bsh` extension.
 
 ### Current behavior
 
-- Type annotations are optional and ignored unless `--strict` is enabled.
+- Type annotations and `as` assertions are accepted for TypeScript-compatible syntax, editor support, and occasional compiler representation hints. They never validate values or produce type mismatch errors.
 - Template literals support `${expr}`, not just `${name}`.
 - `for (item of items)` and `for (let item of items)` are accepted as aliases for `for (item in items)`.
 - Ternary expressions `cond ? a : b` and nullish coalescing `value ?? fallback` are supported.
@@ -117,7 +114,7 @@ Files use the `.bsh` extension.
 
 ### Variables
 
-Declare with `let`. Types are optional and only validated with `--strict`.
+Declare with `let`. Types are optional and are never validated by the compiler.
 
 ```ts
 let name: string = "Alice";
@@ -144,7 +141,7 @@ count--;            // postfix decrement
 let next = ++count;  // prefix increment in expressions
 ```
 
-Available types: `string`, `number`, `boolean`, `object`, `list<T>`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), tuple types (`[string, number]`). Type annotations are ignored by the compiler unless `--strict` is enabled. `null` and `undefined` are runtime nullish sentinels for `??` and comparisons.
+Available annotation forms include `string`, `number`, `boolean`, `object`, `list<T>`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), and tuple types (`[string, number]`). Besht does not type-check annotations; `null` and `undefined` are runtime nullish sentinels for `??` and comparisons.
 
 ### Strings
 
@@ -179,28 +176,21 @@ let port: string = process.env.PORT ?? "8080"
 let debug: string = process.env.DEBUG ?? "false"
 ```
 
-The older `env()` helper remains supported for now:
-
-```ts
-let home: string = env("HOME")
-let port: string = env("PORT", "8080")
-```
-
 ### Script arguments
 
-Use `args` to read command-line arguments passed to the compiled shell script. Missing positional values and options return a nullish value, so use `??` for defaults. Empty strings are preserved.
+Use `Besht.args` to read command-line arguments passed to the compiled shell script. Missing positional values and options return a nullish value, so use `??` for defaults. Empty strings are preserved.
 
 ```ts
-let all: string[] = args.argv()
-let input = args.positional(1) ?? "-"
-let branch = args.option("branch", "b") ?? "main"
-let dryRun = args.flag("dry-run", "d")
+let all: string[] = Besht.args.argv()
+let input = Besht.args.positional(1) ?? "-"
+let branch = Besht.args.option("branch", "b") ?? "main"
+let dryRun = Besht.args.flag("dry-run", "d")
 ```
 
-- `args.argv()` returns positional arguments as `string[]` after option parsing.
-- `args.positional(n)` returns the 1-based positional argument or a nullish value when absent.
-- `args.option(longName, shortName?)` supports `--name=value`, `--name value`, and `-n value`; absent options are nullish.
-- `args.flag(longName, shortName?)` returns `true` when `--name` or `-n` is present.
+- `Besht.args.argv()` returns positional arguments as `string[]` after option parsing.
+- `Besht.args.positional(n)` returns the 1-based positional argument or a nullish value when absent.
+- `Besht.args.option(longName, shortName?)` supports `--name=value`, `--name value`, and `-n value`; absent options are nullish.
+- `Besht.args.flag(longName, shortName?)` returns `true` when `--name` or `-n` is present.
 - `--` stops option and flag parsing; later values are treated as positional arguments.
 
 ### Fetch
@@ -215,7 +205,7 @@ let first: string = response.text()
 let second: string = response.text() // reuses the stored body
 ```
 
-This slice deliberately rejects or defers `await`, `fetch(url, options)`, POST/method options, headers, request bodies, redirects policy, streaming, abort/clone, response `.json()`, `.status`, `.ok`, and `.headers`. `--check` rejects those unsupported response properties and methods even when annotation type checking is not enabled.
+This slice deliberately rejects or defers `await`, `fetch(url, options)`, POST/method options, headers, request bodies, redirects policy, streaming, abort/clone, response `.json()`, `.status`, `.ok`, and `.headers`. `--check` rejects those unsupported response properties and methods.
 
 ### Nullish coalescing
 
@@ -313,7 +303,7 @@ while (count > 0) count--
 
 ```ts
 for (let i: number = 0; i < 10; i++) {
-  $("echo", to_str(i)).run();
+  $("echo", i.toString()).run();
 }
 
 for (let i: number = 0; i < 10; i++) total += i
@@ -322,11 +312,11 @@ for (let i: number = 0; i < 10; i++) total += i
 **For — range:**
 
 ```ts
-for (i in range(1, 10)) {
-  $("echo", to_str(i)).run();
+for (i in Besht.iter.range(1, 10)) {
+  $("echo", i.toString()).run();
 }
 
-for (i in range(1, 10)) total += i
+for (i in Besht.iter.range(1, 10)) total += i
 ```
 
 **For — list:**
@@ -356,7 +346,7 @@ for (file in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
 
 ```ts
 for (f in files) {
-  if (is_empty(f)) {
+  if (Besht.strings.isEmpty(f)) {
     continue;
   }
   if (f == "STOP") {
@@ -397,7 +387,7 @@ let sameTree = draw() === `*
 let count = acc[word] || 0     // returns acc[word] if truthy, else 0
 
 // ?? falls back only for null/undefined, preserving empty string, 0, and false
-let port = args.option("port", "p") ?? "8080"
+let port = Besht.args.option("port", "p") ?? "8080"
 let label = maybeName ?? "anonymous"
 ```
 
@@ -699,7 +689,7 @@ try {
     $("ssh", "server", "systemctl restart myapp").run()
 } catch (code: status) {
     $("echo", `Deploy failed with exit code ${code}`).stderr("&1").run()
-    exit(1)
+    process.exit(1)
 }
 ```
 
@@ -733,45 +723,44 @@ let root: string = $("pwd").workdir("/").run().readStdout() // /
 $("make", "test").workdir("/repo/app").run()
 ```
 
-### Built-in functions
+### Besht helpers
 
-These compile to inline shell tests — they are not real function calls.
+Besht-specific helpers live under the global `Besht` object. They compile to inline POSIX tests or small generated shell; they are not runtime namespace objects.
 
-| Function           | Condition emitted |
-| ------------------ | ----------------- |
-| `file_exists(p)`   | `[ -f "$p" ]`     |
-| `is_dir(p)`        | `[ -d "$p" ]`     |
-| `is_readable(p)`   | `[ -r "$p" ]`     |
-| `is_writable(p)`   | `[ -w "$p" ]`     |
-| `is_executable(p)` | `[ -x "$p" ]`     |
-| `is_empty(s)`      | `[ -z "$s" ]`     |
-| `is_set(s)`        | `[ -n "$s" ]`     |
+File helpers:
 
-The same tests are also available through the `Besht.conditions.*` namespace. These wrappers compile to the same inline shell tests as the older global names, work in strict mode, and do not add runtime helper functions. The older names remain supported for now.
+| API                         | Condition emitted |
+| --------------------------- | ----------------- |
+| `Besht.fs.isFile(p)`        | `[ -f "$p" ]`     |
+| `Besht.fs.isDir(p)`         | `[ -d "$p" ]`     |
+| `Besht.fs.isReadable(p)`    | `[ -r "$p" ]`     |
+| `Besht.fs.isWritable(p)`    | `[ -w "$p" ]`     |
+| `Besht.fs.isExecutable(p)`  | `[ -x "$p" ]`     |
 
-| Wrapper                              | Older name         | Condition emitted |
-| ------------------------------------ | ------------------ | ----------------- |
-| `Besht.conditions.fileExists(p)`     | `file_exists(p)`   | `[ -f "$p" ]`     |
-| `Besht.conditions.isDir(p)`          | `is_dir(p)`        | `[ -d "$p" ]`     |
-| `Besht.conditions.isReadable(p)`     | `is_readable(p)`   | `[ -r "$p" ]`     |
-| `Besht.conditions.isWritable(p)`     | `is_writable(p)`   | `[ -w "$p" ]`     |
-| `Besht.conditions.isExecutable(p)`   | `is_executable(p)` | `[ -x "$p" ]`     |
-| `Besht.conditions.isEmpty(s)`        | `is_empty(s)`      | `[ -z "$s" ]`     |
-| `Besht.conditions.isSet(s)`          | `is_set(s)`        | `[ -n "$s" ]`     |
+String predicates:
 
-List operations should use native list syntax in new code:
+| API                              | Condition emitted |
+| -------------------------------- | ----------------- |
+| `Besht.strings.isEmpty(s)`       | `[ -z "$s" ]`     |
+| `Besht.strings.isNonEmpty(s)`    | `[ -n "$s" ]`     |
 
-| Native API                    | Older helper alias       | Description                   |
-| ----------------------------- | ------------------------ | ----------------------------- |
-| `list.length`                 | `len(list)`              | Number of elements            |
-| `list[0]`                     | `head(list)`             | First element                 |
-| `list.slice(1)`               | `tail(list)`             | All elements except the first |
-| `list.push(value)`            | `append(list, value)`    | New list with value appended  |
-| `[...list, value]`            | `append(list, value)`    | New list with value appended  |
-| `list.includes(value)`        | `contains(list, value)`  | True if value is in list      |
-| `list.concat(other)`          | `concat(list, other)`    | Concatenate two lists         |
+Iteration helpers:
 
-The old helper names remain supported for compatibility. Prefer the native forms above for new code.
+| API                            | Description                              |
+| ------------------------------ | ---------------------------------------- |
+| `Besht.iter.range(start, end)` | Inclusive ascending integer range list   |
+
+List operations should use native list syntax and methods:
+
+| Native API             | Description                   |
+| ---------------------- | ----------------------------- |
+| `list.length`          | Number of elements            |
+| `list[0]`              | First element                 |
+| `list.slice(1)`        | All elements except the first |
+| `list.push(value)`     | New list with value appended  |
+| `[...list, value]`     | New list with value appended  |
+| `list.includes(value)` | True if value is in list      |
+| `list.concat(other)`   | Concatenate two lists         |
 
 Array helpers:
 
@@ -781,15 +770,15 @@ Array helpers:
 | `Array.of(a, b, ...)`        | Create a list from the given values          |
 | `Array.isArray(value)`       | Static predicate for compiler-known list values |
 
-`Array.isArray()` is evaluated from Besht's inferred types. It returns true for expressions the compiler knows are lists and false otherwise; it does not add runtime shape metadata or dynamic JavaScript-style inspection.
+`Array.isArray()` is evaluated from Besht's inferred representations. It returns true for expressions the compiler knows are lists and false otherwise; it does not add runtime shape metadata or dynamic JavaScript-style inspection.
 
 Object helpers:
 
-| Function           | Description                        |
-| ------------------ | ---------------------------------- |
-| `Object.keys(obj)` | Return object keys as a `string[]` |
-| `Object.values(obj)` | Return object values as a `string[]` |
-| `Object.entries(obj)` | Return object `[key, value]` rows as a `string[][]` |
+| Function                 | Description                        |
+| ------------------------ | ---------------------------------- |
+| `Object.keys(obj)`       | Return object keys as a `string[]` |
+| `Object.values(obj)`     | Return object values as a `string[]` |
+| `Object.entries(obj)`    | Return object `[key, value]` rows as a `string[][]` |
 | `Object.hasOwn(obj, key)` | Return whether a compiler-managed object has an exact key |
 
 ### Type conversion
@@ -816,17 +805,12 @@ let boolText: string = flag.toString() // "true"
 
 `Boolean(value)` returns a primitive Besht boolean, not a Boolean object wrapper. It treats `false`, `0`, `0.0`, `""`, `null`, and `undefined` as false; non-empty strings such as `"0"` and `"false"`, non-zero numbers, arrays, and objects are true.
 
-Older helpers remain supported for now: `to_str(value)`, `String(value)`, and `to_int(str)`.
-
 Other:
 
 | Function             | Description                      |
 | -------------------- | -------------------------------- |
-| `env(NAME)`          | Read environment variable        |
-| `env(NAME, default)` | Read env var with fallback       |
 | `console.log(s)`     | Print string + newline to stdout |
 | `console.error(s)`   | Print string + newline to stderr |
-| `exit(code)`         | Exit with code                   |
 | `process.env.NAME`  | Read environment variable; unset values are nullish |
 | `process.exit(code)` | Exit with optional code          |
 
@@ -835,9 +819,6 @@ process.exit()  // exit 0
 process.exit(7) // exit 7
 process.exit(code) // exit with number or status variable
 
-// Older names remain supported for now:
-exit(0)
-exit(code)
 ```
 
 ### Modules and imports
@@ -871,7 +852,7 @@ $(...defaultCmd).run();
 
 Imports are resolved at compile time. Named imports can reference exported functions, classes, and top-level `export const`/`export let` values. `export default <expr>` is imported with `import name from "./module"`. All Besht modules are concatenated into a single `.sh` file in bundled mode. Extensionless imports use `.bsh` only unless `--opt-resolve-ts-imports` is passed; with that opt-in, `.bsh` still wins and `.ts` is used only if `.bsh` is absent.
 
-Declaration files with the `.d.bsh` suffix provide declarations for strict checking and editor-compatible syntax without emitting shell. Declared functions are called by their declared names; besht does not generate wrappers for them. You can import declaration files explicitly, or place `stdlib.d.bsh` next to the entry file to make its declarations available automatically to bundled compile, split compile, and `--check`. Run `besht init` from a project directory to write the standard declarations to `./stdlib.d.bsh`; it will not overwrite different existing content unless you pass `besht init --force`. Only the entry directory is searched for this automatic stdlib file.
+Declaration files with the `.d.bsh` suffix provide editor-compatible declarations and compiler ABI hints without emitting shell. Declared functions are called by their declared names; besht does not generate wrappers for them. You can import declaration files explicitly, or place `stdlib.d.bsh` next to the entry file to make its declarations available automatically to bundled compile, split compile, and `--check`. Run `besht init` from a project directory to write the standard declarations to `./stdlib.d.bsh`; it will not overwrite different existing content unless you pass `besht init --force`. Only the entry directory is searched for this automatic stdlib file.
 
 Existing POSIX shell files can be imported explicitly with named imports and an assertion:
 
@@ -882,7 +863,7 @@ import { legacy_log } from "./legacy.sh" assert { type: "shell" };
 legacy_log("from besht");
 ```
 
-`--check` validates imports using the same module resolver as compilation and rejects unsupported fetch response APIs such as `.status` and `.json()` even without `--strict`. Shell imports require a `.sh` path and `assert { type: "shell" }`. They are named-only; default shell imports are rejected. Besht does not parse the shell file or infer exports, so imported shell functions are unchecked varargs and return `string` when used in value position. By default, shell imports must stay inside the compiler root. Pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root. Bundled output sources the resolved `.sh` file with a guard. Split output copies in-root `.sh` dependencies into the output tree and sources them through `_BESHT_ROOT`; external opt-in shell imports are sourced from their original absolute path. Shell import guards use unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
+`--check` validates imports using the same module resolver as compilation and rejects unsupported fetch response APIs such as `.status` and `.json()`. Shell imports require a `.sh` path and `assert { type: "shell" }`. They are named-only; default shell imports are rejected. Besht does not parse the shell file or infer exports, so imported shell functions are unchecked varargs and return `string` when used in value position. By default, shell imports must stay inside the compiler root. Pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root. Bundled output sources the resolved `.sh` file with a guard. Split output copies in-root `.sh` dependencies into the output tree and sources them through `_BESHT_ROOT`; external opt-in shell imports are sourced from their original absolute path. Shell import guards use unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
 
 ### Comments
 
@@ -910,14 +891,14 @@ function deploy(env: string, version: string) {
     } catch (code: status) {
         error("Deploy failed (exit ${code}), rolling back")
         $("ssh", env, "systemctl restart myapp-previous").run()
-        exit(1)
+        process.exit(1)
     }
 
     info("Deploy successful")
 }
 
-let env: string = env("1")
-let version: string = env("2")
+let env: string = Besht.args.positional(1) ?? ""
+let version: string = Besht.args.positional(2) ?? ""
 
 deploy(env, version)
 ```
@@ -937,14 +918,14 @@ chmod +x deploy.sh
 ```ts
 function format_size(bytes: number): string {
     if (bytes > 1073741824) {
-        return to_str(bytes / 1073741824) + "GB"
+        return (bytes / 1073741824).toString() + "GB"
     } else if (bytes > 1048576) {
-        return to_str(bytes / 1048576) + "MB"
+        return (bytes / 1048576).toString() + "MB"
     }
-    return to_str(bytes / 1024) + "KB"
+    return (bytes / 1024).toString() + "KB"
 }
 
-let target: string = env("1", ".")
+let target: string = Besht.args.positional(1) ?? "."
 let threshold: number = 1048576
 
 for (file in $("find", target, "-type", "f").run().readStdoutLines()) {
@@ -967,7 +948,6 @@ besht init --force                  Overwrite ./stdlib.d.bsh declarations
 besht <file.bsh> -o <out.sh>        Compile to a single bundled file
 besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
 besht --check <file.bsh>            Validate imports, command usage, and unsupported fetch APIs (no output)
-besht --check --strict <file.bsh>   Type-check with validation
 besht <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-check
 besht <file.bsh> --opt-no-source-map            Omit source comments from compiled output
 besht <file.bsh> --opt-resolve-ts-imports       Resolve extensionless imports to .ts only when .bsh is absent

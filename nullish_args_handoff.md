@@ -2,28 +2,28 @@
 
 ## Scope
 
-Simplify command-line parameter handling while staying POSIX/Bourne-shell compatible. Do not implement defaults inside args helpers; defaults should use TypeScript-style nullish coalescing.
+Simplify command-line parameter handling while staying POSIX/Bourne-shell compatible. Do not implement defaults inside Besht args helpers; defaults should use TypeScript-style nullish coalescing.
 
 ## Agreed API Direction
 
-Use a common `args` object instead of globals:
+Use `Besht.args` instead of globals:
 
 ```ts
-let all = args.argv()
-let input = args.positional(1) ?? "input.txt"
-let branch = args.option("branch", "b") ?? "main"
-let dryRun = args.flag("dry-run", "d")
+let all = Besht.args.argv()
+let input = Besht.args.positional(1) ?? "input.txt"
+let branch = Besht.args.option("branch", "b") ?? "main"
+let dryRun = Besht.args.flag("dry-run", "d")
 ```
 
 Rules discussed:
 
-- `args.argv()` returns all positional command-line args as `string[]`.
-- `args.positional(n)` returns the 1-based positional arg or `undefined`.
-- `args.option(longName, shortName?)` supports `--name value`, `--name=value`, and optional `-n value`.
-- `args.flag(longName, shortName?)` supports `--name` and optional `-n`, returning boolean.
+- `Besht.args.argv()` returns all positional command-line args as `string[]`.
+- `Besht.args.positional(n)` returns the 1-based positional arg or `undefined`.
+- `Besht.args.option(longName, shortName?)` supports `--name value`, `--name=value`, and optional `-n value`.
+- `Besht.args.flag(longName, shortName?)` supports `--name` and optional `-n`, returning boolean.
 - Long names are mandatory for `option` and `flag`.
 - Short-only helpers are intentionally not included.
-- Defaults should be written with `??`, e.g. `args.option("branch", "b") ?? "main"`.
+- Defaults should be written with `??`, e.g. `Besht.args.option("branch", "b") ?? "main"`.
 
 ## Required `??` Semantics
 
@@ -73,7 +73,7 @@ Likely compiler work:
 1. Lexer: add a `??` token without interfering with `?` propagation syntax.
 2. AST: add a nullish-coalescing expression node or represent it as a binary expression with a distinct operator.
 3. Parser: add precedence for `??`. Keep it lower than `+`/comparison and compatible with grouping. Decide whether to reject mixed `??` with `&&`/`||` without parentheses, as JavaScript does, or support a simpler deterministic precedence.
-4. Checker: infer result type as left non-nullish union with right fallback. Besht has no real runtime type checking, so this is mostly for codegen dispatch.
+4. Semantic validation/codegen hints: infer the result representation from the left non-nullish value and right fallback. Besht does not type-check annotations, so this is for codegen dispatch only.
 5. Codegen: emit shell that tests nullish only, not generic falsiness. Avoid `${x:-fallback}` because it treats empty string as missing.
 6. Module rewrite: ensure any new expression node descends into both operands.
 7. Docs: update README, AGENTS.md, and `skills/besht-scripting/SKILL.md` when implementing language support.

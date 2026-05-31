@@ -20,7 +20,15 @@ function hasPassed(average: number): boolean {
   return average >= 50;
 }
 
-function printStudentReport(student: Student): void {
+const student: Student = {
+  name: "Laura",
+  age: 16,
+  subjects: ["Math", "English", "History"],
+  scores: [72, 65, 81],
+  isActive: true,
+};
+
+function printStudentReport(): void {
   const average = calculateAverage(student.scores);
   const passed = hasPassed(average);
 
@@ -39,12 +47,4 @@ function printStudentReport(student: Student): void {
   }
 }
 
-const student: Student = {
-  name: "Laura",
-  age: 16,
-  subjects: ["Math", "English", "History"],
-  scores: [72, 65, 81],
-  isActive: true,
-};
-
-printStudentReport(student);
+printStudentReport();

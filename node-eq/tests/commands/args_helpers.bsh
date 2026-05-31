@@ -1,13 +1,13 @@
-let all = args.argv()
-let first = args.positional(1) ?? "missing"
-let second = args.positional(2) ?? "missing"
-let third = args.positional(3) ?? "missing"
-let missingPos = args.positional(9) ?? "missing"
-let branch = args.option("branch", "b") ?? "main"
-let emptyOpt = args.option("empty") ?? "fallback"
-let missingOpt = args.option("missing") ?? "fallback"
-let dryRun = args.flag("dry-run", "d")
-let verbose = args.flag("verbose", "v")
+let all = Besht.args.argv()
+let first = Besht.args.positional(1) ?? "missing"
+let second = Besht.args.positional(2) ?? "missing"
+let third = Besht.args.positional(3) ?? "missing"
+let missingPos = Besht.args.positional(9) ?? "missing"
+let branch = Besht.args.option("branch", "b") ?? "main"
+let emptyOpt = Besht.args.option("empty") ?? "fallback"
+let missingOpt = Besht.args.option("missing") ?? "fallback"
+let dryRun = Besht.args.flag("dry-run", "d")
+let verbose = Besht.args.flag("verbose", "v")
 
 console.log(`argv: ${all.join("|")}`)
 console.log(`first: ${first}`)

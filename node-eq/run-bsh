@@ -5,7 +5,7 @@
  * Usage:  bun run-bsh <file.bsh> [script args...]
  *         ./run-bsh <file.bsh> [script args...]
  *
- * The runtime globals ($, env, to_str, …) are injected before the file runs.
+ * The runtime globals ($, Besht, fetch, …) are injected before the file runs.
  * declare statements in the file are TypeScript no-ops and ignored by Bun.
  */
 
@@ -28,7 +28,7 @@ const materialized = new Map<string, string>()
 function collectArgSchema(code: string): { options: string[]; flags: string[] } {
   const options = new Set<string>()
   const flags = new Set<string>()
-  const re = /args\.(option|flag)\(\s*(["'])([^"']+)\2\s*(?:,\s*(["'])([^"']+)\4\s*)?\)/g
+  const re = /Besht\.args\.(option|flag)\(\s*(["'])([^"']+)\2\s*(?:,\s*(["'])([^"']+)\4\s*)?\)/g
   for (const match of code.matchAll(re)) {
     const target = match[1] === "option" ? options : flags
     target.add(`--${match[3]}`)
@@ -53,10 +53,43 @@ function resolveBshImport(source: string, fromFile: string): string | null {
   return null
 }
 
+function resolveShellImport(source: string, fromFile: string): string | null {
+  if (!source.startsWith("./") && !source.startsWith("../")) return null
+  const base = resolve(dirname(fromFile), source)
+  if (extname(base) === ".sh" && existsSync(base)) return base
+  return null
+}
+
 function importSource(fromWrapper: string, toWrapper: string): string {
   let rel = relative(dirname(fromWrapper), toWrapper).replaceAll("\\", "/")
   if (!rel.startsWith("./") && !rel.startsWith("../")) rel = `./${rel}`
   return rel
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`
+}
+
+function shellImportBindings(names: string, source: string, fromFile: string): string | null {
+  const shellFile = resolveShellImport(source, fromFile)
+  if (!shellFile) return null
+  return names.split(",").map((part) => {
+    const trimmed = part.trim()
+    const alias = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/)
+    const direct = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)$/)
+    const imported = alias ? alias[1] : direct?.[1]
+    const local = alias ? alias[2] : direct?.[1]
+    if (!imported || !local) {
+      throw new Error(`Unsupported shell import binding: ${trimmed}`)
+    }
+    const script = `. ${shellQuote(shellFile)}; ${imported} "$@"`
+    return `const ${local} = (...args: string[]) => {
+  const result = _beshtSpawnSync("sh", ["-c", ${JSON.stringify(script)}, "sh", ...args], { encoding: "utf8" });
+  if (result.stderr) process.stderr.write(result.stderr);
+  if ((result.status ?? 0) !== 0) process.exitCode = result.status ?? 1;
+  return (result.stdout ?? "").replace(/\\n$/, "");
+};`
+  }).join("\n")
 }
 
 function materialize(file: string): string {
@@ -70,6 +103,9 @@ function materialize(file: string): string {
 
   let stripped = stripDeclares(readFileSync(absFile, "utf8"))
   const schema = collectArgSchema(stripped)
+  stripped = stripped.replace(/import\s+\{([^}]+)\}\s+from\s+(['"])(\.{1,2}\/[^'"]+\.sh)\2\s+assert\s*\{\s*type\s*:\s*(['"])shell\4\s*\}\s*;?/g, (match, names, _quote, source) => {
+    return shellImportBindings(names, source, absFile) ?? match
+  })
   stripped = stripped.replace(/(import\s+(?:[^'";]+?\s+from\s+)?)(['"])(\.{1,2}\/[^'"]+)(\2)/g, (match, prefix, quote, source, suffix) => {
     const dep = resolveBshImport(source, absFile)
     if (!dep) return match
@@ -78,22 +114,17 @@ function materialize(file: string): string {
 
   const wrapper = `
 import {
-  $, args, env, fetch, to_str, to_int, String, Number, exit,
-  file_exists, is_dir, is_readable, is_writable, is_executable,
-  is_empty, is_set,
-  len, head, tail, append, contains, concat, range,
+  $, Besht, fetch,
   Command,
 } from ${JSON.stringify(runtimePath)};
+import { spawnSync as _beshtSpawnSync } from "node:child_process";
 
 const _runtime = {
-  $, args, env, fetch, to_str, to_int, String, Number, exit,
-  file_exists, is_dir, is_readable, is_writable, is_executable,
-  is_empty, is_set,
-  len, head, tail, append, contains, concat, range,
+  $, Besht, fetch,
   Command,
 };
 Object.assign(globalThis, _runtime);
-args.configure(${JSON.stringify(schema.options)}, ${JSON.stringify(schema.flags)});
+Besht.args.configure(${JSON.stringify(schema.options)}, ${JSON.stringify(schema.flags)});
 
 ${stripped}
 `.trimStart()

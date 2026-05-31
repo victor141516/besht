@@ -98,7 +98,7 @@ class Command {
               process.stdout.write(rawOut)
             }
           }
-          setImmediate(flush)
+          setTimeout(flush, 0)
         }
       } else {
         input = (result.stdout ?? Buffer.alloc(0)) as unknown as Buffer
@@ -141,12 +141,6 @@ class Command {
 
 function $(cmd: string, ...args: string[]): Command {
   return new Command([{ argv: [cmd, ...args] }])
-}
-
-// ─── env ──────────────────────────────────────────────────────────────────────
-
-function env(name: string, defaultValue?: string): string {
-  return process.env[name] ?? defaultValue ?? ""
 }
 
 function fetch(url: string): { text(): string } {
@@ -221,86 +215,58 @@ const args = {
   },
 }
 
-// ─── type conversion ──────────────────────────────────────────────────────────
+// ─── Besht namespace ──────────────────────────────────────────────────────────
 
-function to_str(value: any): string {
-  return String(value)
-}
-
-function to_int(value: string): number {
-  const n = parseInt(value.trim(), 10)
-  return isNaN(n) ? 0 : n
-}
-
-const RuntimeString = String
-const RuntimeNumber = Number
-
-// ─── exit ─────────────────────────────────────────────────────────────────────
-
-function exit(code: number = 0): never {
-  process.exit(code)
-}
-
-// ─── file tests ───────────────────────────────────────────────────────────────
-
-function file_exists(p: string): boolean {
+function isFile(p: string): boolean {
   try { return statSync(p).isFile() } catch { return false }
 }
 
-function is_dir(p: string): boolean {
+function isDir(p: string): boolean {
   try { return statSync(p).isDirectory() } catch { return false }
 }
 
-function is_readable(p: string): boolean {
+function isReadable(p: string): boolean {
   try { accessSync(p, constants.R_OK); return true } catch { return false }
 }
 
-function is_writable(p: string): boolean {
+function isWritable(p: string): boolean {
   try { accessSync(p, constants.W_OK); return true } catch { return false }
 }
 
-function is_executable(p: string): boolean {
+function isExecutable(p: string): boolean {
   try { accessSync(p, constants.X_OK); return true } catch { return false }
 }
 
-function is_empty(s: string): boolean {
+function isEmpty(s: string): boolean {
   return s === ""
 }
 
-function is_set(s: string): boolean {
+function isNonEmpty(s: string): boolean {
   return s !== ""
 }
 
-// ─── list / array builtins ────────────────────────────────────────────────────
-
-function len(arr: any[]): number {
-  return arr.length
-}
-
-function head(arr: any[]): any {
-  return arr[0]
-}
-
-function tail(arr: any[]): any[] {
-  return arr.slice(1)
-}
-
-function append(arr: any[], item: any): any[] {
-  return [...arr, item]
-}
-
-function contains(arr: any[], item: any): boolean {
-  return arr.includes(item)
-}
-
-function concat(a: any[], b: any[]): any[] {
-  return [...a, ...b]
-}
-
-function range(start: number, end: number): number[] {
+function rangeValues(start: number, end: number): number[] {
   const result: number[] = []
   for (let i = start; i <= end; i++) result.push(i)
   return result
+}
+
+const Besht = {
+  fs: {
+    isFile,
+    isDir,
+    isReadable,
+    isWritable,
+    isExecutable,
+  },
+  strings: {
+    isEmpty,
+    isNonEmpty,
+  },
+  args,
+  iter: {
+    range: rangeValues,
+  },
 }
 
 // ─── console (already global, but standardise stderr) ─────────────────────────
@@ -315,26 +281,6 @@ Object.assign(console, {
 export {
   Command,
   $,
-  args,
-  env,
+  Besht,
   fetch,
-  to_str,
-  to_int,
-  RuntimeString as String,
-  RuntimeNumber as Number,
-  exit,
-  file_exists,
-  is_dir,
-  is_readable,
-  is_writable,
-  is_executable,
-  is_empty,
-  is_set,
-  len,
-  head,
-  tail,
-  append,
-  contains,
-  concat,
-  range,
 }

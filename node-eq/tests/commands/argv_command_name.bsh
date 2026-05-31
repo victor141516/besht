@@ -1,1 +1,2 @@
-$('$@').run()
+let cmd = ["printf", "argv-command"]
+$(...cmd).run()

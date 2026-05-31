@@ -7,9 +7,9 @@ description: >
   variables, constants, raw strings r"...", String.raw, $() command expressions,
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
-  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, args.argv()/positional()/option()/flag(), string
-  concatenation, process.env.NAME, process.exit(), env(), console.log(), value.toString(), Boolean(value), Number.parseInt(), to_str(), String(), to_int(), Besht.conditions.* wrappers, or
-  fetch(url).text(), built-in functions like file_exists, len, and range.
+  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
+  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), Boolean(value), Number.parseInt(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
+  fetch(url).text().
 ---
 
 Write and edit besht scripts. Besht is a TypeScript-flavored language that compiles to POSIX sh. Files use the `.bsh` extension.
@@ -22,7 +22,6 @@ besht init                          # write ./stdlib.d.bsh declarations
 besht init --force                  # overwrite ./stdlib.d.bsh declarations
 besht script.bsh -o out.sh          # write to file
 besht --check script.bsh            # validate imports, commands, and unsupported fetch APIs
-besht --check --strict script.bsh   # type-check with validation
 besht script.bsh | sh               # compile and run
 besht script.bsh --split -o build/  # compile each file to its own .sh
 besht script.bsh --opt-no-add-binaries-check  # omit runtime self-check
@@ -33,7 +32,7 @@ besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh import
 
 ## Variable Declarations
 
-Types are optional. Use `let` for mutable variables, `const` for immutable ones. Pass `--strict` to validate annotations.
+Types are optional. Use `let` for mutable variables and `const` for immutable ones. Besht accepts annotations for TypeScript-compatible syntax, editor support, and representation hints, but never validates them as types.
 
 ```ts
 const VERSION: string = "1.0.0";
@@ -84,9 +83,6 @@ let home: string = process.env.HOME
 let port: string = process.env.PORT ?? "8080"
 let debug: string = process.env.DEBUG ?? "false"
 
-// Older helper remains supported for now:
-let legacyHome: string = env("HOME")
-let legacyPort: string = env("PORT", "8080")
 ```
 
 `process.env.NAME` is nullish only when the variable is unset. Empty strings are preserved, so use `??` for defaults.
@@ -94,13 +90,13 @@ let legacyPort: string = env("PORT", "8080")
 ## Script Arguments
 
 ```ts
-let all: string[] = args.argv()
-let input = args.positional(1) ?? "-"
-let branch = args.option("branch", "b") ?? "main"
-let dryRun = args.flag("dry-run", "d")
+let all: string[] = Besht.args.argv()
+let input = Besht.args.positional(1) ?? "-"
+let branch = Besht.args.option("branch", "b") ?? "main"
+let dryRun = Besht.args.flag("dry-run", "d")
 ```
 
-Use `??` for argument defaults. `args.positional()` and `args.option()` are nullish when absent and preserve empty strings when present. `args.flag()` returns a boolean. `--` stops option parsing, so later `-`-prefixed values are positional.
+Use `??` for argument defaults. `Besht.args.positional()` and `Besht.args.option()` are nullish when absent and preserve empty strings when present. `Besht.args.flag()` returns a boolean. `--` stops option parsing, so later `-`-prefixed values are positional.
 
 ## Fetch
 
@@ -114,7 +110,7 @@ let first: string = response.text()
 let second: string = response.text() // reuses the stored body
 ```
 
-This slice supports only `fetch(url).text()` and assigned response `.text()`. It does not support `await`, options objects, POST/method overrides, headers, request bodies, `.json()`, `.status`, `.ok`, `.headers`, streaming, abort, or clone yet. `besht --check` rejects unsupported response properties and methods even without `--strict`.
+This slice supports only `fetch(url).text()` and assigned response `.text()`. It does not support `await`, options objects, POST/method overrides, headers, request bodies, `.json()`, `.status`, `.ok`, `.headers`, streaming, abort, or clone yet. `besht --check` rejects unsupported response properties and methods.
 
 ## Print
 
@@ -140,29 +136,28 @@ process.exit()
 process.exit(7)
 process.exit(code) // number or status
 
-// Older helper remains supported for now:
-exit(0)
 ```
 
-## Condition Helpers
+## Besht Helpers
 
-Use `Besht.conditions.*` for file and string predicates. They compile to inline POSIX tests and add no runtime helpers. Older global names such as `file_exists()` and `is_empty()` remain supported for now.
+Use `Besht.fs.*` for file predicates, `Besht.strings.*` for string predicates, and `Besht.iter.range()` for inclusive integer ranges. These compile to inline POSIX tests or compact generated shell and add no runtime namespace object.
 
 ```ts
-if (Besht.conditions.fileExists(path)) {
+if (Besht.fs.isFile(path)) {
   console.log("file exists")
 }
 
-let empty: boolean = Besht.conditions.isEmpty(value)
-let ready = Besht.conditions.isReadable(path) && Besht.conditions.isExecutable(path)
+let empty: boolean = Besht.strings.isEmpty(value)
+let ready = Besht.fs.isReadable(path) && Besht.fs.isExecutable(path)
 
-Besht.conditions.fileExists(path)   // file_exists(path), [ -f path ]
-Besht.conditions.isDir(path)        // is_dir(path), [ -d path ]
-Besht.conditions.isReadable(path)   // is_readable(path), [ -r path ]
-Besht.conditions.isWritable(path)   // is_writable(path), [ -w path ]
-Besht.conditions.isExecutable(path) // is_executable(path), [ -x path ]
-Besht.conditions.isEmpty(value)     // is_empty(value), [ -z value ]
-Besht.conditions.isSet(value)       // is_set(value), [ -n value ]
+Besht.fs.isFile(path)        // [ -f path ]
+Besht.fs.isDir(path)         // [ -d path ]
+Besht.fs.isReadable(path)    // [ -r path ]
+Besht.fs.isWritable(path)    // [ -w path ]
+Besht.fs.isExecutable(path)  // [ -x path ]
+Besht.strings.isEmpty(value) // [ -z value ]
+Besht.strings.isNonEmpty(value) // [ -n value ]
+Besht.iter.range(1, 5)       // 1, 2, 3, 4, 5
 ```
 
 ## All Variables Declared with `let`
@@ -180,7 +175,7 @@ Reassign without `let`:
 count = count + 1;
 ```
 
-**Types:** `string`, `number`, `boolean`, `list<T>`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), tuple types (`[string, number]`), and `Record<K, V>` — annotations only, ignored by compiler unless `--strict`. Nested lists use `T[][]` or `list<list<T>>`. `null` and `undefined` are accepted for TypeScript-compatible syntax and work with `??`.
+**Types:** `string`, `number`, `boolean`, `list<T>`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), tuple types (`[string, number]`), and `Record<K, V>` are accepted as annotations only. Besht does not type-check. Nested lists use `T[][]` or `list<list<T>>`. `null` and `undefined` are accepted for TypeScript-compatible syntax and work with `??`.
 
 ## Type Aliases and Interfaces
 
@@ -391,8 +386,6 @@ let lines = Number.parseInt(raw)
 let lines10 = Number.parseInt(raw, 10)
 ```
 
-Older helpers remain supported for now: `String(value)`, `to_str(value)`, and `to_int(value)`.
-
 ## Command Execution
 
 All external commands use `$()` expressions. Arguments are separate strings — the compiler single-quotes everything safely.
@@ -459,7 +452,7 @@ Optional chaining returns a nullish value when the receiver is `null` or `undefi
 ```ts
 function greet(name: string, times: number): string {
   let result: string = "";
-  for (i in range(1, times)) {
+  for (i in Besht.iter.range(1, times)) {
     result = "${result}Hello, ${name}!\n";
   }
   return result;
@@ -508,7 +501,7 @@ while (count > 0) count--
 
 ```ts
 for (let i: number = 0; i < 10; i++) {
-  $("echo", to_str(i)).run();
+  $("echo", i.toString()).run();
 }
 
 for (let i: number = 0; i < 10; i++) total += i
@@ -517,11 +510,11 @@ for (let i: number = 0; i < 10; i++) total += i
 **For — integer range:**
 
 ```ts
-for (i in range(1, 10)) {
-  $("echo", to_str(i)).run();
+for (i in Besht.iter.range(1, 10)) {
+  $("echo", i.toString()).run();
 }
 
-for (i in range(1, 10)) total += i
+for (i in Besht.iter.range(1, 10)) total += i
 ```
 
 **For — list:**
@@ -550,7 +543,7 @@ for (line in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
 
 ````ts
 for (f in files) {
-    if (is_empty(f)) { continue }
+    if (Besht.strings.isEmpty(f)) { continue }
     if (f == "STOP") { break }
     $("echo", f).run()
 }
@@ -578,10 +571,10 @@ try {
   $("rsync", "-az", "./dist/", "server:/opt/app/").run();
   $("ssh", "server", "systemctl restart myapp").run();
 } catch (code: status) {
-  $("echo", "Failed with exit code " + to_str(code))
+  $("echo", "Failed with exit code " + code.toString())
     .stderr("&1")
     .run();
-  exit(1);
+  process.exit(1);
 }
 ```
 
@@ -598,23 +591,20 @@ function read_config(path: string): string {
 
 | Builtin              | Description                        |
 | -------------------- | ---------------------------------- |
-| `env(NAME)`          | Read environment variable          |
-| `env(NAME, default)` | Read env var with fallback default |
 | `console.log(s)`     | Write string + newline to stdout   |
 | `console.error(s)`   | Write string + newline to stderr   |
+| `process.env.NAME`   | Read environment variable          |
 
-## Built-in File Tests
-
-Available file and string tests:
+## Besht File and String Tests
 
 ```ts
-if (file_exists(path)) { ... }
-if (is_dir(path)) { ... }
-if (is_readable(path)) { ... }
-if (is_writable(path)) { ... }
-if (is_executable(path)) { ... }
-if (is_empty(s)) { ... }     // [ -z "$s" ]
-if (is_set(s)) { ... }       // [ -n "$s" ]
+if (Besht.fs.isFile(path)) { ... }
+if (Besht.fs.isDir(path)) { ... }
+if (Besht.fs.isReadable(path)) { ... }
+if (Besht.fs.isWritable(path)) { ... }
+if (Besht.fs.isExecutable(path)) { ... }
+if (Besht.strings.isEmpty(s)) { ... }       // [ -z "$s" ]
+if (Besht.strings.isNonEmpty(s)) { ... }    // [ -n "$s" ]
 ```
 
 ## Native List Operations
@@ -632,7 +622,7 @@ let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
 ```
 
-Compatibility aliases remain supported for now: `len(files)`, `head(files)`, `tail(files)`, `append(files, value)`, `contains(files, value)`, and `concat(files, otherFiles)`. Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
+Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
 
 ## Imports and Modules
 
@@ -743,8 +733,8 @@ Note: booleans print as `true`/`false` in string contexts and can be used direct
 ## Exit
 
 ```ts
-exit(0);
-exit(code); // code: number or status
+process.exit(0);
+process.exit(code); // code: number or status
 ```
 
 ## Common Patterns
@@ -752,17 +742,17 @@ exit(code); // code: number or status
 **Read a required argument:**
 
 ```ts
-let target_env: string = env("1", "");
-if (is_empty(target_env)) {
+let target_env: string = Besht.args.positional(1) ?? "";
+if (Besht.strings.isEmpty(target_env)) {
   console.log("Usage: script.bsh <env>");
-  exit(1);
+  process.exit(1);
 }
 ```
 
 **Check and create a directory:**
 
 ```ts
-if (!is_dir(path)) {
+if (!Besht.fs.isDir(path)) {
   $("mkdir", "-p", path).run();
 }
 ```
@@ -783,7 +773,7 @@ try {
   $("ssh", host, "systemctl restart myapp").run();
 } catch (code: status) {
   $("ssh", host, "systemctl restart myapp-previous").run();
-  exit(1);
+  process.exit(1);
 }
 ```
 
@@ -796,8 +786,6 @@ let raw: string = $("wc", "-l", "file.txt");
 let lines: number = Number.parseInt(raw); // string -> number
 
 // Older helpers remain supported for now:
-let legacyS: string = to_str(n);
-let legacyLines: number = to_int(raw);
 ```
 
 ## Type Rules
@@ -806,7 +794,7 @@ let legacyLines: number = to_int(raw);
 - `boolean` values work directly in `if`/`while` conditions and render as `true`/`false` in string contexts
 - `list<T>` values can be indexed, joined, and iterated with `for`
 - `status` type holds exit codes; only usable in `catch` clauses
-- String, number, boolean, and status values can be converted with `.toString()`; strings can be parsed with `Number.parseInt()`. Older `String()`, `to_str()`, and `to_int()` helpers remain supported for now
+- String, number, boolean, and status values can be converted with `.toString()`; strings can be parsed with `Number.parseInt()`
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
 - `===`/`!==` are aliases for `==`/`!=`

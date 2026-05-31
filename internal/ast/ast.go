@@ -100,7 +100,7 @@ type Statement interface {
 type Expression interface {
 	Node
 	exprNode()
-	GetType() *Type // filled in by the type checker; nil before that
+	GetType() *Type // optional compiler representation hint; nil when unknown
 }
 
 // ─── Program ──────────────────────────────────────────────────────────────────
@@ -335,7 +335,7 @@ type ReturnStmt struct {
 func (n *ReturnStmt) nodePos() Pos { return n.Pos }
 func (n *ReturnStmt) stmtNode()    {}
 
-// ExitStmt: exit(expr)
+// ExitStmt: internal process exit representation.
 type ExitStmt struct {
 	Pos  Pos
 	Code Expression // int expression
@@ -622,7 +622,7 @@ type FnCallExpr struct {
 func (n *FnCallExpr) nodePos() Pos { return n.Pos }
 func (n *FnCallExpr) exprNode()    {}
 
-// BuiltinCallExpr: file_exists(p), is_dir(p), len(l), etc.
+// BuiltinCallExpr: compiler-known static APIs such as fetch(), Boolean(), Object.keys(), etc.
 type BuiltinCallExpr struct {
 	baseExpr
 	Pos  Pos
@@ -633,7 +633,7 @@ type BuiltinCallExpr struct {
 func (n *BuiltinCallExpr) nodePos() Pos { return n.Pos }
 func (n *BuiltinCallExpr) exprNode()    {}
 
-// RangeExpr: range(start, end)  — only valid as for-loop iterator
+// RangeExpr: integer range representation used by Besht.iter.range().
 type RangeExpr struct {
 	baseExpr
 	Pos   Pos
@@ -716,9 +716,7 @@ func (n *AsExpr) exprNode()    {}
 // IsBuiltin returns true if name is a built-in compile-time function.
 func IsBuiltin(name string) bool {
 	switch name {
-	case "file_exists", "is_dir", "is_readable", "is_writable", "is_executable",
-		"is_empty", "is_set", "len", "head", "tail", "append", "contains",
-		"range", "exit", "env", "fetch", "to_str", "to_int", "String", "Boolean", "concat",
+	case "fetch", "Boolean",
 		"Array.isArray", "Object.keys", "Object.values", "Object.entries", "Object.hasOwn",
 		"console.log", "console.error":
 		return true
@@ -726,31 +724,67 @@ func IsBuiltin(name string) bool {
 	return false
 }
 
-func BeshtConditionBuiltinName(method string) (string, bool) {
-	switch method {
-	case "fileExists":
-		return "file_exists", true
-	case "isDir":
-		return "is_dir", true
-	case "isReadable":
-		return "is_readable", true
-	case "isWritable":
-		return "is_writable", true
-	case "isExecutable":
-		return "is_executable", true
-	case "isEmpty":
-		return "is_empty", true
-	case "isSet":
-		return "is_set", true
+func BeshtBuiltinName(group, method string) (string, bool) {
+	switch group + "." + method {
+	case "fs.isFile":
+		return "Besht.fs.isFile", true
+	case "fs.isDir":
+		return "Besht.fs.isDir", true
+	case "fs.isReadable":
+		return "Besht.fs.isReadable", true
+	case "fs.isWritable":
+		return "Besht.fs.isWritable", true
+	case "fs.isExecutable":
+		return "Besht.fs.isExecutable", true
+	case "strings.isEmpty":
+		return "Besht.strings.isEmpty", true
+	case "strings.isNonEmpty":
+		return "Besht.strings.isNonEmpty", true
+	case "iter.range":
+		return "Besht.iter.range", true
 	}
 	return "", false
 }
 
-func IsBeshtConditionsReceiver(expr Expression) bool {
+func BeshtGroupReceiver(expr Expression) (string, bool) {
 	prop, ok := expr.(*PropertyExpr)
-	if !ok || prop.Property != "conditions" {
-		return false
+	if !ok {
+		return "", false
 	}
 	ident, ok := prop.Receiver.(*IdentExpr)
-	return ok && ident.Name == "Besht"
+	if !ok || ident.Name != "Besht" {
+		return "", false
+	}
+	switch prop.Property {
+	case "fs", "strings", "args", "iter":
+		return prop.Property, true
+	}
+	return "", false
+}
+
+func BeshtMethodBuiltinName(receiver Expression, method string) (string, bool) {
+	group, ok := BeshtGroupReceiver(receiver)
+	if !ok {
+		return "", false
+	}
+	return BeshtBuiltinName(group, method)
+}
+
+func IsBeshtArgsReceiver(expr Expression) bool {
+	group, ok := BeshtGroupReceiver(expr)
+	return ok && group == "args"
+}
+
+func BeshtArgsMethodType(method string) (string, bool) {
+	switch method {
+	case "argv":
+		return "argv", true
+	case "positional":
+		return "positional", true
+	case "option":
+		return "option", true
+	case "flag":
+		return "flag", true
+	}
+	return "", false
 }

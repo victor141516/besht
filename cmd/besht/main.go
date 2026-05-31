@@ -19,7 +19,6 @@ Usage:
   besht <file.bsh> -o <out.sh>        Compile to single file
   besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
   besht --check <file.bsh>            Validate imports, command usage, and unsupported fetch APIs (no output)
-  besht --strict <file.bsh>           Validate types during checking/compile
   besht --version                     Print version
 
 Flags:
@@ -30,7 +29,6 @@ Flags:
   --opt-resolve-ts-imports       Resolve extensionless imports to .ts when .bsh is absent
   --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
   --check      Validate imports, command usage, and unsupported fetch APIs; do not generate output
-  --strict     Enable compile-time type validation
   --version    Show version and exit
   -h, --help   Show this message
 `
@@ -57,7 +55,6 @@ func main() {
 	var inputFile string
 	var outputPath string
 	checkOnly := false
-	strict := false
 	splitMode := false
 	noCheck := false
 	noSourceMap := false
@@ -70,8 +67,6 @@ func main() {
 			checkOnly = true
 		case "--split":
 			splitMode = true
-		case "--strict":
-			strict = true
 		case "--opt-no-add-binaries-check":
 			noCheck = true
 		case "--opt-no-source-map":
@@ -105,7 +100,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: input file %q does not have .bsh extension\n", inputFile)
 	}
 
-	opts := codegen.Options{NoCheck: noCheck, Strict: strict, NoSourceMap: noSourceMap, ResolveTsImports: resolveTSImports, AllowExternalShellImports: allowExternalShellImports}
+	opts := codegen.Options{NoCheck: noCheck, NoSourceMap: noSourceMap, ResolveTsImports: resolveTSImports, AllowExternalShellImports: allowExternalShellImports}
 
 	if checkOnly {
 		runCheck(inputFile, opts)

@@ -337,7 +337,7 @@ func TestParser_IfDanglingElseBindsNearestIf(t *testing.T) {
 }
 
 func TestParser_ForRange(t *testing.T) {
-	prog := mustParse(t, `for (i in range(1, 10)) {
+	prog := mustParse(t, `for (i in Besht.iter.range(1, 10)) {
     $("echo", "${i}")
 }`)
 	stmt, ok := prog.Statements[0].(*ast.ForStmt)
@@ -347,12 +347,19 @@ func TestParser_ForRange(t *testing.T) {
 	if stmt.VarName != "i" {
 		t.Errorf("var name: got %q, want i", stmt.VarName)
 	}
-	builtin, ok := stmt.Iterator.(*ast.BuiltinCallExpr)
+	method, ok := stmt.Iterator.(*ast.MethodCallExpr)
 	if !ok {
-		t.Fatalf("iterator: expected *ast.BuiltinCallExpr, got %T", stmt.Iterator)
+		t.Fatalf("iterator: expected *ast.MethodCallExpr, got %T", stmt.Iterator)
 	}
-	if builtin.Name != "range" {
-		t.Errorf("builtin name: got %q, want range", builtin.Name)
+	if method.Method != "range" {
+		t.Errorf("method name: got %q, want range", method.Method)
+	}
+	receiver, ok := method.Receiver.(*ast.PropertyExpr)
+	if !ok {
+		t.Fatalf("receiver: expected *ast.PropertyExpr, got %T", method.Receiver)
+	}
+	if receiver.Property != "iter" {
+		t.Errorf("receiver property: got %q, want iter", receiver.Property)
 	}
 }
 
@@ -773,10 +780,9 @@ func TestParser_BuiltinCalls(t *testing.T) {
 		src  string
 		name string
 	}{
-		{`let _ : boolean = file_exists("/tmp/x")`, "file_exists"},
-		{`let _ : boolean = is_dir("/tmp")`, "is_dir"},
-		{`let _ : boolean = is_empty(s)`, "is_empty"},
-		{`let _ : boolean = is_set(s)`, "is_set"},
+		{`let _ : boolean = Boolean(value)`, "Boolean"},
+		{`let _ : number = Number.parseInt(value)`, "Number.parseInt"},
+		{`let _ : string[] = Object.keys(value)`, "Object.keys"},
 	}
 	for _, tt := range tests {
 		prog := mustParse(t, tt.src)
@@ -808,22 +814,22 @@ func TestParser_FetchParsesAsBuiltinCall(t *testing.T) {
 	}
 }
 
-func TestParser_BeshtConditionsCallShape(t *testing.T) {
-	prog := mustParse(t, `let ok: boolean = Besht.conditions.fileExists(path)`)
+func TestParser_BeshtFsCallShape(t *testing.T) {
+	prog := mustParse(t, `let ok: boolean = Besht.fs.isFile(path)`)
 	decl := prog.Statements[0].(*ast.LetDecl)
 	method, ok := decl.Value.(*ast.MethodCallExpr)
 	if !ok {
 		t.Fatalf("value: expected *ast.MethodCallExpr, got %T", decl.Value)
 	}
-	if method.Method != "fileExists" {
-		t.Fatalf("method: got %q, want fileExists", method.Method)
+	if method.Method != "isFile" {
+		t.Fatalf("method: got %q, want isFile", method.Method)
 	}
 	receiver, ok := method.Receiver.(*ast.PropertyExpr)
 	if !ok {
 		t.Fatalf("receiver: expected *ast.PropertyExpr, got %T", method.Receiver)
 	}
-	if receiver.Property != "conditions" {
-		t.Fatalf("receiver property: got %q, want conditions", receiver.Property)
+	if receiver.Property != "fs" {
+		t.Fatalf("receiver property: got %q, want fs", receiver.Property)
 	}
 	ident, ok := receiver.Receiver.(*ast.IdentExpr)
 	if !ok {
