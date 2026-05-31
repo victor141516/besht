@@ -375,10 +375,10 @@ func TestIntegration_SameModuleFunctionSeesExportedValueRuntime(t *testing.T) {
 	path := writeFile(t, dir, "main.bsh", `export const cmd = ["printf", "same\\n"]
 export function runIt() {
     $(...cmd).run()
-}
+	}
 runIt()`)
 	out := compileFile(t, path)
-	assertContains(t, out, `main__cmd=$(`)
+	assertContains(t, out, "main__cmd='printf\nsame\\n'")
 	assertContains(t, out, `$main__cmd`)
 	shPath := filepath.Join(dir, "main.sh")
 	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
@@ -636,8 +636,8 @@ $(...cmd).run()
 $(...def).run()
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `b_dep__cmd=$(`)
-	assertContains(t, out, `b_dep__default=$(`)
+	assertContains(t, out, "b_dep__cmd='echo\nnamed'")
+	assertContains(t, out, "b_dep__default='echo\ndefault'")
 	assertContains(t, out, `$b_dep__cmd`)
 	assertContains(t, out, `$b_dep__default`)
 }
@@ -716,8 +716,7 @@ $(...cmd).run()
 	if err != nil {
 		t.Fatalf("explicit .ts import with opt-in: %v", err)
 	}
-	assertContains(t, out, `dep__cmd=$(`)
-	assertContains(t, out, `'ts'`)
+	assertContains(t, out, "dep__cmd='echo\nts'")
 }
 
 func TestIntegration_TSImportFallbackDisabledByDefault(t *testing.T) {
@@ -741,8 +740,7 @@ $(...cmd).run()
 	if err != nil {
 		t.Fatalf("CompileFile with .ts fallback: %v", err)
 	}
-	assertContains(t, out, `dep__cmd=$(`)
-	assertContains(t, out, `'ts'`)
+	assertContains(t, out, "dep__cmd='echo\nts'")
 }
 
 func TestIntegration_ShellImportBundledRuntime(t *testing.T) {
@@ -948,8 +946,8 @@ $(...cmd).run()
 	if err != nil {
 		t.Fatalf("CompileFile with .bsh precedence: %v", err)
 	}
-	assertContains(t, out, `'bsh'`)
-	assertNotContains(t, out, `'ts'`)
+	assertContains(t, out, "dep__cmd='echo\nbsh'")
+	assertNotContains(t, out, "dep__cmd='echo\nts'")
 }
 
 func TestIntegration_TypeAnnotationsAreIgnored(t *testing.T) {

@@ -88,9 +88,14 @@ func TestCodegen_LetShellCapture(t *testing.T) {
 
 func TestCodegen_LetListLiteral(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a.txt", "b.txt"]`)
-	assertContains(t, out, `files=`)
-	assertContains(t, out, `a.txt`)
-	assertContains(t, out, `b.txt`)
+	assertContains(t, out, "files='a.txt\nb.txt'")
+	assertNotContains(t, out, `$( { printf '%s\n'`)
+}
+
+func TestCodegen_StaticListLiteralEscapesSingleQuotes(t *testing.T) {
+	out := compile(t, `let words: list<string> = ["can't", "stop"]`)
+	assertContains(t, out, `words='can'"'"'t`)
+	assertNotContains(t, out, `$( { printf '%s\n'`)
 }
 
 func TestCodegen_Assignment(t *testing.T) {

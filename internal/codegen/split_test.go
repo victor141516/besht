@@ -355,7 +355,7 @@ $(...cmd).run()
 	if err != nil {
 		t.Fatalf("read main.sh: %v", err)
 	}
-	assertContains(t, string(dep), `lib__dep__cmd=$(`)
+	assertContains(t, string(dep), "lib__dep__cmd='echo\nts'")
 	assertContains(t, string(main), sourceFromRootForTest("lib/dep.sh"))
 }
 
