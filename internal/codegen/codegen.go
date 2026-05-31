@@ -27,6 +27,7 @@ type Generator struct {
 	objFieldsMap   map[string][]string  // object var name → list of field names
 	objPropTypeMap map[string]*ast.Type // "varName.propName" → property type
 	stringConstMap map[string]string
+	staticListMap  map[string][]string
 	fnParamTypes   map[string]*ast.Type // current fn param name → type annotation
 	fnParamNames   map[string][]string  // function name → param names (in order)
 	classMap       map[string]*ast.ClassDecl
@@ -126,6 +127,7 @@ func New() *Generator {
 		objFieldsMap:   make(map[string][]string),
 		objPropTypeMap: make(map[string]*ast.Type),
 		stringConstMap: make(map[string]string),
+		staticListMap:  make(map[string][]string),
 		fnParamTypes:   make(map[string]*ast.Type),
 		fnParamNames:   make(map[string][]string),
 		classMap:       make(map[string]*ast.ClassDecl),
@@ -983,6 +985,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	} else {
 		delete(g.listLenMap, varName)
 	}
+	g.updateStaticListBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
 	return nil
 }
@@ -1395,6 +1398,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	} else {
 		delete(g.stringConstMap, varName)
 	}
+	g.updateStaticListBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
 	if ref, ok := g.objectRefForBinding(varName, s.Value); ok {
 		g.objAliasMap[s.Name] = ref
@@ -1708,6 +1712,9 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 			return g.genForRange(s, iter)
 		}
 	case *ast.IdentExpr:
+		if words, ok := g.staticListMap[g.resolveVarName(iter.Name)]; ok {
+			return g.genForStaticList(s, words)
+		}
 		return g.genForList(s, fmt.Sprintf("\"$%s\"", iter.Name), g.listLengthExpr(iter))
 	case *ast.CmdExpr:
 		pipeline, redirect, err := g.genCmdPipeline(iter)
@@ -1823,6 +1830,28 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 		}
 	}
 	return words, true
+}
+
+func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.ListLit:
+		return staticForListWords(e)
+	case *ast.AsExpr:
+		return staticForListWordsExpr(e.Expr)
+	default:
+		return nil, false
+	}
+}
+
+func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression) {
+	if g.staticListMap == nil {
+		g.staticListMap = make(map[string][]string)
+	}
+	if words, ok := staticForListWordsExpr(expr); ok {
+		g.staticListMap[varName] = words
+		return
+	}
+	delete(g.staticListMap, varName)
 }
 
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
@@ -5527,6 +5556,7 @@ func (g *Generator) genIndexAssign(s *ast.IndexAssignStmt) error {
 	if err != nil {
 		return err
 	}
+	delete(g.staticListMap, listVar)
 	g.line(fmt.Sprintf("%s=$(printf '%%s\\n' \"$%s\" | awk -v n=$(( %s + 1 )) -v v=%s '{if (NR==n) print v; else print}')", listVar, listVar, stripQuotes(indexStr), val))
 	return nil
 }
