@@ -919,6 +919,29 @@ let r: string = s.replaceAll("a", "b")`)
 
 }
 
+func TestCodegen_StaticStringTransforms(t *testing.T) {
+	out := compile(t, `let trimmed: string = "  hi  ".trim()
+let upper: string = "hello".toUpperCase()
+let lower: string = "HELLO".toLowerCase()
+let sliced: string = "hello".slice(1, 4)
+let sub: string = "hello".substring(4, 1)
+let repeated: string = "ha".repeat(3)
+let padded: string = "hi".padStart(5, "0")
+let ended: string = "hi".padEnd(5, ".")`)
+	assertContains(t, out, `trimmed='hi'`)
+	assertContains(t, out, `upper='HELLO'`)
+	assertContains(t, out, `lower='hello'`)
+	assertContains(t, out, `sliced='ell'`)
+	assertContains(t, out, `sub='ell'`)
+	assertContains(t, out, `repeated='hahaha'`)
+	assertContains(t, out, `padded='000hi'`)
+	assertContains(t, out, `ended='hi...'`)
+	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `cut -c`)
+	assertNotContains(t, out, `awk`)
+}
+
 func TestCodegen_StringLength(t *testing.T) {
 	out := compile(t, `let s: string = "hello"
 let n: number = s.length`)

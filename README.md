@@ -90,6 +90,7 @@ Files use the `.bsh` extension.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - String equality preserves spaces and newlines, including multiline template literals.
+- Static ASCII string literal transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments compile to constants; dynamic and non-ASCII transforms keep the POSIX tool path.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
 - `for (... of [...])` over static scalar list literals compiles to a compact shell `for` loop when values do not contain newlines; dynamic lists keep the newline-safe read loop.
@@ -433,6 +434,8 @@ s.padEnd(20, "."); // "  Hello, World!  ..."
 s.concat(" More text"); // "  Hello, World!   More text"
 s.length; // int (character count)
 ```
+
+Static ASCII string literal transforms with static arguments compile to constants. Dynamic and non-ASCII transforms use POSIX tools such as `sed`, `tr`, `cut`, and `awk`.
 
 One-argument string `includes()`, `startsWith()`, and `endsWith()` use tiny POSIX helper functions that are emitted only when the generated shell calls them. Two-argument string search methods use inline `awk` instead.
 

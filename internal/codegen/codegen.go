@@ -1825,6 +1825,67 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 	return words, true
 }
 
+func staticASCIIStringValue(expr ast.Expression) (string, bool) {
+	var value string
+	switch e := expr.(type) {
+	case *ast.StringLit:
+		value = e.Value
+	case *ast.RawStringLit:
+		value = e.Value
+	case *ast.TemplateLit:
+		if len(e.Exprs) != 0 {
+			return "", false
+		}
+		value = strings.Join(e.Parts, "")
+	case *ast.AsExpr:
+		return staticASCIIStringValue(e.Expr)
+	default:
+		return "", false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] >= 0x80 {
+			return "", false
+		}
+	}
+	return value, true
+}
+
+func staticIntValue(expr ast.Expression) (int, bool) {
+	switch e := expr.(type) {
+	case *ast.IntLit:
+		return int(e.Value), true
+	case *ast.FloatLit:
+		f, err := strconv.ParseFloat(e.Value, 64)
+		if err != nil {
+			return 0, false
+		}
+		return int(f), true
+	case *ast.AsExpr:
+		return staticIntValue(e.Expr)
+	default:
+		return 0, false
+	}
+}
+
+func clampInt(n, min, max int) int {
+	if n < min {
+		return min
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
+
+func isASCIIWhitespace(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	if len(words) == 0 {
 		return nil
@@ -4148,6 +4209,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeFetchResponse {
 		return g.genFetchResponseMethod(e)
 	}
+	if val, ok, err := g.genStaticStringTransform(e); ok || err != nil {
+		return val, err
+	}
 	// Handle terminal command methods that read captured output
 	if e.Method == "readStdout" || e.Method == "readStdoutLines" || e.Method == "readStderr" || e.Method == "exitCode" {
 		id := -1
@@ -5398,6 +5462,135 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 		return fmt.Sprintf("\"%s\"", strings.Join(parts, "")), nil
 	}
 	return "", fmt.Errorf("string has no method %q", e.Method)
+}
+
+func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, bool, error) {
+	recv, ok := staticASCIIStringValue(e.Receiver)
+	if !ok {
+		return "", false, nil
+	}
+	staticArg := func(idx int) (string, bool) {
+		if len(e.Args) <= idx {
+			return "", false
+		}
+		return staticASCIIStringValue(e.Args[idx])
+	}
+	staticIntArg := func(idx int, fallback int) (int, bool) {
+		if len(e.Args) <= idx {
+			return fallback, true
+		}
+		return staticIntValue(e.Args[idx])
+	}
+
+	switch e.Method {
+	case "trim":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trim() takes no arguments")
+		}
+		return shellQuote(strings.TrimFunc(recv, isASCIIWhitespace)), true, nil
+	case "trimStart":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trimStart() takes no arguments")
+		}
+		return shellQuote(strings.TrimLeftFunc(recv, isASCIIWhitespace)), true, nil
+	case "trimEnd":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trimEnd() takes no arguments")
+		}
+		return shellQuote(strings.TrimRightFunc(recv, isASCIIWhitespace)), true, nil
+	case "toUpperCase":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toUpperCase() takes no arguments")
+		}
+		return shellQuote(strings.ToUpper(recv)), true, nil
+	case "toLowerCase":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toLowerCase() takes no arguments")
+		}
+		return shellQuote(strings.ToLower(recv)), true, nil
+	case "slice":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", true, fmt.Errorf("slice() takes one or two arguments")
+		}
+		start, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		end, ok := staticIntArg(1, len(recv))
+		if !ok {
+			return "", false, nil
+		}
+		if start < 0 {
+			start = len(recv) + start
+		}
+		if end < 0 {
+			end = len(recv) + end
+		}
+		start = clampInt(start, 0, len(recv))
+		end = clampInt(end, 0, len(recv))
+		if end < start {
+			end = start
+		}
+		return shellQuote(recv[start:end]), true, nil
+	case "substring":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", true, fmt.Errorf("substring() takes one or two arguments")
+		}
+		start, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		end, ok := staticIntArg(1, len(recv))
+		if !ok {
+			return "", false, nil
+		}
+		start = clampInt(start, 0, len(recv))
+		end = clampInt(end, 0, len(recv))
+		if start > end {
+			start, end = end, start
+		}
+		return shellQuote(recv[start:end]), true, nil
+	case "repeat":
+		if len(e.Args) != 1 {
+			return "", true, fmt.Errorf("repeat() requires an argument")
+		}
+		count, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		if count < 0 {
+			return "", false, nil
+		}
+		return shellQuote(strings.Repeat(recv, count)), true, nil
+	case "padStart", "padEnd":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", true, fmt.Errorf("%s() takes one or two arguments", e.Method)
+		}
+		targetLen, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		fill := " "
+		if len(e.Args) == 2 {
+			var ok bool
+			fill, ok = staticArg(1)
+			if !ok {
+				return "", false, nil
+			}
+		}
+		if targetLen <= len(recv) || fill == "" {
+			return shellQuote(recv), true, nil
+		}
+		need := targetLen - len(recv)
+		padding := strings.Repeat(fill, need/len(fill)+1)
+		padding = padding[:need]
+		if e.Method == "padStart" {
+			return shellQuote(padding + recv), true, nil
+		}
+		return shellQuote(recv + padding), true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
