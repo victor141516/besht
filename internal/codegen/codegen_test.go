@@ -344,6 +344,16 @@ let s: string = pi.toFixed(2)`)
 	assertContains(t, out, `awk -v _x="$pi" -v _n=2 'BEGIN{OFMT="%.17g";printf "%.*f", _n, _x}'`)
 }
 
+func TestCodegen_StaticNumberMethods(t *testing.T) {
+	out := compile(t, `let s: string = (42).toString()
+let fixed: string = (3.14159).toFixed(2)
+let whole: string = (3.9).toFixed()`)
+	assertContains(t, out, `s='42'`)
+	assertContains(t, out, `fixed='3.14'`)
+	assertContains(t, out, `whole='4'`)
+	assertNotContains(t, out, `awk`)
+}
+
 func TestCodegen_SpreadCommandArgs(t *testing.T) {
 	out := compile(t, `let args: list<string> = ["a b", "c"]
 $("echo", ...args).run()`)
@@ -1684,16 +1694,42 @@ let i: number = s.lastIndexOf("lo")`)
 }
 
 func TestCodegen_MathTrunc(t *testing.T) {
-	out := compile(t, `let n: number = Math.trunc(-3.7)`)
+	out := compile(t, `let x = -3.7
+let n: number = Math.trunc(x)`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `int(`)
 }
 
 func TestCodegen_MathSign(t *testing.T) {
-	out := compile(t, `let n: number = Math.sign(-3)`)
+	out := compile(t, `let x = -3
+let n: number = Math.sign(x)`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `-1`)
 	assertContains(t, out, `1`)
+}
+
+func TestCodegen_StaticMathMethods(t *testing.T) {
+	out := compile(t, `let minValue = Math.min(4, 2)
+let maxValue = Math.max(4, 2)
+let rounded = Math.round(2.7)
+let floored = Math.floor(2.7)
+let ceiled = Math.ceil(2.1)
+let truncated = Math.trunc(-3.7)
+let signValue = Math.sign(-3)
+let absValue = Math.abs(-3)
+let powValue = Math.pow(2, 3)
+let sqrtValue = Math.sqrt(9)`)
+	assertContains(t, out, `minValue=2`)
+	assertContains(t, out, `maxValue=4`)
+	assertContains(t, out, `rounded=3`)
+	assertContains(t, out, `floored=2`)
+	assertContains(t, out, `ceiled=3`)
+	assertContains(t, out, `truncated=-3`)
+	assertContains(t, out, `signValue=-1`)
+	assertContains(t, out, `absValue=3`)
+	assertContains(t, out, `powValue=8`)
+	assertContains(t, out, `sqrtValue=3`)
+	assertNotContains(t, out, `awk`)
 }
 
 func TestCodegen_FloatTrackingClearedOnIntegerReassignment(t *testing.T) {

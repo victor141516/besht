@@ -390,7 +390,7 @@ let lines = Number.parseInt(raw)
 let lines10 = Number.parseInt(raw, 10)
 ```
 
-Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`.
+Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal `.toString()` and `.toFixed()` calls also compile to constants.
 
 ## Command Execution
 
@@ -689,7 +689,7 @@ Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Defau
 
 ## Float Literals and Math
 
-Float (decimal) literals are supported. `Math.*` methods support decimals.
+Float (decimal) literals are supported. `Math.*` methods support decimals. Literal-argument `Math.*` calls compile to constants; dynamic calls use POSIX `awk`.
 
 If you reassign a variable, besht updates its float-tracking metadata from the new right-hand side: float-producing expressions keep later arithmetic on `awk`, while integer or non-float reassignment clears the float marker so later integer arithmetic can use shell integer lowering again.
 

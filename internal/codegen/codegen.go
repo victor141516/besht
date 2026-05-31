@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -2079,6 +2080,45 @@ func isASCIIWhitespace(r rune) bool {
 	default:
 		return false
 	}
+}
+
+func staticNumberValue(expr ast.Expression) (float64, bool) {
+	switch e := expr.(type) {
+	case *ast.IntLit:
+		return float64(e.Value), true
+	case *ast.FloatLit:
+		v, err := strconv.ParseFloat(e.Value, 64)
+		if err != nil {
+			return 0, false
+		}
+		return v, true
+	case *ast.UnaryExpr:
+		v, ok := staticNumberValue(e.Expr)
+		if !ok {
+			return 0, false
+		}
+		if e.Op == "-" {
+			return -v, true
+		}
+	case *ast.AsExpr:
+		return staticNumberValue(e.Expr)
+	}
+	return 0, false
+}
+
+func staticIntNumberValue(expr ast.Expression) (int, bool) {
+	v, ok := staticNumberValue(expr)
+	if !ok {
+		return 0, false
+	}
+	return int(v), true
+}
+
+func formatStaticNumber(v float64) string {
+	if v == 0 {
+		v = 0
+	}
+	return strconv.FormatFloat(v, 'g', -1, 64)
 }
 
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
@@ -4467,6 +4507,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if val, ok, err := g.genStaticStringTransform(e); ok || err != nil {
 		return val, err
 	}
+	if val, ok, err := g.genStaticNumberMethod(e); ok || err != nil {
+		return val, err
+	}
 	// Handle terminal command methods that read captured output
 	if isTerminalCommandReadMethod(e.Method) {
 		if runCall, ok := immediateRunReceiver(e); ok {
@@ -4537,6 +4580,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	}
 
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+		if val, ok, err := g.genStaticMathMethod(e); ok || err != nil {
+			return val, err
+		}
 		return g.genMathMethod(e)
 	}
 
@@ -4612,6 +4658,35 @@ func (g *Generator) genFetchResponseMethod(e *ast.MethodCallExpr) (string, error
 		return fmt.Sprintf("\"$%s\"", objectPropVar(varName, "body")), nil
 	}
 	return "", fmt.Errorf("FetchResponse.text() receiver must be fetch(url) or a fetch response variable")
+}
+
+func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	value, ok := staticNumberValue(e.Receiver)
+	if !ok {
+		return "", false, nil
+	}
+	switch e.Method {
+	case "toString":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toString() takes no arguments")
+		}
+		return shellQuote(formatStaticNumber(value)), true, nil
+	case "toFixed":
+		digits := 0
+		if len(e.Args) > 1 {
+			return "", true, fmt.Errorf("toFixed() takes zero or one argument")
+		}
+		if len(e.Args) == 1 {
+			var ok bool
+			digits, ok = staticIntNumberValue(e.Args[0])
+			if !ok || digits < 0 {
+				return "", false, nil
+			}
+		}
+		return shellQuote(strconv.FormatFloat(value, 'f', digits, 64)), true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (g *Generator) genFetchCall(e *ast.BuiltinCallExpr) (string, error) {
@@ -5489,6 +5564,65 @@ func callbackParamName(e *ast.ArrowExpr) string {
 func callbackParamNameAt(e *ast.ArrowExpr, index int) string {
 	name := e.Params[index].Name
 	return fmt.Sprintf("_cb_%d_%d_%s", e.Pos.Line, e.Pos.Column+index, mangle(name))
+}
+
+func (g *Generator) genStaticMathMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	arg := func(i int) (float64, bool, error) {
+		if i >= len(e.Args) {
+			return 0, false, fmt.Errorf("Math.%s requires at least %d argument(s)", e.Method, i+1)
+		}
+		v, ok := staticNumberValue(e.Args[i])
+		return v, ok, nil
+	}
+	switch e.Method {
+	case "min", "max", "pow":
+		a, ok, err := arg(0)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		b, ok, err := arg(1)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		switch e.Method {
+		case "min":
+			return formatStaticNumber(math.Min(a, b)), true, nil
+		case "max":
+			return formatStaticNumber(math.Max(a, b)), true, nil
+		default:
+			return formatStaticNumber(math.Pow(a, b)), true, nil
+		}
+	case "round", "floor", "ceil", "trunc", "sign", "abs", "sqrt":
+		a, ok, err := arg(0)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		switch e.Method {
+		case "round":
+			return formatStaticNumber(math.Floor(a + 0.5)), true, nil
+		case "floor":
+			return formatStaticNumber(math.Floor(a)), true, nil
+		case "ceil":
+			return formatStaticNumber(math.Ceil(a)), true, nil
+		case "trunc":
+			return formatStaticNumber(math.Trunc(a)), true, nil
+		case "sign":
+			switch {
+			case a > 0:
+				return "1", true, nil
+			case a < 0:
+				return "-1", true, nil
+			default:
+				return "0", true, nil
+			}
+		case "abs":
+			return formatStaticNumber(math.Abs(a)), true, nil
+		default:
+			return formatStaticNumber(math.Sqrt(a)), true, nil
+		}
+	default:
+		return "", false, nil
+	}
 }
 
 func (g *Generator) genMathMethod(e *ast.MethodCallExpr) (string, error) {
