@@ -937,6 +937,19 @@ let s: string = l.join(", ")`)
 	assertContains(t, out, `NR>1{printf s}`)
 }
 
+func TestCodegen_StaticListLiteralJoin(t *testing.T) {
+	out := compile(t, `let s: string = ["a", "b", "c"].join(",")`)
+	assertContains(t, out, `s='a,b,c'`)
+	assertNotContains(t, out, `awk -v s=','`)
+	assertNotContains(t, out, `printf '%s\n' 'a'`)
+}
+
+func TestCodegen_StaticListLiteralToString(t *testing.T) {
+	out := compile(t, `let s: string = ["a", "b", "c"].toString()`)
+	assertContains(t, out, `s='a,b,c'`)
+	assertNotContains(t, out, `awk -v s=','`)
+}
+
 func TestCodegen_ListToString(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.toString()`)
