@@ -255,7 +255,7 @@ func TestCodegen_ForList(t *testing.T) {
 for (f in files) {
     $("echo", "${f}").run()
 }`)
-	assertContains(t, out, `while IFS= read -r`)
+	assertContains(t, out, `for f in 'a' 'b'; do`)
 	assertContains(t, out, `done`)
 }
 
@@ -264,11 +264,21 @@ func TestCodegen_ForOfList(t *testing.T) {
 for (f of files) {
     $("echo", f).run()
 }`)
-	assertContains(t, out, `while IFS= read -r`)
+	assertContains(t, out, `for f in 'a' 'b'; do`)
 }
 
 func TestCodegen_ForLetOfList(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
+for (let f of files) {
+    $("echo", f).run()
+}`)
+	assertContains(t, out, `for f in 'a' 'b'; do`)
+	assertNotContains(t, out, `_forlist_`)
+}
+
+func TestCodegen_ForStaticListVariableInvalidatedAfterAssignment(t *testing.T) {
+	out := compile(t, `let files: list<string> = ["a", "b"]
+files = files.push("c")
 for (let f of files) {
     $("echo", f).run()
 }`)

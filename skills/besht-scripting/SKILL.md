@@ -535,7 +535,7 @@ for (let f of files) {
 for (f of files) $("echo", f).run()
 ```
 
-Static scalar list literals in `for (... of [...])` compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
+Static scalar list literals, and variables bound to them, compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
 
 **For — command output (line by line):**
 
