@@ -92,6 +92,12 @@ func CheckFile(entryPath string, opts Options) error {
 				return err
 			}
 		}
+		if err := checker.ValidateObjectSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
+			return err
+		}
+		if err := checker.ValidateForEachSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
+			return err
+		}
 		analysis := AnalyzeProgram(mod.Prog.Statements)
 		for _, w := range analysis.Warnings {
 			fmt.Fprintf(os.Stderr, "besht: warning: %s: %s\n", w.Pos, w.Message)
@@ -734,8 +740,15 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 	case *ast.ObjectLit:
 		return &ast.Type{Kind: ast.TypeObject}
 	case *ast.BuiltinCallExpr:
-		if e.Name == "fetch" {
+		switch e.Name {
+		case "fetch":
 			return &ast.Type{Kind: ast.TypeFetchResponse}
+		case "Object.keys", "Object.values":
+			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
+		case "Object.entries":
+			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}}
+		case "Object.hasOwn", "Boolean", "Array.isArray", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+			return &ast.Type{Kind: ast.TypeBoolean}
 		}
 	case *ast.AsExpr:
 		return inferExportValueType(e.Expr)
@@ -1023,7 +1036,7 @@ func qualifyClassIdent(ident *ast.IdentExpr, importMap map[string]string, qualif
 		ident.Name = qualName
 		return
 	}
-	if ident.Name == "" || ident.Name == "Besht" || ident.Name == "Math" || ident.Name == "Number" || ident.Name == "String" || ident.Name == "Set" || ident.Name == "console" || strings.Contains(ident.Name, "__") || ident.Name[0] < 'A' || ident.Name[0] > 'Z' {
+	if ident.Name == "" || ident.Name == "Besht" || ident.Name == "Boolean" || ident.Name == "Math" || ident.Name == "Number" || ident.Name == "Object" || ident.Name == "String" || ident.Name == "Set" || ident.Name == "console" || strings.Contains(ident.Name, "__") || ident.Name[0] < 'A' || ident.Name[0] > 'Z' {
 		return
 	}
 	ident.Name = qualify(ident.Name)
@@ -1135,7 +1148,7 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.varTypeMap = make(map[string]*ast.Type)
 	g.floatVars = make(map[string]bool)
 	g.paramMap = make(map[string]string)
-	g.objAliasMap = make(map[string]string)
+	g.objAliasMap = make(map[string]objectRef)
 	g.objFieldsMap = make(map[string][]string)
 	g.objPropTypeMap = make(map[string]*ast.Type)
 	g.fnParamTypes = make(map[string]*ast.Type)
@@ -1325,10 +1338,12 @@ func (g *moduleGenerator) genModuleFnDecl(s *ast.FnDecl) error {
 	prevFn := g.currentFn
 	prevInFn := g.inFunction
 	prevParamMap := g.paramMap
+	prevObjAliasMap := g.objAliasMap
 	prevFnParamTypes := g.fnParamTypes
 	g.currentFn = s.Name
 	g.inFunction = true
 	g.paramMap = make(map[string]string)
+	g.objAliasMap = cloneObjectRefMap(prevObjAliasMap)
 	for importedName, qualName := range g.importVarMap {
 		g.paramMap[importedName] = qualName
 		if typ, ok := g.importVarTypeMap[importedName]; ok {
@@ -1344,6 +1359,7 @@ func (g *moduleGenerator) genModuleFnDecl(s *ast.FnDecl) error {
 	for i, param := range s.Params {
 		varName := fmt.Sprintf("_%s_%s", qualName, param.Name)
 		g.paramMap[param.Name] = varName
+		delete(g.objAliasMap, param.Name)
 		if param.Type != nil {
 			g.fnParamTypes[param.Name] = param.Type
 			g.varTypeMap[varName] = param.Type
@@ -1364,6 +1380,7 @@ func (g *moduleGenerator) genModuleFnDecl(s *ast.FnDecl) error {
 	g.currentFn = prevFn
 	g.inFunction = prevInFn
 	g.paramMap = prevParamMap
+	g.objAliasMap = prevObjAliasMap
 	g.fnParamTypes = prevFnParamTypes
 	g.pop()
 	g.line("}")

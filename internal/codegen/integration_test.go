@@ -274,6 +274,18 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderStrictCheck(t *test
 	if !strings.Contains(stdlib.Declarations, "function isArray(value): boolean") {
 		t.Fatalf("generated stdlib should declare Array.isArray with an untyped value parameter")
 	}
+	if !strings.Contains(stdlib.Declarations, "declare function Boolean(value): boolean") {
+		t.Fatalf("generated stdlib should declare Boolean(value)")
+	}
+	if !strings.Contains(stdlib.Declarations, "function hasOwn(value: object, key: string): boolean") {
+		t.Fatalf("generated stdlib should declare Object.hasOwn(value, key)")
+	}
+	if !strings.Contains(stdlib.Declarations, "function values(value: object): string[]") {
+		t.Fatalf("generated stdlib should declare Object.values(value)")
+	}
+	if !strings.Contains(stdlib.Declarations, "function entries(value: object): string[][]") {
+		t.Fatalf("generated stdlib should declare Object.entries(value)")
+	}
 	mainPath := writeFile(t, dir, "main.bsh", `let path: string = env("HOME", "/tmp")
 let paths: string[] = [path]
 let argc: number = len(args.argv())
@@ -286,9 +298,13 @@ let indexes: number[] = Array.from({ length: 3 })
 let indexesIsArray: boolean = Array.isArray(indexes)
 let stringIsArray: boolean = Array.isArray("not a list")
 let objectIsArray: boolean = Array.isArray({ value: "x" })
+let objectHasPath: boolean = Object.hasOwn({ path: path }, "path")
+let objectValues: string[] = Object.values({ path: path })
+let objectEntries: string[][] = Object.entries({ path: path })
 let label: string = String(to_str(to_int("7")))
+let converted: boolean = Boolean(label)
 let existsViaNamespace: boolean = Besht.conditions.fileExists(first)
-if (indexesIsArray || stringIsArray || objectIsArray || existsViaNamespace || file_exists(first) || is_dir(first) || is_readable(first) || is_writable(first) || is_executable(first) || is_empty(label) || is_set(label) || hasHome) {
+if (converted || indexesIsArray || stringIsArray || objectIsArray || objectHasPath || existsViaNamespace || file_exists(first) || is_dir(first) || is_readable(first) || is_writable(first) || is_executable(first) || is_empty(label) || is_set(label) || hasHome || objectValues.length > 0 || objectEntries.length > 0) {
     for (i in range(0, n)) {
         if (i == argc) break
     }
@@ -2152,6 +2168,511 @@ if (Array.isArray("condition")) console.log("condition false")`)
 	want := "true\ntrue\ntrue\nfalse\nfalse\ncondition true\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_BooleanBuiltinRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(Boolean(false))
+console.log(Boolean(true))
+console.log(Boolean(0))
+console.log(Boolean(0.0))
+let dynamicZero = 0.0
+let dynamicNegZero = -0.0
+console.log(Boolean(dynamicZero))
+console.log(Boolean(dynamicNegZero))
+console.log(Boolean(1))
+console.log(Boolean(-1))
+console.log(Boolean(""))
+console.log(Boolean("x"))
+console.log(Boolean("0"))
+console.log(Boolean("false"))
+console.log(Boolean(null))
+console.log(Boolean(undefined))
+console.log(Boolean([]))
+console.log(Boolean({}))
+console.log(Boolean("x").toString())
+if (Boolean("x")) console.log("condition true")
+if (Boolean("")) console.log("condition false")`)
+	want := "false\ntrue\nfalse\nfalse\nfalse\nfalse\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\ntrue\ncondition true\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectKeysRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { id: 1, name: "Victor" }
+user.active = true
+let key = "role"
+user[key] = "admin"
+let alias = user
+function showKeys(obj: object): string {
+    return Object.keys(obj).join(",")
+}
+function hasKey(obj: object, k: string): boolean {
+    return Object.hasOwn(obj, k)
+}
+function shadowAlias(alias: object): string {
+    return Object.keys(alias).join(",")
+}
+function showAliasKeys(obj: object): string {
+    let alias = obj
+    return Object.keys(alias).join(",")
+}
+function aliasComputed(obj: object): string {
+    let alias = obj
+    let k = "role"
+    alias[k] = "editor"
+    return alias[k] + ":" + Object.keys(alias).join(",")
+}
+function localAliasDoesNotLeak(): string {
+    let same = user
+    return Object.keys(same).join(",")
+}
+console.log(Object.keys(user).join(","))
+console.log(Object.values(user).join(","))
+let userEntries = Object.entries(user)
+console.log(userEntries[0][0] + "=" + userEntries[0][1])
+console.log(userEntries[2][0] + "=" + userEntries[2][1])
+console.log(userEntries[3][0] + "=" + userEntries[3][1])
+console.log(Object.keys(alias).join(","))
+console.log(showKeys(user))
+console.log(Object.hasOwn(user, "name"))
+console.log(Object.hasOwn(user, "na"))
+console.log(Object.hasOwn(user, "bad-key"))
+console.log(Object.hasOwn(user, key).toString())
+if (Object.hasOwn(user, "active")) console.log("has active")
+console.log(hasKey(user, "role"))
+let other = { other: true }
+console.log(shadowAlias(other))
+console.log(showAliasKeys(user))
+console.log(aliasComputed(user))
+alias = other
+console.log(Object.keys(alias).join(","))
+let same = other
+console.log(localAliasDoesNotLeak())
+console.log(Object.keys(same).join(","))
+console.log(alias[key])
+console.log(Object.keys({ value: "x", enabled: true }).join(","))
+console.log(Object.values({ value: "x", enabled: true }).join(","))
+let literalEntries = Object.entries({ value: "x", enabled: true })
+console.log(literalEntries[1][0] + "=" + literalEntries[1][1])
+console.log(Object.hasOwn({ value: "x", enabled: true }, "enabled"))
+class Game {
+    static Deltas: Record<string, [number, number]> = { U: [-1, 0], D: [1, 0] }
+}
+console.log(Object.keys(Game.Deltas).join(","))
+let deltas = Game.Deltas
+console.log(Object.keys(deltas).join(","))
+console.log(Object.hasOwn(deltas, "U"))
+deltas = Game.Deltas
+console.log(Object.keys(deltas).join(","))
+let words = ["a", "b", "a"]
+let counts = words.reduce((acc, word) => {
+    acc[word] = (acc[word] || 0) + 1
+    return acc
+}, {})
+console.log(Object.keys(counts).join(","))
+console.log(Object.values(counts).join(","))
+console.log(Object.hasOwn(counts, "a"))
+console.log(Object.hasOwn(counts, "c"))`)
+	want := "id,name,active,role\n1,Victor,true,admin\nid=1\nactive=true\nrole=admin\nid,name,active,role\nid,name,active,role\ntrue\nfalse\nfalse\ntrue\nhas active\ntrue\nother\nid,name,active,role\neditor:id,name,active,role\nother\nid,name,active,role\nother\n\nvalue,enabled\nx,true\nenabled=true\ntrue\nU,D\nU,D\ntrue\nU,D\na,b\n2,1\ntrue\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectKeysRejectsUnsupportedSurfaces(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		wantErr string
+	}{
+		{"process env", `let keys: string[] = Object.keys(process.env)`, "Object.keys() requires an object literal or named object"},
+		{"values process env", `let values: string[] = Object.values(process.env)`, "Object.values() requires an object literal or named object"},
+		{"entries process env", `let entries: string[][] = Object.entries(process.env)`, "Object.entries() requires an object literal or named object"},
+		{"process env alias", `let envObj = process.env
+let keys: string[] = Object.keys(envObj)`, "Object.keys() requires an object literal or named object"},
+		{"process env property", `let keys: string[] = Object.keys(process.env.HOME)`, "Object.keys() requires an object literal or named object"},
+		{"scalar argument", `let keys: string[] = Object.keys("x")`, "Object.keys() requires an object literal or named object"},
+		{"hasOwn process env", `let ok: boolean = Object.hasOwn(process.env, "HOME")`, "Object.hasOwn() requires an object literal or named object"},
+		{"hasOwn process env alias", `let envObj = process.env
+let ok: boolean = Object.hasOwn(envObj, "HOME")`, "Object.hasOwn() requires an object literal or named object"},
+		{"hasOwn scalar argument", `let ok: boolean = Object.hasOwn("x", "name")`, "Object.hasOwn() requires an object literal or named object"},
+		{"unsafe literal key", `let keys: string[] = Object.keys({ "bad-key": "x" })`, `object key "bad-key" is not supported`},
+		{"values list value", `let values: string[] = Object.values({ pair: ["a", "b"] })`, "Object.values() only supports scalar object values"},
+		{"entries list value", `let entries: string[][] = Object.entries({ pair: ["a", "b"] })`, "Object.entries() only supports scalar object values"},
+		{"values named list value", `let obj = { pair: ["a", "b"] }
+let values: string[] = Object.values(obj)`, "Object.values() only supports scalar object values"},
+		{"entries alias list value", `let obj = { pair: ["a", "b"] }
+let alias = obj
+let entries: string[][] = Object.entries(alias)`, "Object.entries() only supports scalar object values"},
+		{"values later property list value", `let obj = { ok: "x" }
+obj.pair = ["a", "b"]
+let values: string[] = Object.values(obj)`, "Object.values() only supports scalar object values"},
+		{"entries later computed list value", `let obj = { ok: "x" }
+let key = "pair"
+obj[key] = ["a", "b"]
+let entries: string[][] = Object.entries(obj)`, "Object.entries() only supports scalar object values"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeFile(t, dir, "main.bsh", tt.src)
+			_, err := codegen.CompileFile(path, codegen.Options{})
+			if err == nil {
+				t.Fatalf("CompileFile error: got nil, want an error containing %q or a process.env value error", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) && !strings.Contains(err.Error(), "process.env cannot be used as a value") {
+				t.Fatalf("CompileFile error: got %v, want containing %q or process.env value error", err, tt.wantErr)
+			}
+			if err := codegen.CheckFile(path, codegen.Options{}); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("CheckFile error: got %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestIntegration_ObjectValuesEntriesRejectKnownListValuedObjects(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		wantErr string
+	}{
+		{
+			name: "static values",
+			src: `class Game {
+    static Deltas: Record<string, [number, number]> = { U: [-1, 0], D: [1, 0] }
+}
+let values = Object.values(Game.Deltas)`,
+			wantErr: "Object.values() only supports scalar object values",
+		},
+		{
+			name: "static entries",
+			src: `class Game {
+    static Deltas: Record<string, [number, number]> = { U: [-1, 0], D: [1, 0] }
+}
+let entries = Object.entries(Game.Deltas)`,
+			wantErr: "Object.entries() only supports scalar object values",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeFile(t, dir, "main.bsh", tt.src)
+			_, err := codegen.CompileFile(path, codegen.Options{})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("CompileFile error: got %v, want containing %q", err, tt.wantErr)
+			}
+			if err := codegen.CheckFile(path, codegen.Options{}); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("CheckFile error: got %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestIntegration_ObjectKeysImportedObjectCheckFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "dep.bsh", `export const user = { id: 1, name: "Victor" }`)
+	main := writeFile(t, dir, "main.bsh", `import { user } from "./dep"
+console.log(Object.keys(user).join(","))
+console.log(Object.hasOwn(user, "name"))`)
+	out, err := codegen.CompileFile(main, codegen.Options{})
+	if err != nil {
+		t.Fatalf("CompileFile imported object keys: %v", err)
+	}
+	if !strings.Contains(out, "dep__user") {
+		t.Fatalf("compiled output should reference imported object storage, got:\n%s", out)
+	}
+	if err := codegen.CheckFile(main, codegen.Options{}); err != nil {
+		t.Fatalf("CheckFile imported object keys: %v", err)
+	}
+}
+
+func TestIntegration_ObjectKeysImportedListValue(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "dep.bsh", `export const keys = Object.keys({ id: 1, name: "Victor" })
+export const values = Object.values({ id: "1", name: "Victor" })
+export const entries = Object.entries({ id: "1", name: "Victor" })`)
+	main := writeFile(t, dir, "main.bsh", `import { keys, values, entries } from "./dep"
+console.log(keys.join(","))
+console.log(keys.length)
+console.log(Array.isArray(keys))
+console.log(values.join(","))
+console.log(entries[1][0] + "=" + entries[1][1])`)
+	outShell := compileFile(t, main)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(outShell), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	output, err := exec.Command("sh", shPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, outShell)
+	}
+	out := string(output)
+	want := "id,name\n2\ntrue\n1,Victor\nname=Victor\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+	if err := codegen.CheckFile(main, codegen.Options{}); err != nil {
+		t.Fatalf("CheckFile imported Object.keys list value: %v", err)
+	}
+}
+
+func TestIntegration_ObjectValuesEntriesDynamicOverwriteClearsBooleanMetadata(t *testing.T) {
+	out := runCompiledShell(t, `let user = { active: true, name: "Ada" }
+let key = "active"
+user[key] = "admin"
+console.log(Object.values(user).join(","))
+let entries = Object.entries(user)
+console.log(entries[0][0] + "=" + entries[0][1])
+user.active = false
+console.log(Object.values(user).join(","))`)
+	want := "admin,Ada\nactive=admin\nfalse,Ada\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectValuesEntriesValidateDynamicMetadataKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `function showValues(obj: object): string {
+    return Object.values(obj).join(",")
+}
+function showEntries(obj: object): string {
+    let entries = Object.entries(obj)
+    return entries[0][1]
+}
+let user = { name: "Ada" }`)
+	outShell, err := codegen.CompileFile(path, codegen.Options{})
+	if err != nil {
+		t.Fatalf("compile object metadata key fixture: %v", err)
+	}
+	shPath := filepath.Join(dir, "main.sh")
+	attack := outShell + "\n_objkeys_user='name bad-key'\nmain__showValues \"$user\"\nmain__showEntries \"$user\"\n"
+	if err := os.WriteFile(shPath, []byte(attack), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	out, _ := exec.Command("sh", shPath).CombinedOutput()
+	if !strings.Contains(string(out), "[besht] invalid object key: bad-key") {
+		t.Fatalf("output: got %q, want invalid object key error", out)
+	}
+}
+
+func TestIntegration_ListForEachRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let names: string[] = ["alice", "bob", "anna"]
+let seen = ""
+names.forEach((name, index) => {
+    console.log(index.toString() + ":" + name)
+    seen = seen + name.charAt(0)
+})
+console.log("seen=" + seen)
+let empty: string[] = []
+let count = 0
+empty.forEach(item => {
+    count = count + 1
+})
+console.log(count.toString())
+let visited = new Set<string>()
+names.forEach(name => visited.add(name))
+console.log(visited.has("bob"))`)
+	want := "0:alice\n1:bob\n2:anna\nseen=aba\n0\ntrue\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ListForEachRejectsValueCallback(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let names: string[] = ["alice"]
+names.forEach(name => name + "!")`)
+	err := codegen.CheckFile(path, codegen.Options{})
+	if err == nil || !strings.Contains(err.Error(), "forEach() callback expression must be side-effecting") {
+		t.Fatalf("CheckFile error: got %v, want side-effecting callback error", err)
+	}
+}
+
+func TestIntegration_ListForEachRejectsControlFlow(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let names: string[] = ["alice"]
+names.forEach(name => { return name })`)
+	err := codegen.CheckFile(path, codegen.Options{})
+	if err == nil || !strings.Contains(err.Error(), "forEach() callback does not support return") {
+		t.Fatalf("CheckFile error: got %v, want return rejection", err)
+	}
+}
+
+func TestIntegration_ListForEachRejectsValuePosition(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let names: string[] = ["alice"]
+let result = names.forEach(name => console.log(name))`)
+	err := codegen.CheckFile(path, codegen.Options{})
+	if err == nil || !strings.Contains(err.Error(), "forEach() must be used as a statement") {
+		t.Fatalf("CheckFile error: got %v, want statement-only rejection", err)
+	}
+}
+
+func TestIntegration_ObjectHasOwnReduceAccumulatorCheckFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let words = ["a", "b", "a"]
+let counts = words.reduce((acc, word) => {
+    if (!Object.hasOwn(acc, word)) acc[word] = 0
+    acc[word] = acc[word] + 1
+    return acc
+}, {})
+console.log(Object.hasOwn(counts, "a"))`)
+	if err := codegen.CheckFile(path, codegen.Options{}); err != nil {
+		t.Fatalf("CheckFile reduce Object.hasOwn accumulator: %v", err)
+	}
+}
+
+func TestIntegration_ClassInstanceSlotValidation(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "pwned")
+	path := writeFile(t, dir, "main.bsh", `class User {
+    name: string
+    constructor(name: string) { this.name = name }
+}
+let u = new User("Ada")
+
+console.log(u.name)`)
+	outShell, err := codegen.CompileFile(path, codegen.Options{})
+	if err != nil {
+		t.Fatalf("compile unsafe class slot fixture: %v", err)
+	}
+	shPath := filepath.Join(dir, "main.sh")
+	attack := outShell + "\nUser__get_name 'bad;touch " + marker + ";#'\n"
+	if err := os.WriteFile(shPath, []byte(attack), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	out, err := exec.Command("sh", shPath).CombinedOutput()
+	if err == nil {
+		t.Fatalf("unsafe class slot should fail, output: %q", out)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("unsafe class slot executed injected command; marker stat err=%v", statErr)
+	}
+}
+
+func TestIntegration_ObjectValuesEntriesDynamicKeyOverwriteClearsBooleanFormatting(t *testing.T) {
+	out := runCompiledShell(t, `let user = { active: true, name: "Ada" }
+let key = "active"
+user[key] = "admin"
+console.log(Object.values(user).join(","))
+let entries = Object.entries(user)
+console.log(entries[0][0] + "=" + entries[0][1])
+user.active = false
+console.log(Object.values(user).join(","))`)
+	want := "admin,Ada\nactive=admin\nfalse,Ada\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectValuesEntriesValidatePollutedMetadataKeys(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "pwned")
+	path := writeFile(t, dir, "main.bsh", `function showValues(obj: object): string {
+    return Object.values(obj).join(",")
+}
+function showEntries(obj: object): string {
+    let rows = Object.entries(obj)
+    return rows[0][0] + "=" + rows[0][1]
+}
+let user = { name: "Ada" }
+
+console.log(showValues(user))
+console.log(showEntries(user))`)
+	outShell, err := codegen.CompileFile(path, codegen.Options{})
+	if err != nil {
+		t.Fatalf("compile object metadata fixture: %v", err)
+	}
+	shPath := filepath.Join(dir, "main.sh")
+	attack := outShell + "\n_objkeys_user='name bad-key'\nmain__showValues user\nmain__showEntries user\n"
+	if err := os.WriteFile(shPath, []byte(attack), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	out, _ := exec.Command("sh", shPath).CombinedOutput()
+	if !strings.Contains(string(out), "invalid object key: bad-key") {
+		t.Fatalf("output should report invalid object key, got %q", out)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("polluted object metadata executed injected command; marker stat err=%v", statErr)
+	}
+}
+
+func TestIntegration_ObjectPrintValidatesPollutedMetadataKeys(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "pwned")
+	path := writeFile(t, dir, "main.bsh", `let words = ["a", "b", "a"]
+let counts = words.reduce((acc, word) => {
+    acc[word] = (acc[word] || 0) + 1
+    return acc
+}, {})
+console.log(counts)`)
+	outShell, err := codegen.CompileFile(path, codegen.Options{})
+	if err != nil {
+		t.Fatalf("compile object print metadata fixture: %v", err)
+	}
+	printStart := "printf '{\\n'\nfor _bst_k in $_objkeys_counts; do"
+	attack := strings.Replace(outShell, printStart, "_objkeys_counts='a bad;touch "+marker+";#'\n"+printStart, 1)
+	if attack == outShell {
+		t.Fatalf("generated shell did not contain dynamic object print loop")
+	}
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(attack), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	out, _ := exec.Command("sh", shPath).CombinedOutput()
+	if !strings.Contains(string(out), "invalid object key") {
+		t.Fatalf("output should report invalid object key, got %q", out)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("polluted object print metadata executed injected command; marker stat err=%v", statErr)
+	}
+}
+
+func TestIntegration_ObjectValuesEntriesRejectAliasMutatedRootListValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		wantErr string
+	}{
+		{
+			name: "values alias property",
+			src: `function values(obj: object): string[] {
+    let alias = obj
+    alias.pair = ["a"]
+    return Object.values(obj)
+}
+let user = { ok: "x" }
+let out = values(user)`,
+			wantErr: "Object.values() only supports scalar object values",
+		},
+		{
+			name: "entries alias computed",
+			src: `function entries(obj: object): string[][] {
+    let alias = obj
+    let key = args.option("key") ?? "pair"
+    alias[key] = ["a"]
+    return Object.entries(obj)
+}
+let user = { ok: "x" }
+let out = entries(user)`,
+			wantErr: "Object.entries() only supports scalar object values",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeFile(t, dir, "main.bsh", tt.src)
+			_, err := codegen.CompileFile(path, codegen.Options{})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("CompileFile error: got %v, want containing %q", err, tt.wantErr)
+			}
+			if err := codegen.CheckFile(path, codegen.Options{}); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("CheckFile error: got %v, want containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

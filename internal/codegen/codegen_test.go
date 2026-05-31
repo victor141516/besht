@@ -1597,6 +1597,65 @@ let notList: boolean = Array.isArray("a")`)
 	assertContains(t, out, `notList=0`)
 }
 
+func TestCodegen_BooleanBuiltin(t *testing.T) {
+	out := compile(t, `let emptyString: boolean = Boolean("")
+let zero: boolean = Boolean(0)
+let nonZero: boolean = Boolean(2)
+let textZero: boolean = Boolean("0")
+let listValue: boolean = Boolean([])`)
+	assertContains(t, out, `emptyString=0`)
+	assertContains(t, out, `zero=0`)
+	assertContains(t, out, `nonZero=1`)
+	assertContains(t, out, `textZero=1`)
+	assertContains(t, out, `listValue=1`)
+}
+
+func TestCodegen_ObjectKeys(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Victor" }
+user.active = true
+let key = "role"
+user[key] = "admin"
+let keys: string[] = Object.keys(user)
+let values: string[] = Object.values(user)
+let entries: string[][] = Object.entries(user)
+let literalKeys: string[] = Object.keys({ value: "x", enabled: true })
+let literalValues: string[] = Object.values({ value: "x", enabled: true })
+let literalEntries: string[][] = Object.entries({ value: "x", enabled: true })
+let hasName: boolean = Object.hasOwn(user, "name")
+let hasLiteral: boolean = Object.hasOwn({ value: "x", enabled: true }, "enabled")`)
+	assertContains(t, out, `_objkeys_user='id name'`)
+	assertContains(t, out, `case " $_objkeys_user " in *" active "*)`)
+	assertContains(t, out, `printf '%s\n' $_objkeys_user`)
+	assertContains(t, out, `values=$(for _bst_obj_key in $_objkeys_user`)
+	assertContains(t, out, `entries=$(for _bst_obj_key in $_objkeys_user`)
+	assertContains(t, out, `case "$_bst_obj_key" in active)`)
+	assertContains(t, out, `case "$_bst_obj_key" in enabled)`)
+	assertContains(t, out, `printf '%s\037%s\n' "$_bst_obj_key" "$_bst_obj_value"`)
+	assertContains(t, out, `_objkeys__objlit_`)
+	assertContains(t, out, `='value enabled'`)
+	assertContains(t, out, `printf '%s\n' $_objkeys__objlit_`)
+	assertContains(t, out, `grep -qxF -- "$_bst_obj_key"`)
+	assertContains(t, out, `hasName=$(_bst_obj_key='name'`)
+	assertContains(t, out, `hasLiteral=$(_objkeys__objlit_`)
+	assertNotContains(t, out, `_bst_object_keys`)
+}
+
+func TestCodegen_ListForEach(t *testing.T) {
+	out := compile(t, `let names: string[] = ["alice", "bob"]
+names.forEach((name, index) => console.log(index.toString() + ":" + name))`)
+	assertContains(t, out, `_foreach_`)
+	assertContains(t, out, `while IFS= read -r _cb_`)
+	assertContains(t, out, `done <<__BESHT_FOREACH_`)
+	assertNotContains(t, out, `| while IFS= read -r _cb_`)
+}
+
+func TestCodegen_ListForEachLiteralReceiver(t *testing.T) {
+	out := compile(t, `let names = ["alice", "bob"]
+names.map(name => name).forEach(name => console.log(name))`)
+	assertContains(t, out, `_foreach_`)
+	assertContains(t, out, `while IFS= read -r _cb_`)
+}
+
 func TestCodegen_NumberIsSafeInteger(t *testing.T) {
 	out := compile(t, `let ok: boolean = Number.isSafeInteger(9007199254740991)`)
 	assertContains(t, out, `awk`)
