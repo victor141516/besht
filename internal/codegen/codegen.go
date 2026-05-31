@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/victor141516/besht/internal/ast"
 )
@@ -1823,6 +1824,58 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 		}
 	}
 	return words, true
+}
+
+func staticASCIIStringValue(expr ast.Expression) (string, bool) {
+	var value string
+	switch e := expr.(type) {
+	case *ast.StringLit:
+		value = e.Value
+	case *ast.RawStringLit:
+		value = e.Value
+	case *ast.TemplateLit:
+		if len(e.Exprs) != 0 {
+			return "", false
+		}
+		value = strings.Join(e.Parts, "")
+	case *ast.AsExpr:
+		return staticASCIIStringValue(e.Expr)
+	default:
+		return "", false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			return "", false
+		}
+	}
+	return value, true
+}
+
+func staticIntValue(expr ast.Expression) (int, bool) {
+	switch e := expr.(type) {
+	case *ast.IntLit:
+		return int(e.Value), true
+	case *ast.FloatLit:
+		f, err := strconv.ParseFloat(e.Value, 64)
+		if err != nil {
+			return 0, false
+		}
+		return int(f), true
+	case *ast.AsExpr:
+		return staticIntValue(e.Expr)
+	default:
+		return 0, false
+	}
+}
+
+func clampInt(n, min, max int) int {
+	if n < min {
+		return min
+	}
+	if n > max {
+		return max
+	}
+	return n
 }
 
 func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
@@ -4148,6 +4201,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeFetchResponse {
 		return g.genFetchResponseMethod(e)
 	}
+	if val, ok, err := g.genStaticStringMethod(e); ok || err != nil {
+		return val, err
+	}
 	// Handle terminal command methods that read captured output
 	if e.Method == "readStdout" || e.Method == "readStdoutLines" || e.Method == "readStderr" || e.Method == "exitCode" {
 		id := -1
@@ -5398,6 +5454,132 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 		return fmt.Sprintf("\"%s\"", strings.Join(parts, "")), nil
 	}
 	return "", fmt.Errorf("string has no method %q", e.Method)
+}
+
+func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	recv, ok := staticASCIIStringValue(e.Receiver)
+	if !ok {
+		return "", false, nil
+	}
+
+	stringArg := func() (string, bool, error) {
+		if len(e.Args) == 0 {
+			return "", false, fmt.Errorf("%s() requires an argument", e.Method)
+		}
+		value, ok := staticASCIIStringValue(e.Args[0])
+		return value, ok, nil
+	}
+	intArg := func(idx int, fallback int) (int, bool) {
+		if len(e.Args) <= idx {
+			return fallback, true
+		}
+		return staticIntValue(e.Args[idx])
+	}
+
+	switch e.Method {
+	case "includes":
+		needle, ok, err := stringArg()
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		pos, ok := intArg(1, 0)
+		if !ok {
+			return "", false, nil
+		}
+		pos = clampInt(pos, 0, len(recv))
+		if needle == "" || strings.Contains(recv[pos:], needle) {
+			return "1", true, nil
+		}
+		return "0", true, nil
+
+	case "startsWith":
+		needle, ok, err := stringArg()
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		pos, ok := intArg(1, 0)
+		if !ok {
+			return "", false, nil
+		}
+		pos = clampInt(pos, 0, len(recv))
+		if strings.HasPrefix(recv[pos:], needle) {
+			return "1", true, nil
+		}
+		return "0", true, nil
+
+	case "endsWith":
+		needle, ok, err := stringArg()
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		end, ok := intArg(1, len(recv))
+		if !ok {
+			return "", false, nil
+		}
+		end = clampInt(end, 0, len(recv))
+		if strings.HasSuffix(recv[:end], needle) {
+			return "1", true, nil
+		}
+		return "0", true, nil
+
+	case "indexOf":
+		needle, ok, err := stringArg()
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		pos, ok := intArg(1, 0)
+		if !ok {
+			return "", false, nil
+		}
+		pos = clampInt(pos, 0, len(recv))
+		if needle == "" {
+			return strconv.Itoa(pos), true, nil
+		}
+		found := strings.Index(recv[pos:], needle)
+		if found < 0 {
+			return "-1", true, nil
+		}
+		return strconv.Itoa(pos + found), true, nil
+
+	case "lastIndexOf":
+		needle, ok, err := stringArg()
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		pos, ok := intArg(1, len(recv))
+		if !ok {
+			return "", false, nil
+		}
+		pos = clampInt(pos, 0, len(recv))
+		if needle == "" {
+			return strconv.Itoa(pos), true, nil
+		}
+		limit := len(recv) - len(needle)
+		if pos < limit {
+			limit = pos
+		}
+		for i := limit; i >= 0; i-- {
+			if strings.HasPrefix(recv[i:], needle) {
+				return strconv.Itoa(i), true, nil
+			}
+		}
+		return "-1", true, nil
+
+	case "charAt":
+		if len(e.Args) != 1 {
+			return "", true, fmt.Errorf("charAt() requires an argument")
+		}
+		idx, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		if idx < 0 || idx >= len(recv) {
+			return shellQuote(""), true, nil
+		}
+		return shellQuote(recv[idx : idx+1]), true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {

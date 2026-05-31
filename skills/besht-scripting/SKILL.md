@@ -265,7 +265,7 @@ let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).joi
 
 ## String and List Search
 
-Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Lists also support `items.includes(x)` for exact item membership.
+Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literal searches and `charAt()` calls with static arguments compile to constants. Lists also support `items.includes(x)` for exact item membership.
 
 ## Sets and Nested Lists
 

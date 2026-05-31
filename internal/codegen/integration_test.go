@@ -2076,6 +2076,20 @@ console.log(s.endsWith("", -2))`)
 	}
 }
 
+func TestIntegration_StaticStringMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log("hello".includes("ell"))
+console.log("hello".startsWith("he"))
+console.log("hello".endsWith("lo"))
+console.log("hello".indexOf("l"))
+console.log("hello".lastIndexOf("l"))
+console.log("hello".charAt(1))
+console.log("hello".charAt(99))`)
+	want := "true\ntrue\ntrue\n2\n3\ne\n\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PureJSAPIsDoNotExecuteHostileStrings(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "owned")

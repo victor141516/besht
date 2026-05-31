@@ -1528,6 +1528,33 @@ let ew: boolean = s.endsWith("hel", 3)`)
 	assertContains(t, out, `int(_len)`)
 }
 
+func TestCodegen_StaticStringSearchMethods(t *testing.T) {
+	out := compile(t, `let has: boolean = "hello".includes("ell")
+let sw: boolean = "hello".startsWith("he")
+let ew: boolean = "hello".endsWith("lo")
+let first: number = "hello".indexOf("l")
+let last: number = "hello".lastIndexOf("l")
+let pos: number = "hello hello".indexOf("lo", 4)`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `sw=1`)
+	assertContains(t, out, `ew=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=3`)
+	assertContains(t, out, `pos=9`)
+	assertNotContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `_bst_starts_with`)
+	assertNotContains(t, out, `_bst_ends_with`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticStringCharAt(t *testing.T) {
+	out := compile(t, `let c: string = "hello".charAt(1)
+let missing: string = "hello".charAt(99)`)
+	assertContains(t, out, `c='e'`)
+	assertContains(t, out, `missing=''`)
+	assertNotContains(t, out, `awk`)
+}
+
 func TestCodegen_StringLastIndexOf(t *testing.T) {
 	out := compile(t, `let s: string = "banana"
 let i: number = s.lastIndexOf("na")`)
