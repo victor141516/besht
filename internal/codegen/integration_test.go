@@ -1414,6 +1414,31 @@ console.log(user)
 	assertContains(t, out, `user=$(whoami)`)
 }
 
+func TestIntegration_InlineRunReadStdoutExpressionRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log($("printf", "inline").run().readStdout())
+`)
+	if out != "inline\n" {
+		t.Fatalf("output: got %q, want inline", out)
+	}
+}
+
+func TestIntegration_InlineRunReadStderrExpressionRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log($("sh", "-c", "printf err >&2").run().readStderr())
+`)
+	if out != "err\n" {
+		t.Fatalf("output: got %q, want err", out)
+	}
+}
+
+func TestIntegration_InlineRunExitCodeRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let code = $("false").run().exitCode()
+console.log(code)
+`)
+	if out != "1\n" {
+		t.Fatalf("output: got %q, want exit code 1", out)
+	}
+}
+
 func TestIntegration_CmdPipeline(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `let result = $("cat", "/etc/passwd")

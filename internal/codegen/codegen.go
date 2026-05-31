@@ -903,8 +903,8 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		return nil
 	}
 
-	// Inline .run() chain (e.g. let x = $(...).run().text()):
-	// emit the run call first, then read the captured var.
+	// Inline .run() chain (e.g. let x = $(...).run().readStdout()):
+	// emit the run call first, then read the captured value var.
 	if containsRunCall(s.Value) && g.cmdAnalysis != nil {
 		if err := g.emitInlineRunChain(s.Value); err != nil {
 			return err
@@ -913,11 +913,14 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		if id >= 0 {
 			ident := g.cmdAnalysis.identity(id)
 			if ident != nil {
-				captureVar := ident.CaptureVarName(g.resolveVarName)
-				// genRunCall already emitted the capture assignment using captureVar.
-				// Only add an alias if the let variable name differs from captureVar.
-				if varName != captureVar {
-					g.line(fmt.Sprintf("%s=\"$%s\"", varName, captureVar))
+				valueVar := ident.CaptureVarName(g.resolveVarName)
+				if me, ok := s.Value.(*ast.MethodCallExpr); ok && me.Method == "exitCode" {
+					valueVar = ident.ExitCodeVarName(g.resolveVarName)
+				}
+				// genRunCall already emitted the value assignment using valueVar.
+				// Only add an alias if the let variable name differs from valueVar.
+				if varName != valueVar {
+					g.line(fmt.Sprintf("%s=\"$%s\"", varName, valueVar))
 				}
 				return nil
 			}
@@ -1037,7 +1040,7 @@ func (g *Generator) isLazyCommandBinding(expr ast.Expression) bool {
 
 func (g *Generator) genDestructureDecl(s *ast.DestructureDecl) error {
 	tmp := fmt.Sprintf("_destructure_%d_%d", s.Pos.Line, s.Pos.Column)
-	if containsRunCall(s.Value) && g.cmdAnalysis != nil {
+	if containsRunCall(s.Value) && g.cmdAnalysis != nil && !isImmediateRunTerminalCall(s.Value) {
 		if err := g.emitInlineRunChain(s.Value); err != nil {
 			return err
 		}
@@ -2031,7 +2034,7 @@ func (g *Generator) genReturn(s *ast.ReturnStmt) error {
 		return nil
 	}
 
-	if containsRunCall(s.Value) && g.cmdAnalysis != nil {
+	if containsRunCall(s.Value) && g.cmdAnalysis != nil && !isImmediateRunTerminalCall(s.Value) {
 		if err := g.emitInlineRunChain(s.Value); err != nil {
 			return err
 		}
@@ -3746,6 +3749,32 @@ func containsRunCall(expr ast.Expression) bool {
 	return containsRunCall(me.Receiver)
 }
 
+func isTerminalCommandReadMethod(method string) bool {
+	switch method {
+	case "readStdout", "readStdoutLines", "readStderr", "exitCode":
+		return true
+	default:
+		return false
+	}
+}
+
+func immediateRunReceiver(e *ast.MethodCallExpr) (*ast.MethodCallExpr, bool) {
+	runCall, ok := e.Receiver.(*ast.MethodCallExpr)
+	if !ok || runCall.Method != "run" {
+		return nil, false
+	}
+	return runCall, true
+}
+
+func isImmediateRunTerminalCall(expr ast.Expression) bool {
+	me, ok := expr.(*ast.MethodCallExpr)
+	if !ok || !isTerminalCommandReadMethod(me.Method) {
+		return false
+	}
+	_, ok = immediateRunReceiver(me)
+	return ok
+}
+
 func (g *Generator) emitInlineRunChain(expr ast.Expression) error {
 	me, ok := expr.(*ast.MethodCallExpr)
 	if !ok {
@@ -4149,7 +4178,37 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 		return g.genFetchResponseMethod(e)
 	}
 	// Handle terminal command methods that read captured output
-	if e.Method == "readStdout" || e.Method == "readStdoutLines" || e.Method == "readStderr" || e.Method == "exitCode" {
+	if isTerminalCommandReadMethod(e.Method) {
+		if runCall, ok := immediateRunReceiver(e); ok {
+			id := -1
+			var ident *CmdIdentity
+			if g.cmdAnalysis != nil {
+				id = g.cmdAnalysis.resolveIdentityExpr(e.Receiver, g.cmdScope)
+				ident = g.cmdAnalysis.identity(id)
+			}
+			needsCapturedRun := e.Method == "exitCode" || (ident != nil && (ident.VarName != "" || ident.UsesExitCode))
+			if needsCapturedRun {
+				if err := g.genRunCall(runCall); err != nil {
+					return "", err
+				}
+				if ident != nil {
+					if e.Method == "exitCode" {
+						exitVar := ident.ExitCodeVarName(g.resolveVarName)
+						return fmt.Sprintf("\"$%s\"", exitVar), nil
+					}
+					captureVar := ident.CaptureVarName(g.resolveVarName)
+					return fmt.Sprintf("\"$%s\"", captureVar), nil
+				}
+			}
+			pipeline, redirect, err := g.genCmdChainExpr(runCall.Receiver)
+			if err != nil {
+				return "", err
+			}
+			if e.Method == "readStderr" {
+				return commandSubstitution(formatCmdForStderrCapture(pipeline, redirect)), nil
+			}
+			return commandSubstitution(formatCmdForCapture(pipeline, redirect)), nil
+		}
 		id := -1
 		if g.cmdAnalysis != nil {
 			id = g.cmdAnalysis.resolveIdentityExpr(e.Receiver, g.cmdScope)

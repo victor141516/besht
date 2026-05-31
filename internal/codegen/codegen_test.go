@@ -1170,6 +1170,29 @@ func TestCodegen_CmdBasicCapture(t *testing.T) {
 	assertContains(t, out, `u=$(whoami)`)
 }
 
+func TestCodegen_InlineRunReadStdoutExpressionUsesCommandSubstitution(t *testing.T) {
+	out := compile(t, `console.log($("printf", "inline").run().readStdout())`)
+	assertContains(t, out, `printf '%s\n' "$(printf inline)"`)
+	assertNotContains(t, out, `$_cmd`)
+}
+
+func TestCodegen_NamedInlineRunReadStdoutExpressionKeepsCapture(t *testing.T) {
+	out := compile(t, `let cmd = $("printf", "named")
+console.log(cmd.run().readStdout())
+console.log(cmd.readStdout())`)
+	assertContains(t, out, `cmd=$(printf named)`)
+	assertContains(t, out, `printf '%s\n' "$cmd"`)
+}
+
+func TestCodegen_InlineRunExitCodeLetUsesExitVar(t *testing.T) {
+	out := compile(t, `let code = $("false").run().exitCode()
+console.log(code)`)
+	assertContains(t, out, `false`)
+	assertContains(t, out, `code_exit=$?`)
+	assertContains(t, out, `code="$code_exit"`)
+	assertContains(t, out, `printf '%s\n' "$code"`)
+}
+
 func TestCodegen_CmdMultiArgCapture(t *testing.T) {
 	out := compile(t, `let b = $("git", "rev-parse", "--abbrev-ref", "HEAD").run().readStdout()`)
 	assertContains(t, out, `git`)

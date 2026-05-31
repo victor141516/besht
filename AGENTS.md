@@ -264,6 +264,8 @@ let result = $("whoami").run().readStdout();
 
 The captured variable name is derived from the **besht variable name** for readability. `let result = $("whoami")` where `result.run()` is later called generates `result=$(whoami)`. The same variable is reused for every `.readStdout()` call — no duplication.
 
+Immediate anonymous reads such as `console.log($("pwd").run().readStdout())` compile directly to command substitution (`"$(pwd)"`) instead of creating a temporary capture variable. Named command objects and inline `.exitCode()` reads still emit capture/exit variables so later reads remain correct.
+
 **Single-run enforcement:**
 
 Each Command object may only have `.run()` called once. Calling `.run()` a second time on the same object is a **compile error**. To run the same pipeline again, use `.clone()` which returns a fresh, un-run copy of the pipeline.
@@ -854,7 +856,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 1. Add case in `checkCommandMethod()` in `checker/checker.go` — specify arg count and return type
 2. If the method is a **terminal** (causes execution or capture): handle in the Command Analysis pass so it's accounted for in the emit decision
 3. Add case in `genCmdChain()` in `codegen/codegen.go` — emit the shell equivalent
-4. If the method records a capture (like `.readStdout()` or `.exitCode()`), codegen reads from the pre-assigned capture variable, not from a new `$(...)` subshell
+4. If the method records a capture (like `.readStdout()` or `.exitCode()`), codegen usually reads from the pre-assigned capture variable. Immediate anonymous `.run().readStdout()` / `.run().readStderr()` expressions may compile directly to command substitution; named command objects and `.exitCode()` must keep `genRunCall()` capture/exit-variable emission so reuse stays correct.
 
 ## Known Semantic Differences from TypeScript
 

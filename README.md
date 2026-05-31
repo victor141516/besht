@@ -715,6 +715,7 @@ Use `.pipe()` to build pipelines:
 
 ```ts
 let user: string = $("whoami").pipe($("tr", "[:lower:]", "[:upper:]")).run().readStdout()
+console.log($("pwd").run().readStdout()) // inline reads can compile directly to "$(pwd)"
 ```
 
 Use `.env(name, value)` to prefix one command invocation with an environment variable. The name must be a string literal POSIX shell identifier.
