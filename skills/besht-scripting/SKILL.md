@@ -388,7 +388,7 @@ let lines10 = Number.parseInt(raw, 10)
 
 ## Command Execution
 
-All external commands use `$()` expressions. Arguments are separate strings — the compiler single-quotes everything safely.
+All external commands use `$()` expressions. Arguments are separate strings. The compiler emits conservative shell-safe literal command words bare when possible and quotes anything that needs protection.
 
 ```ts
 // Capture stdout explicitly

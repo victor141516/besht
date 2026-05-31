@@ -83,7 +83,7 @@ func TestCodegen_LetBoolFalse(t *testing.T) {
 
 func TestCodegen_LetShellCapture(t *testing.T) {
 	out := compile(t, `let user = $("whoami").run().readStdout()`)
-	assertContains(t, out, `user=$('whoami')`)
+	assertContains(t, out, `user=$(whoami)`)
 }
 
 func TestCodegen_LetListLiteral(t *testing.T) {
@@ -101,7 +101,7 @@ x = "b"`)
 
 func TestCodegen_ShellStmt(t *testing.T) {
 	out := compile(t, `$("echo", "hello").run()`)
-	assertContains(t, out, `'echo' 'hello'`)
+	assertContains(t, out, `echo hello`)
 }
 
 func TestCodegen_FnDeclVoid(t *testing.T) {
@@ -110,7 +110,7 @@ func TestCodegen_FnDeclVoid(t *testing.T) {
 }`)
 	assertContains(t, out, `greet()`)
 	assertContains(t, out, `_greet_name="$1"`)
-	assertContains(t, out, `'echo' 'hi'`)
+	assertContains(t, out, `echo hi`)
 }
 
 func TestCodegen_FnDeclWithReturn(t *testing.T) {
@@ -145,7 +145,7 @@ if (n > 0) {
     $("echo", "pos").run()
 }`)
 	assertContains(t, out, `awk -v _a=$n -v _b=0`)
-	assertContains(t, out, `'echo' 'pos'`)
+	assertContains(t, out, `echo pos`)
 	assertContains(t, out, `fi`)
 }
 
@@ -345,7 +345,7 @@ func TestCodegen_ForShell(t *testing.T) {
 	out := compile(t, `for (line in $("cat", "/etc/hosts").readStdoutLines()) {
     $("echo", "${line}").run()
 }`)
-	assertContains(t, out, `'cat'`)
+	assertContains(t, out, `cat`)
 	assertContains(t, out, `while IFS= read -r`)
 	assertContains(t, out, `done`)
 }
@@ -360,7 +360,7 @@ func TestCodegen_TryCatch(t *testing.T) {
 	assertContains(t, out, `set -e`)
 	assertContains(t, out, `risky_cmd`)
 	assertContains(t, out, `=$?`)
-	assertContains(t, out, `'echo' 'failed'`)
+	assertContains(t, out, `echo failed`)
 	assertContains(t, out, `fi`)
 }
 
@@ -548,9 +548,9 @@ let c: number = a % b`)
 
 func TestCodegen_PipeMethod(t *testing.T) {
 	out := compile(t, `let r = $("whoami").pipe($("tr", "-d", "\n")).run().readStdout()`)
-	assertContains(t, out, `'whoami'`)
+	assertContains(t, out, `whoami`)
 	assertContains(t, out, `|`)
-	assertContains(t, out, `'tr'`)
+	assertContains(t, out, `tr`)
 }
 
 func TestCodegen_PropagateExprInFunction(t *testing.T) {
@@ -621,7 +621,7 @@ if (a != b) {
 func TestCodegen_CmdWithVarArg(t *testing.T) {
 	out := compile(t, `let path: string = "/tmp"
 $("ls", path).run()`)
-	assertContains(t, out, `'ls'`)
+	assertContains(t, out, `ls`)
 	assertContains(t, out, `$path`)
 }
 
@@ -1167,15 +1167,28 @@ console.log(MathUtils.round(2.7))`)
 
 func TestCodegen_CmdBasicCapture(t *testing.T) {
 	out := compile(t, `let u = $("whoami").run().readStdout()`)
-	assertContains(t, out, `u=$('whoami')`)
+	assertContains(t, out, `u=$(whoami)`)
 }
 
 func TestCodegen_CmdMultiArgCapture(t *testing.T) {
 	out := compile(t, `let b = $("git", "rev-parse", "--abbrev-ref", "HEAD").run().readStdout()`)
-	assertContains(t, out, `'git'`)
-	assertContains(t, out, `'rev-parse'`)
-	assertContains(t, out, `'--abbrev-ref'`)
-	assertContains(t, out, `'HEAD'`)
+	assertContains(t, out, `git`)
+	assertContains(t, out, `rev-parse`)
+	assertContains(t, out, `--abbrev-ref`)
+	assertContains(t, out, `HEAD`)
+}
+
+func TestCodegen_CmdSafeLiteralArgsUseBareWords(t *testing.T) {
+	out := compile(t, `$("git", "status", "--short").run()
+$("find", ".", "-name", "*.go").run()
+$("sed", r"s/foo/bar/").run()
+$("if", "value").run()`)
+	assertContains(t, out, `git status --short`)
+	assertContains(t, out, `find . -name '*.go'`)
+	assertContains(t, out, `sed 's/foo/bar/'`)
+	assertContains(t, out, `'if' value`)
+	assertNotContains(t, out, `'git'`)
+	assertNotContains(t, out, `'--short'`)
 }
 
 func TestCodegen_CmdVarArgPassedRaw(t *testing.T) {
@@ -1187,26 +1200,26 @@ let r = $("ls", path).run().readStdout()`)
 
 func TestCodegen_CmdRunSideEffect(t *testing.T) {
 	out := compile(t, `$("chmod", "+x", "script.sh").run()`)
-	assertContains(t, out, `'chmod'`)
-	assertContains(t, out, `'+x'`)
-	assertContains(t, out, `'script.sh'`)
-	assertNotContains(t, out, `$('chmod'`)
+	assertContains(t, out, `chmod`)
+	assertContains(t, out, `+x`)
+	assertContains(t, out, `script.sh`)
+	assertNotContains(t, out, `$(chmod`)
 }
 
 func TestCodegen_CmdPipe(t *testing.T) {
 	out := compile(t, `let r = $("cat", "/etc/passwd").pipe($("grep", "root")).run().readStdout()`)
-	assertContains(t, out, `'cat'`)
+	assertContains(t, out, `cat`)
 	assertContains(t, out, `|`)
-	assertContains(t, out, `'grep'`)
+	assertContains(t, out, `grep`)
 }
 
 func TestCodegen_CmdPipeChain(t *testing.T) {
 	out := compile(t, `let r = $("cat", "/etc/passwd")
     .pipe($("grep", "root"))
     .pipe($("cut", "-d:", "-f1")).run().readStdout()`)
-	assertContains(t, out, `'cat'`)
-	assertContains(t, out, `'grep'`)
-	assertContains(t, out, `'cut'`)
+	assertContains(t, out, `cat`)
+	assertContains(t, out, `grep`)
+	assertContains(t, out, `cut`)
 	n := len(strings.Split(out, "|"))
 	if n < 3 {
 		t.Errorf("expected 2 pipes in output, got %d", n-1)
@@ -1252,93 +1265,93 @@ func TestCodegen_CmdLines(t *testing.T) {
 	out := compile(t, `let lsCmd = $("ls", "/tmp")
 lsCmd.run()
 let ls = lsCmd.readStdoutLines()`)
-	assertContains(t, out, `'ls'`)
-	assertContains(t, out, `'/tmp'`)
+	assertContains(t, out, `ls`)
+	assertContains(t, out, `/tmp`)
 }
 
 func TestCodegen_CmdText(t *testing.T) {
 	out := compile(t, `let s = $("whoami").run().readStdout()`)
-	assertContains(t, out, `'whoami'`)
+	assertContains(t, out, `whoami`)
 }
 
 func TestCodegen_CmdInFor(t *testing.T) {
 	out := compile(t, `for (f in $("find", ".", "-name", "*.log").readStdoutLines()) {
     $("echo", f).run()
 }`)
-	assertContains(t, out, `'find'`)
+	assertContains(t, out, `find`)
 	assertContains(t, out, `while IFS= read -r`)
-	assertContains(t, out, `'echo'`)
+	assertContains(t, out, `echo`)
 }
 
 func TestCodegen_CmdEnv(t *testing.T) {
 	out := compile(t, `$("env").env("FOO", "bar").run()`)
-	assertContains(t, out, `FOO='bar' 'env'`)
+	assertContains(t, out, `FOO='bar' env`)
 }
 
 func TestCodegen_CmdEnvWithVariable(t *testing.T) {
 	out := compile(t, `let value: string = "bar"
 $("env").env("FOO", value).run()`)
-	assertContains(t, out, `FOO="$value" 'env'`)
+	assertContains(t, out, `FOO="$value" env`)
 }
 
 func TestCodegen_CmdEnvCapture(t *testing.T) {
 	out := compile(t, `let scoped = $("sh", "-c", 'printf %s "$FOO"').env("FOO", "bar").run().readStdout()`)
-	assertContains(t, out, `scoped=$(FOO='bar' 'sh'`)
+	assertContains(t, out, `scoped=$(FOO='bar' sh`)
 }
 
 func TestCodegen_CmdEnvPipe(t *testing.T) {
 	out := compile(t, `$("printenv", "FOO").env("FOO", "bar").pipe($("cat")).run()`)
-	assertContains(t, out, `FOO='bar' 'printenv'`)
-	assertContains(t, out, `| 'cat'`)
+	assertContains(t, out, `FOO='bar' printenv`)
+	assertContains(t, out, `| cat`)
 }
 
 func TestCodegen_CmdWorkdir(t *testing.T) {
 	out := compile(t, `$("ls").workdir("/").run()`)
 	assertContains(t, out, `_bst_workdir='/'`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'ls'`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && ls`)
 }
 
 func TestCodegen_CmdWorkdirWithVariable(t *testing.T) {
 	out := compile(t, `let dir: string = "/tmp"
 $("pwd").workdir(dir).run()`)
 	assertContains(t, out, `_bst_workdir="$dir"`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'pwd'`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && pwd`)
 }
 
 func TestCodegen_CmdWorkdirCapture(t *testing.T) {
 	out := compile(t, `let root = $("pwd").workdir("/").run().readStdout()`)
 	assertContains(t, out, `root=$(_bst_workdir='/'`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'pwd')`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && pwd)`)
 }
 
 func TestCodegen_CmdWorkdirPipe(t *testing.T) {
 	out := compile(t, `$("printf", "hello").pipe($("grep", "hello")).workdir("/").run()`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'printf' 'hello' | 'grep' 'hello')`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && printf hello | grep hello)`)
 }
 
 func TestCodegen_CmdWorkdirRedirect(t *testing.T) {
 	out := compile(t, `$("printf", "hello").stdout("out.txt").workdir("/").run()`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'printf' 'hello' > out.txt)`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && printf hello > out.txt)`)
 }
 
 func TestCodegen_CmdWorkdirThenRedirect(t *testing.T) {
 	out := compile(t, `$("printf", "hello").workdir("/").stdout("out.txt").run()`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'printf' 'hello' > out.txt)`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && printf hello > out.txt)`)
 }
 
 func TestCodegen_CmdWorkdirThenEnv(t *testing.T) {
 	out := compile(t, `$("printenv", "FOO").workdir("/").env("FOO", "bar").run()`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && FOO='bar' 'printenv' 'FOO')`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && FOO='bar' printenv FOO)`)
 }
 
 func TestCodegen_CmdWorkdirWithoutRunStaysLazy(t *testing.T) {
 	out := compile(t, `$("ls").workdir("/")`)
-	assertNotContains(t, out, `(cd '/' && 'ls')`)
+	assertNotContains(t, out, `(cd '/' && ls)`)
 }
 
 func TestCodegen_CmdEnvWithoutRunStaysLazy(t *testing.T) {
 	out := compile(t, `$("env").env("FOO", "bar")`)
-	assertNotContains(t, out, `FOO='bar' 'env'`)
+	assertNotContains(t, out, `FOO='bar' env`)
 }
 
 func TestCodegen_CmdEnvRejectsInvalidName(t *testing.T) {
@@ -1357,9 +1370,9 @@ func TestCodegen_CmdPipeIntoStdout(t *testing.T) {
     .pipe($("grep", "ERROR"))
     .stdout("/tmp/errors.log")
     `)
-	assertContains(t, out, `'cat'`)
+	assertContains(t, out, `cat`)
 	assertContains(t, out, `|`)
-	assertContains(t, out, `'grep'`)
+	assertContains(t, out, `grep`)
 	assertContains(t, out, `> /tmp/errors.log`)
 }
 
@@ -1377,13 +1390,13 @@ func TestCodegen_CmdSingleQuoteInArg(t *testing.T) {
 func TestCodegen_CmdVarStringConcat(t *testing.T) {
 	out := compile(t, `let name: string = "world"
 $("echo", "Hello " + name).run()`)
-	assertContains(t, out, `'echo'`)
+	assertContains(t, out, `echo`)
 }
 
 func TestCodegen_CmdAssignedToInt(t *testing.T) {
 	out := compile(t, `let n = $("wc", "-l", "file.txt").run().readStdout()`)
-	assertContains(t, out, `'wc'`)
-	assertContains(t, out, `'-l'`)
+	assertContains(t, out, `wc`)
+	assertContains(t, out, `-l`)
 }
 
 func TestCodegen_CmdAssignedReceiverWorkdirPreserved(t *testing.T) {
@@ -1391,7 +1404,7 @@ func TestCodegen_CmdAssignedReceiverWorkdirPreserved(t *testing.T) {
 let root = cmd.workdir("/").run().readStdout()`)
 	assertContains(t, out, `cmd=$(_bst_workdir='/'`)
 	assertContains(t, out, `root="$cmd"`)
-	assertNotContains(t, out, `cmd=$('pwd')`)
+	assertNotContains(t, out, `cmd=$(pwd)`)
 }
 
 func TestCodegen_CmdIdentifierRootedLazyChainBinding(t *testing.T) {
@@ -1399,7 +1412,7 @@ func TestCodegen_CmdIdentifierRootedLazyChainBinding(t *testing.T) {
 let rooted = base.workdir("/")
 rooted.run()`)
 	assertContains(t, out, `_bst_workdir='/'`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'pwd'`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && pwd`)
 }
 
 func TestCodegen_CmdIdentifierRootedLazyChainCapture(t *testing.T) {
@@ -1414,7 +1427,7 @@ func TestCodegen_CmdAssignedChainRunPreserved(t *testing.T) {
 	out := compile(t, `let cmd = $("pwd").workdir("/")
 cmd.run()`)
 	assertContains(t, out, `_bst_workdir='/'`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'pwd'`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && pwd`)
 }
 
 func TestCodegen_CmdReadStderrWithStdoutRedirectPreservesRedirect(t *testing.T) {
@@ -1435,20 +1448,20 @@ func TestCodegen_CmdWorkdirFunctionPathIsQuotedCommandSubstitution(t *testing.T)
 	out := compile(t, `function getDir(): string { return "/" }
 $("pwd").workdir(getDir()).run()`)
 	assertContains(t, out, `_bst_workdir="$(getDir)"`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'pwd'`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && pwd`)
 }
 
 func TestCodegen_CmdNestedWorkdirLastWinsAndNoMarkerLeaks(t *testing.T) {
 	out := compile(t, `$("pwd").workdir("/tmp").workdir("/").run()`)
 	assertContains(t, out, `_bst_workdir='/'`)
-	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && 'pwd'`)
+	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && pwd`)
 	assertNotContains(t, out, `__BESHT_WORKDIR__`)
 	assertNotContains(t, out, `_bst_workdir='/tmp'`)
 }
 
 func TestCodegen_CmdWorkdirNewlinePathDoesNotLeakMarker(t *testing.T) {
 	out := compile(t, `$("pwd").workdir("/tmp/line\nbreak").run()`)
-	assertContains(t, out, `'pwd'`)
+	assertContains(t, out, `pwd`)
 	assertNotContains(t, out, `__BESHT_WORKDIR__`)
 }
 
@@ -1684,7 +1697,7 @@ func TestCodegen_CmdInCondition(t *testing.T) {
 	out := compile(t, `if ($("test", "-f", "/etc/hosts")) {
     $("echo", "exists").run()
 }`)
-	assertContains(t, out, `'test'`)
+	assertContains(t, out, `test`)
 	assertContains(t, out, `-f`)
 }
 

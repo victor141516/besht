@@ -97,6 +97,7 @@ Files use the `.bsh` extension.
 - Tuple destructuring declarations such as `const [x, y] = pair` are supported for list/tuple values.
 - `null` and `undefined` are accepted for TypeScript-compatible syntax; `??` falls back only for nullish values and preserves `""`, `0`, and `false`. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains.
 - `$()` calls support list spreading with `...args`; spreading an entire command vector must use sole-argument form `$(...cmd)`.
+- Literal `$()` command words are emitted bare when they are conservative shell-safe words, and quoted when they need protection.
 - `.d.bsh` files are declaration-only and never emit shell output. A `stdlib.d.bsh` file beside the entry `.bsh` file is auto-loaded for compile, split compile, and `--check`; run `besht init` to generate one in the current directory. Imported module directories are not scanned for their own `stdlib.d.bsh` files.
 - Extensionless imports resolve to `.bsh` by default. Pass `--opt-resolve-ts-imports` to fall back to `.ts` only when the `.bsh` file is absent. Explicit named `.sh` imports require `assert { type: "shell" }` and source existing shell functions. Shell imports must resolve inside the compiler root unless `--opt-allow-external-shell-imports` is passed.
 - `type` aliases and `interface` declarations are parsed and silently ignored (no runtime output).
