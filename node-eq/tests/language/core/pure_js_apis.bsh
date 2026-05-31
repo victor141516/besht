@@ -60,6 +60,45 @@ console.log(`Array.isArray Array.of: ${Array.isArray(ordered)}`)
 console.log(`Array.isArray Array.from: ${Array.isArray(Array.from({ length: 2 }))}`)
 console.log(`Array.isArray string: ${Array.isArray("not a list")}`)
 console.log(`Array.isArray object: ${Array.isArray({ value: "x" })}`)
+let forEachNames = ["alice", "bob", "anna"]
+let forEachSeen = ""
+forEachNames.forEach((name, index) => {
+    console.log(`forEach ${index}: ${name}`)
+    forEachSeen = forEachSeen + name.charAt(0)
+})
+let forEachEmpty: string[] = []
+let forEachCount = 0
+forEachEmpty.forEach(name => {
+    forEachCount = forEachCount + 1
+})
+console.log(`forEach seen: ${forEachSeen}`)
+console.log(`forEach empty count: ${forEachCount}`)
+let forEachVisited = new Set<string>()
+forEachNames.forEach(name => {
+    forEachVisited.add(name)
+})
+console.log(`forEach Set.add bob: ${forEachVisited.has("bob")}`)
+
+let objectApiUser = { id: 1, name: "Victor" }
+objectApiUser.active = true
+let objectApiKey = "role"
+objectApiUser[objectApiKey] = "admin"
+console.log(`Object.keys object: ${Object.keys(objectApiUser).join(",")}`)
+console.log(`Object.keys literal: ${Object.keys({ value: "x", enabled: true }).join(",")}`)
+console.log(`Object.values object: ${Object.values({ first: "Victor", second: "Besht" }).join(",")}`)
+console.log(`Object.values boolean: ${Object.values({ active: true, name: "Besht" }).join(",")}`)
+let objectApiEntries = Object.entries({ first: "Victor", second: "Besht" })
+console.log(`Object.entries first: ${objectApiEntries[0][0]}=${objectApiEntries[0][1]}`)
+console.log(`Object.entries second: ${objectApiEntries[1][0]}=${objectApiEntries[1][1]}`)
+let objectApiBooleanEntries = Object.entries({ active: true })
+console.log(`Object.entries boolean: ${objectApiBooleanEntries[0][0]}=${objectApiBooleanEntries[0][1]}`)
+Object.values({ first: "A", second: "B" }).forEach((value, index) => console.log(`Object.values forEach ${index}: ${value}`))
+Object.entries({ first: "A", second: "B" }).forEach((entry, index) => console.log(`Object.entries forEach ${index}: ${entry[0]}=${entry[1]}`))
+console.log(`Object.hasOwn name: ${Object.hasOwn(objectApiUser, "name")}`)
+console.log(`Object.hasOwn na exact: ${Object.hasOwn(objectApiUser, "na")}`)
+console.log(`Object.hasOwn dynamic: ${Object.hasOwn(objectApiUser, objectApiKey)}`)
+console.log(`Object.hasOwn invalid key: ${Object.hasOwn(objectApiUser, "bad-key")}`)
+console.log(`Object.hasOwn literal enabled: ${Object.hasOwn({ value: "x", enabled: true }, "enabled")}`)
 
 console.log(`isSafeInteger(42): ${Number.isSafeInteger(42)}`)
 console.log(`isSafeInteger(3.0): ${Number.isSafeInteger(3.0)}`)
@@ -76,3 +115,16 @@ console.log(`EPSILON: ${Number.EPSILON}`)
 console.log(`MAX_SAFE_INTEGER safe: ${Number.isSafeInteger(Number.MAX_SAFE_INTEGER)}`)
 console.log(`MIN_SAFE_INTEGER safe: ${Number.isSafeInteger(Number.MIN_SAFE_INTEGER)}`)
 console.log(`MAX_SAFE_INTEGER plus one safe: ${Number.isSafeInteger(Number.MAX_SAFE_INTEGER + 1)}`)
+
+console.log(`Boolean false: ${Boolean(false)}`)
+console.log(`Boolean true: ${Boolean(true)}`)
+console.log(`Boolean zero: ${Boolean(0)}`)
+console.log(`Boolean one: ${Boolean(1)}`)
+console.log(`Boolean empty string: ${Boolean("")}`)
+console.log(`Boolean text: ${Boolean("x")}`)
+console.log(`Boolean text zero: ${Boolean("0")}`)
+console.log(`Boolean null: ${Boolean(null)}`)
+console.log(`Boolean undefined: ${Boolean(undefined)}`)
+console.log(`Boolean empty array: ${Boolean([])}`)
+console.log(`Boolean empty object: ${Boolean({})}`)
+console.log(`Boolean toString: ${Boolean("x").toString()}`)
