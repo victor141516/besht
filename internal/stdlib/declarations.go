@@ -41,6 +41,7 @@ declare function fetch(url: string): FetchResponse
 declare function to_str(value: string): string
 declare function to_int(value: string): number
 declare function String(value: string): string
+declare function Boolean(value): boolean
 declare function exit()
 declare function exit(code: number)
 declare function exit(code: status)
@@ -90,5 +91,12 @@ declare namespace Array {
     function from(source: { length: number }): number[]
     function of(first: string, second: string): string[]
     function isArray(value): boolean
+}
+
+declare namespace Object {
+    function keys(value: object): string[]
+    function values(value: object): string[]
+    function entries(value: object): string[][]
+    function hasOwn(value: object, key: string): boolean
 }
 `

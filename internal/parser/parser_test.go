@@ -88,6 +88,19 @@ func TestParser_LetDeclList(t *testing.T) {
 	}
 }
 
+func TestParser_ObjectTypeAnnotation(t *testing.T) {
+	prog := mustParse(t, `function keys(obj: object): string[] {
+    return Object.keys(obj)
+}`)
+	fn := prog.Statements[0].(*ast.FnDecl)
+	if fn.Params[0].Type.Kind != ast.TypeObject {
+		t.Fatalf("param type: got %v, want object", fn.Params[0].Type)
+	}
+	if fn.ReturnType.Kind != ast.TypeList || fn.ReturnType.Elem.Kind != ast.TypeString {
+		t.Fatalf("return type: got %v, want string[]", fn.ReturnType)
+	}
+}
+
 func TestParser_AsTypeAssertion(t *testing.T) {
 	prog := mustParse(t, `let xs = [] as string[]`)
 	decl := prog.Statements[0].(*ast.LetDecl)
@@ -1160,6 +1173,51 @@ func TestParser_ArrayIsArrayParsesAsBuiltinCall(t *testing.T) {
 	}
 	if len(builtin.Args) != 1 {
 		t.Fatalf("args: got %d, want 1", len(builtin.Args))
+	}
+}
+
+func TestParser_BooleanParsesAsBuiltinCall(t *testing.T) {
+	prog := mustParse(t, `let ok = Boolean("x")`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	builtin, ok := decl.Value.(*ast.BuiltinCallExpr)
+	if !ok {
+		t.Fatalf("value: expected *ast.BuiltinCallExpr, got %T", decl.Value)
+	}
+	if builtin.Name != "Boolean" {
+		t.Fatalf("builtin name: got %q, want Boolean", builtin.Name)
+	}
+	if len(builtin.Args) != 1 {
+		t.Fatalf("args: got %d, want 1", len(builtin.Args))
+	}
+}
+
+func TestParser_ObjectStaticMethodsParseAsBuiltinCalls(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		wantName string
+		wantArgs int
+	}{
+		{"keys", `let keys = Object.keys(user)`, "Object.keys", 1},
+		{"values", `let values = Object.values(user)`, "Object.values", 1},
+		{"entries", `let entries = Object.entries(user)`, "Object.entries", 1},
+		{"hasOwn", `let ok = Object.hasOwn(user, "name")`, "Object.hasOwn", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prog := mustParse(t, tt.src)
+			decl := prog.Statements[0].(*ast.LetDecl)
+			builtin, ok := decl.Value.(*ast.BuiltinCallExpr)
+			if !ok {
+				t.Fatalf("value: expected *ast.BuiltinCallExpr, got %T", decl.Value)
+			}
+			if builtin.Name != tt.wantName {
+				t.Fatalf("builtin name: got %q, want %s", builtin.Name, tt.wantName)
+			}
+			if len(builtin.Args) != tt.wantArgs {
+				t.Fatalf("args: got %d, want %d", len(builtin.Args), tt.wantArgs)
+			}
+		})
 	}
 }
 

@@ -567,6 +567,8 @@ func (p *Parser) parseType() (*ast.Type, error) {
 			}
 			p.advance()
 			t = &ast.Type{Kind: ast.TypeObject, Elem: elem, Pos: pos}
+		} else if tok.Literal == "object" {
+			t = &ast.Type{Kind: ast.TypeObject, Pos: pos}
 		} else if tok.Literal == "undefined" {
 			t = &ast.Type{Kind: ast.TypeString, Pos: pos}
 		} else {
@@ -1925,6 +1927,17 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 				return nil, err
 			}
 			return &ast.BuiltinCallExpr{Pos: pos, Name: "Array." + methodTok.Literal, Args: args}, nil
+		}
+
+		if name == "Object" && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "keys" || p.peekN(1).Literal == "values" || p.peekN(1).Literal == "entries" || p.peekN(1).Literal == "hasOwn") {
+			methodTok := p.peekN(1)
+			p.advance()
+			p.advance()
+			args, err := p.parseArgList()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.BuiltinCallExpr{Pos: pos, Name: "Object." + methodTok.Literal, Args: args}, nil
 		}
 
 		if name == "console" && p.peekType() == lexer.TokDot {
