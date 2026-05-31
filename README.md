@@ -193,6 +193,8 @@ let dryRun = Besht.args.flag("dry-run", "d")
 - `Besht.args.flag(longName, shortName?)` returns `true` when `--name` or `-n` is present.
 - `--` stops option and flag parsing; later values are treated as positional arguments.
 
+Top-level scripts that only read `Besht.args.positional()` compile to a compact inline scan of `"$@"`. Scripts that use `argv()`, `option()`, `flag()`, or read args inside functions keep the shared parser runtime so option parsing and script-argument capture remain consistent.
+
 ### Fetch
 
 The first `fetch()` slice is synchronous, curl-backed, and text-only. It performs a GET with `curl -sS -- <url>` and returns stdout through `.text()`.
