@@ -388,6 +388,8 @@ let lines = Number.parseInt(raw)
 let lines10 = Number.parseInt(raw, 10)
 ```
 
+Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`.
+
 ## Command Execution
 
 All external commands use `$()` expressions. Arguments are separate strings. The compiler emits conservative shell-safe literal command words bare when possible and quotes anything that needs protection.

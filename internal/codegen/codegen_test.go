@@ -815,8 +815,19 @@ let n: number = Number.parseInt(s)`)
 func TestCodegen_NumberParseIntOneAndTwoArgs(t *testing.T) {
 	out := compile(t, `let a: number = Number.parseInt("42")
 let b: number = Number.parseInt("42", 10)`)
-	assertContains(t, out, `a=$(( 42 + 0 ))`)
-	assertContains(t, out, `b=$(( 42 + 0 ))`)
+	assertContains(t, out, `a=42`)
+	assertContains(t, out, `b=42`)
+	assertNotContains(t, out, `$(( 42 + 0 ))`)
+}
+
+func TestCodegen_NumberParseIntStaticPrefix(t *testing.T) {
+	out := compile(t, `let a: number = Number.parseInt("2a", 10)
+let b: number = Number.parseInt("ff", 16)
+let c: number = Number.parseInt("-10px", 10)`)
+	assertContains(t, out, `a=2`)
+	assertContains(t, out, `b=255`)
+	assertContains(t, out, `c=-10`)
+	assertNotContains(t, out, `$(( 2a + 0 ))`)
 }
 
 func TestCodegen_ListConcatMethod(t *testing.T) {
