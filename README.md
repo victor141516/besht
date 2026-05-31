@@ -93,7 +93,7 @@ Files use the `.bsh` extension.
 - String equality preserves spaces and newlines, including multiline template literals.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
-- Object literals compile to per-property shell variables.
+- Object literals compile to per-property shell variables; `Object.keys(obj)` returns known object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership.
 - Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters.
 - TypeScript-only class modifiers such as `private`, `public`, `protected`, and `readonly` are accepted and ignored.
 - `Record<K, V>` annotations are accepted for object-map style code; they are annotations only and add no runtime type checks.
@@ -110,8 +110,9 @@ Files use the `.bsh` extension.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
 - Semicolons are optional (only required inside `for` headers).
 - `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
+- `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use compiler-managed object key metadata and do not emit runtime helpers.
 - `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
-- Arrow callbacks support expression and block bodies for list `.map()` and `.reduce()`; `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` callbacks may also receive a zero-based index parameter.
+- Arrow callbacks support expression and block bodies for list `.map()`, `.reduce()`, and statement-position `.forEach()`; `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, and `.forEach()` callbacks may also receive a zero-based index parameter.
 - Generated shell elides string runtime helpers unless one-argument string `.includes()`, `.startsWith()`, or `.endsWith()` actually needs them.
 
 ### Variables
@@ -143,7 +144,7 @@ count--;            // postfix decrement
 let next = ++count;  // prefix increment in expressions
 ```
 
-Available types: `string`, `number`, `boolean`, `list<T>`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), tuple types (`[string, number]`). Type annotations are ignored by the compiler unless `--strict` is enabled. `null` and `undefined` are runtime nullish sentinels for `??` and comparisons.
+Available types: `string`, `number`, `boolean`, `object`, `list<T>`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), tuple types (`[string, number]`). Type annotations are ignored by the compiler unless `--strict` is enabled. `null` and `undefined` are runtime nullish sentinels for `??` and comparisons.
 
 ### Strings
 
@@ -506,9 +507,19 @@ user.name = "Compiler Tester";     // property assignment
 let key: string = "name";
 let val: string = user[key];       // read property by key
 user[key] = "Updated";            // assign property by key
+let keys: string[] = Object.keys(user); // ["id", "name", "active"]
+let values: string[] = Object.values(user); // ["1", "Compiler Tester", "true"]
+let entries: string[][] = Object.entries(user); // [["id", "1"], ["name", "Compiler Tester"], ...]
+let hasName: boolean = Object.hasOwn(user, "name") // true
+let hasBadKey: boolean = Object.hasOwn(user, "bad-key") // false
+
+function showKeys(obj: object): string[] {
+  return Object.keys(obj)
+}
 ```
 
-Computed object keys must contain only letters, numbers, and `_`.
+Static and computed object keys must contain only letters, numbers, and `_`.
+`Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return known keys, scalar values, or `[key, value]` rows in insertion order and include aliases, object parameters, later `obj.prop = value`, and `obj[key] = value` additions. Statically known boolean values are rendered as `true`/`false` in values and entries output. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current `string[]` and packed `string[][]` representations cannot preserve deeper nested values. `Object.hasOwn(obj, key)` checks exact key membership against the same metadata and returns `false` for dynamic keys that are not valid Besht object keys. These helpers do not emit a runtime helper library. `process.env` is not enumerable; access individual variables with `process.env.NAME`.
 
 ### Classes
 
@@ -591,6 +602,7 @@ l.lastIndexOf("beta"); // int (last zero-based match, -1 if not found)
 l.reverse(); // ["gamma", "beta", "alpha"]
 l.map(x => x + "!"); // new list with callback expression applied to each item
 l.map((x, i) => i.toString() + ":" + x); // second callback arg is zero-based index
+l.forEach((x, i) => console.log(i.toString() + ":" + x)); // statement-only side effects
 l.filter(x => x.startsWith("a")); // new list with truthy callback results
 let anyA = l.some(x => x.startsWith("a")); // true if any callback result is truthy; false for an empty list
 let allNamed = l.every(x => x.length > 0); // true if all callback results are truthy; true for an empty list
@@ -621,7 +633,7 @@ if (visited.has("0,0")) {
 
 ### Arrow callbacks
 
-Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, and `.reduce()`. Scalar-list predicate callbacks for `.some()`, `.every()`, `.find()`, and `.findIndex()` are direct arrow expressions with one item parameter or `(item, index)`.
+Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-list predicate callbacks for `.some()`, `.every()`, `.find()`, and `.findIndex()` are direct arrow expressions with one item parameter or `(item, index)`.
 
 ```ts
 let names = ["alice", "bob", "anna"]
@@ -631,6 +643,12 @@ let hasAnna = names.some(name => name == "anna")
 let allShort = names.every((name, i) => name.length < 10 && i >= 0)
 let firstB = names.find(name => name.startsWith("b")) ?? "none"
 console.log(aNames.join(","))
+
+let initials = ""
+names.forEach((name, i) => {
+    console.log(i.toString() + ":" + name)
+    initials = initials + name.charAt(0)
+})
 
 let typed = names.filter((name: string) => name.includes("a"))
 let labeled = names.map((name, i) => {
@@ -650,7 +668,7 @@ let counts = words.reduce((acc, word) => {
 console.log(counts)
 ```
 
-`.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty list. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty list. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. Arrows are not general function values and cannot be stored in variables. `forEach` and general arrow function values are still future work.
+`.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty list. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty list. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` is statement-only, takes a direct arrow callback with `(item)` or `(item, index)`, runs in the current shell so outer assignments and `Set.add()` side effects persist, and rejects callback `return`, `break`, `continue`, and pure value expressions. Arrows are not general function values and cannot be stored in variables; general arrow function values are still future work.
 
 ### List indexing
 
@@ -765,6 +783,15 @@ Array helpers:
 
 `Array.isArray()` is evaluated from Besht's inferred types. It returns true for expressions the compiler knows are lists and false otherwise; it does not add runtime shape metadata or dynamic JavaScript-style inspection.
 
+Object helpers:
+
+| Function           | Description                        |
+| ------------------ | ---------------------------------- |
+| `Object.keys(obj)` | Return object keys as a `string[]` |
+| `Object.values(obj)` | Return object values as a `string[]` |
+| `Object.entries(obj)` | Return object `[key, value]` rows as a `string[][]` |
+| `Object.hasOwn(obj, key)` | Return whether a compiler-managed object has an exact key |
+
 ### Type conversion
 
 Use JS-style conversion APIs for new code:
@@ -775,6 +802,7 @@ Use JS-style conversion APIs for new code:
 | `list.toString()`        | Convert a scalar list to a comma-joined string, like `list.join(",")` |
 | `Number.parseInt(value)` | Parse `string` to `number`                       |
 | `Number.parseInt(value, 10)` | Parse with an optional radix argument        |
+| `Boolean(value)`          | Convert a value to a primitive boolean using JavaScript-like truthiness |
 
 ```ts
 let n: number = 42
@@ -782,9 +810,11 @@ let msg: string = "Count is " + n.toString()
 
 let raw: string = $("wc", "-l", "file").run().readStdout()
 let lines: number = Number.parseInt(raw)
-let flag: boolean = true
+let flag: boolean = Boolean(raw)
 let boolText: string = flag.toString() // "true"
 ```
+
+`Boolean(value)` returns a primitive Besht boolean, not a Boolean object wrapper. It treats `false`, `0`, `0.0`, `""`, `null`, and `undefined` as false; non-empty strings such as `"0"` and `"false"`, non-zero numbers, arrays, and objects are true.
 
 Older helpers remain supported for now: `to_str(value)`, `String(value)`, and `to_int(str)`.
 
