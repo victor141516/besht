@@ -627,7 +627,7 @@ let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
 ```
 
-Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
+Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls compile to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path. Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice.
 
 ## Imports and Modules
 

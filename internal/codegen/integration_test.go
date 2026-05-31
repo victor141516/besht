@@ -1405,6 +1405,18 @@ console.log(items.find((x, i) => i == 2))
 	}
 }
 
+func TestIntegration_StaticListLiteralSearchRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(["a", "b"].includes("b"))
+console.log(["a", "b"].includes("z"))
+console.log(["a", "b", "a"].indexOf("a"))
+console.log(["a", "b", "a"].lastIndexOf("a"))
+console.log(["a", "b", "a"].indexOf("z"))`)
+	want := "true\nfalse\n0\n2\n-1\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_CmdBasicCapture(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `let user = $("whoami").run().readStdout()
