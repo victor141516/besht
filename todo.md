@@ -8,6 +8,15 @@ Items here are not scheduled. They were identified during development and saved 
 
 Reshape Besht's built-in helper APIs into a more TypeScript/JavaScript-like standard-library surface while keeping generated POSIX sh small and optimal.
 
+Current completed slices:
+
+- `Besht.conditions.*` exists as the standard namespace for condition helpers while the older global names remain compatibility aliases.
+- TypeScript/Node-style replacements exist for the highest-use global helpers: `value.toString()`, `Number.parseInt(value)`, `process.env.NAME ?? fallback`, and `process.exit(code)`.
+- Native list/array-style APIs are the preferred user-facing path. Current coverage includes indexing, `.length`, `.slice()`, `.push()`, `.concat()`, `.includes()`, `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.reduce()`, and statement-position `.forEach()`.
+- The latest JS API slice added primitive `Boolean(value)` coercion plus `Object.keys(obj)`, scalar-only `Object.values(obj)`, scalar-only `Object.entries(obj)`, and `Object.hasOwn(obj, key)`.
+- Object helpers are intentionally backed by compiler-managed object key metadata, not broad runtime shape metadata. Dynamic object metadata keys are validated before generated shell uses `eval`; invalid dynamic keys fail closed instead of becoming shell injection vectors.
+- `Object.values()` and `Object.entries()` deliberately reject statically known list/object/set/command/fetch values because the current `string[]` and packed `string[][]` representations cannot preserve nested values safely.
+
 Requirements to preserve for later design:
 
 - Group Besht-only helpers under `Besht.<group>.*` with camelCase names. For example, condition helpers such as `file_exists(p)` should become something like `Besht.conditions.fileExists(p)`.
@@ -19,11 +28,14 @@ Requirements to preserve for later design:
 
 Remaining future work:
 
-- Broader JS stdlib migration.
-- Other Besht namespace groups beyond `Besht.conditions`.
-- Eventual removal, warning, or deprecation strategy for old `env()` / `exit()` / condition-helper global names.
-- Eventual removal, warning, or deprecation strategy for old global list helpers.
-- The larger move away from `list<T>` terminology toward `Array<T>` / `T[]` as the preferred user-facing type.
+- Broader JS stdlib migration for APIs that map cleanly to POSIX sh without broad runtime metadata.
+- Other Besht namespace groups beyond `Besht.conditions`; decide where non-JS-standard helpers such as script-argument helpers should live.
+- Eventual removal, warning, or deprecation strategy for old `env()` / `exit()` / condition-helper global names, after compatibility expectations are clear.
+- Eventual removal, warning, or deprecation strategy for old global list helpers (`len`, `head`, `tail`, `append`, `contains`, `concat`).
+- The larger move away from `list<T>` terminology toward `Array<T>` / `T[]` as the preferred user-facing type in docs, examples, declarations, and diagnostics.
+- Expand object APIs only after preserving the current no-runtime-metadata boundary. Near candidates are `Object.assign()` and `Object.fromEntries()`; nested `Object.values()` / `Object.entries()` support requires a broader object/list representation design.
+- Decide whether a limited `JSON.stringify()` for known compiler-managed object/list shapes is worth adding before full JSON support. Defer `JSON.parse()` unless Besht gains a parser or explicitly depends on a tool such as `jq`.
+- General callback values and closures remain future work. Current callback lowering is method-specific and compiler-known, including statement-position `forEach()`.
 
 Open design questions:
 
@@ -34,10 +46,11 @@ Open design questions:
 
 Implementation notes:
 
-- Parser/checker/codegen need to recognize `Besht.*`, `process.*`, and future standard namespaces such as `Object`, `Array`, `Boolean`, and `JSON` so module qualification does not rewrite them.
-- Static namespaces should use handling similar to the existing `Number.*` special case.
+- Parser/checker/codegen now recognize `Besht.*`, `process.*`, `Array.*`, `Object.*`, `Boolean`, and other standard namespaces enough for the implemented slices. Future namespaces such as `JSON` must continue to be exempt from module qualification.
+- Static namespaces should keep using handling similar to the existing `Number.*` and `Object.*` paths instead of ad-hoc emitted runtime libraries.
 - Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
-- Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, and node-eq fixtures in sync.
+- Any API that introduces dynamic object keys or slots must validate names before generated shell uses `eval`; tests should cover polluted `_objkeys_*` metadata and unsafe computed keys.
+- Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, stdlib declarations, checker/codegen tests, and node-eq fixtures in sync.
 
 ---
 
