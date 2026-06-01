@@ -8728,19 +8728,13 @@ func escapeForDoubleQuote(s string) string {
 		case ch == '`':
 			b.WriteString("\\`")
 			i++
-		case ch == '$' && i+1 < len(s) && s[i+1] == '(':
-			b.WriteString("\\$(")
-			i += 2
-		case ch == '$' && i+1 < len(s) && s[i+1] == '{':
-			// ${...} — besht interpolation, leave intact
-			b.WriteByte(ch)
-			i++
 		case ch == '\\' && i+1 < len(s) && s[i+1] == '$':
-			// \$ — already an escaped literal dollar from the lexer, leave as-is
+			// \$ is already an escaped literal dollar from the lexer.
 			b.WriteString("\\$")
 			i += 2
-		case ch == '$' && i+1 < len(s) && (isAlphaOrUnderscore(s[i+1]) || (s[i+1] >= '0' && s[i+1] <= '9')):
-			// $VAR or $1 not inside ${} — escape so it doesn't expand in sh
+		case ch == '$':
+			// Literal template/string text is not shell syntax. Escape every
+			// dollar form, including special parameters such as $*, $?, and $$.
 			b.WriteString("\\$")
 			i++
 		default:
@@ -8749,10 +8743,6 @@ func escapeForDoubleQuote(s string) string {
 		}
 	}
 	return b.String()
-}
-
-func isAlphaOrUnderscore(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
 }
 
 func genStringLiteral(s string) string {

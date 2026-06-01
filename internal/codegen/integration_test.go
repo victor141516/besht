@@ -2105,6 +2105,16 @@ func TestIntegration_MultilineStrictEqualityRuntime(t *testing.T) {
 	}
 }
 
+func TestIntegration_TemplateLiteralShellSpecialDollarsRuntime(t *testing.T) {
+	out := runCompiledShell(t, "function marker(): string { return `$* $? $$` }\n"+
+		"console.log(marker())\n"+
+		"console.log(marker() === `$* $? $$`)\n")
+	want := "$* $? $$\ntrue\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticComparisonsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log("a" === "a")
 console.log("a" !== "b")

@@ -16,13 +16,14 @@ function drawTree(height: number, ornament: string, frequency: number): string {
     .join('')
 }
 
+console.log(drawTree(5, '$', 2))
 
-console.log(drawTree(5, 'o', 2) === 
+console.log(drawTree(5, '$', 2) ===
 `    *
-   o*o
-  *o*o*
- o*o*o*o
-*o*o*o*o*
+   $*$
+  *$*$*
+ $*$*$*$
+*$*$*$*$*
     #`)
 
 

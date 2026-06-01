@@ -66,6 +66,8 @@ let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // esc
 let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 ```
 
+In template literal text, `$` stays literal unless it starts a Besht `${expr}` interpolation. Shell parameter forms such as `$*`, `$?`, and `$$` are emitted as literal text.
+
 Concatenation with `+`:
 
 ```ts

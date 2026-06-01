@@ -2700,6 +2700,12 @@ func TestCodegen_TemplateLitInterpolatesVar(t *testing.T) {
 	assertContains(t, out, `"Hello ${name}!"`)
 }
 
+func TestCodegen_TemplateLiteralEscapesShellSpecialDollars(t *testing.T) {
+	out := compile(t, "function marker(): string { return `$* $? $$` }\nconsole.log(marker() === `$* $? $$`)")
+	assertContains(t, out, `printf '%s' "\$* \$? \$\$"`)
+	assertContains(t, out, `_bst_right="\$* \$? \$\$"`)
+}
+
 func TestCodegen_PlainStringLiteralNotInterpolated(t *testing.T) {
 	out := compile(t, `let name: string = "world"
 let msg: string = "Hello ${name}!"`)
