@@ -104,33 +104,40 @@ make cover-html && open coverage.html
 # Compile a .bsh file
 go run ./cmd/besht/ init
 go run ./cmd/besht/ init --force
-go run ./cmd/besht/ <file.bsh>
-go run ./cmd/besht/ <file.bsh> -o out.sh
-go run ./cmd/besht/ --check <file.bsh>
+go run ./cmd/besht/ compile <file.bsh>
+go run ./cmd/besht/ compile <file.bsh> -o out.sh
+go run ./cmd/besht/ compile --check <file.bsh>
+
+# View source and compiled shell side by side in the terminal
+go run ./cmd/besht/ visualize <file.bsh>
 
 # Split mode — one .sh per .bsh, imports become source calls
-go run ./cmd/besht/ <file.bsh> --split -o <outdir/>
+go run ./cmd/besht/ compile <file.bsh> --split -o <outdir/>
 
 # Omit the conditional runtime POSIX self-check from compiled output
-go run ./cmd/besht/ <file.bsh> --opt-no-add-binaries-check
+go run ./cmd/besht/ compile <file.bsh> --opt-no-add-binaries-check
 
 # Opt in to extensionless .ts import fallback when .bsh is absent
-go run ./cmd/besht/ <file.bsh> --opt-resolve-ts-imports
+go run ./cmd/besht/ compile <file.bsh> --opt-resolve-ts-imports
 
 # Allow explicit .sh imports outside the compiler root
-go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
+go run ./cmd/besht/ compile <file.bsh> --opt-allow-external-shell-imports
 
 # Opt in to jq-backed JSON.stringify() codegen
-go run ./cmd/besht/ <file.bsh> --opt-use-jq
+go run ./cmd/besht/ compile <file.bsh> --opt-use-jq
 ```
 
 ### CLI Flags
+
+The preferred CLI shape is mode-first: `besht compile ...` or `besht visualize ...`. Legacy `besht <file.bsh> [flags]` and `besht --check <file.bsh>` are still accepted as compile aliases for compatibility, but do not add new docs or tooling that rely on the legacy spelling.
 
 | Flag                          | Description                                                           |
 | ----------------------------- | --------------------------------------------------------------------- |
 | `-o <path>`                   | Output file or directory (required with `--split`)                    |
 | `init`                        | Write `./stdlib.d.bsh` declarations in the current directory          |
 | `init --force`                | Overwrite a different existing `./stdlib.d.bsh`                       |
+| `compile`                     | Compile `.bsh` to POSIX sh, printing to stdout unless `-o` is used    |
+| `visualize`                   | Open a terminal side-by-side source/compiled-shell view, no output file |
 | `--split`                     | Compile each `.bsh` to its own `.sh`; imports become `. source` calls |
 | `--check`                     | Validate imports, command usage, and unsupported fetch APIs, no output |
 | `--opt-no-add-binaries-check` | Omit the conditional runtime POSIX utility self-check block           |
@@ -156,6 +163,8 @@ Pass via `codegen.Options{NoCheck: true, NoSourceMap: true, ResolveTsImports: tr
 
 Generated shell emits inline `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions. Class declarations skip the generic statement-boundary comment so synthetic property accessors and implicit default constructors do not receive source comments.
 
+`besht visualize` depends on those source comments internally. It must force `codegen.Options.NoSourceMap = false` for the internal compile even if the flag is passed, then remove all `# besht:file:line:col` lines from the displayed shell pane. The view is terminal-only: it pages the rendered text through an in-terminal pager when available, falls back to stdout when not attached to a terminal, and must never write a compiled output file.
+
 When no runtime helpers, args snapshot, or POSIX self-check are emitted, generated entry scripts keep exactly one blank separator between the header and the first body line. Do not reintroduce a double-empty preamble gap.
 
 ## Architecture
@@ -178,6 +187,9 @@ internal/
 │   └── checker.go       # Type checker + scope resolver; walks AST, annotates types
 │                        # FnSig, Scope, Checker structs; RegisterFn for cross-module sigs
 │                        # checkCommandMethod() routes .pipe()/.run()/.readStdoutLines() etc.
+├── viewer/
+│   └── viewer.go        # Terminal side-by-side source/shell renderer for `besht visualize`
+│                        # Compiles with source comments internally, strips them from display
 └── codegen/
     ├── codegen.go       # Generator: AST → POSIX sh string
     │                    # genCmdPipeline/genCmdChain build shell pipelines
@@ -207,6 +219,9 @@ internal/
   → Shell import collection              ← validates explicit .sh imports and source/copy plan
   → Codegen (codegen.CompileFile)        ← bundled mode: single .sh output
           or (codegen.CompileFileSplit)   ← split mode: one .sh per .bsh
+          or viewer.Build                 ← visualize mode: CompileFile with source
+                                             comments enabled internally, then side-by-side
+                                             terminal rendering with comments hidden
 ```
 
 Bundled output omits `# --- module: name ---` separator comments when only one Besht module emits code. Keep separators for multi-module bundled output so generated files remain navigable.
@@ -374,6 +389,7 @@ internal/parser/parser_test.go     # Every AST node type; error recovery
 internal/checker/checker_test.go   # Semantic validation, scope, builtins/surfaces
 internal/codegen/codegen_test.go   # Unit: AST → sh output patterns (uses Generate())
 internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh output
+internal/viewer/viewer_test.go     # Side-by-side visualization renderer behavior
 ```
 
 `node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Focused API fixtures live under their language subdirectories, including `node-eq/tests/language/json/` for `JSON.stringify()` parity coverage. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Fixtures that need non-default compiler flags may include a top-of-file `// besht-compile-flags: ...` directive; the compare runner applies those flags only to that fixture. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.

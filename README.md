@@ -18,29 +18,32 @@ brew install victor141516/tap/besht
 
 ```sh
 # Compile to stdout (single bundled file)
-besht script.bsh
+besht compile script.bsh
 
 # Generate editor declarations in ./stdlib.d.bsh
 besht init
 
 # Compile to a single bundled file
-besht script.bsh -o script.sh
+besht compile script.bsh -o script.sh
 
 # Compile each .bsh file to its own .sh file (recommended for multi-file projects)
-besht script.bsh --split -o build/
+besht compile script.bsh --split -o build/
 
 # Validate imports, command usage, and unsupported fetch APIs
-besht --check script.bsh
+besht compile --check script.bsh
+
+# View source and compiled shell side by side in the terminal
+besht visualize script.bsh
 
 # Opt in to jq-backed JSON.stringify() support
-besht script.bsh --opt-use-jq
+besht compile script.bsh --opt-use-jq
 # Run directly
-besht script.bsh | sh
+besht compile script.bsh | sh
 ```
 
 ## Output modes
 
-### Bundled (default)
+### Compile (`compile`)
 
 All imported Besht modules are inlined into a single `.sh` file. Explicit `.sh` imports are sourced from the generated script. Good for one-file scripts and piping to `sh`.
 
@@ -51,7 +54,7 @@ One-file bundled output omits module separator comments for a more natural small
 Each `.bsh` file compiles to its own `.sh` file in the output directory, preserving the source directory structure. Besht imports become POSIX source (`. file.sh`) calls at runtime. Explicit `.sh` imports are copied into the output directory and sourced with include guards.
 
 ```sh
-besht main.bsh --split -o build/
+besht compile main.bsh --split -o build/
 # Produces:
 #   build/main.sh         (entry: has #!/bin/sh, sets _BESHT_ROOT, sources libs)
 #   build/lib/log.sh      (library: has include guard, sources its own deps)
@@ -74,6 +77,10 @@ Library files include a guard against double-sourcing (safe for diamond dependen
 [ -n "$_BESHT_LOADED_lib__log" ] && return 0
 _BESHT_LOADED_lib__log=1
 ```
+
+### Visualization (`visualize`)
+
+`besht visualize <file.bsh>` opens an in-terminal side-by-side view. The left pane shows Besht source with line numbers; the right pane shows the compiled POSIX shell with line numbers. When one source line expands into multiple shell lines, the source pane leaves blank rows beside the generated block so the next source line aligns after that block. The view is for inspection only: it does not write an output file, and displayed shell omits `# besht:file:line:col` source comments.
 
 ---
 
@@ -972,7 +979,7 @@ deploy(env, version)
 Compile and run:
 
 ```sh
-besht deploy.bsh -o deploy.sh
+besht compile deploy.bsh -o deploy.sh
 chmod +x deploy.sh
 ./deploy.sh production v1.2.3
 ```
@@ -1008,20 +1015,23 @@ for (file in $("find", target, "-type", "f").run().readStdoutLines()) {
 ## CLI reference
 
 ```
-besht <file.bsh>                    Compile and print to stdout (single bundled file)
+besht compile <file.bsh>            Compile and print to stdout (single bundled file)
 besht init                          Write ./stdlib.d.bsh declarations
 besht init --force                  Overwrite ./stdlib.d.bsh declarations
-besht <file.bsh> -o <out.sh>        Compile to a single bundled file
-besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
-besht --check <file.bsh>            Validate imports, command usage, and unsupported fetch APIs (no output)
-besht <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-check when present
-besht <file.bsh> --opt-no-source-map            Omit source comments from compiled output
-besht <file.bsh> --opt-resolve-ts-imports       Resolve extensionless imports to .ts only when .bsh is absent
-besht <file.bsh> --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
-besht <file.bsh> --opt-use-jq                  Enable jq-backed JSON.stringify() codegen
+besht compile <file.bsh> -o <out.sh>  Compile to a single bundled file
+besht compile <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
+besht compile --check <file.bsh>   Validate imports, command usage, and unsupported fetch APIs (no output)
+besht visualize <file.bsh>         Open an in-terminal side-by-side source/shell view
+besht compile <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-check when present
+besht compile <file.bsh> --opt-no-source-map           Omit source comments from compiled output
+besht compile <file.bsh> --opt-resolve-ts-imports      Resolve extensionless imports to .ts only when .bsh is absent
+besht compile <file.bsh> --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
+besht compile <file.bsh> --opt-use-jq                  Enable jq-backed JSON.stringify() codegen
 besht --version                     Show version
 besht --help                        Show usage
 ```
+
+The legacy `besht <file.bsh> [flags]` and `besht --check <file.bsh>` forms remain accepted as aliases for `besht compile`.
 
 Besht emits the runtime `printf`/`grep`/`sed` self-check only when generated output uses the compiler's `grep`/`sed` paths or the args runtime. Simple scripts that only need direct `printf` output skip it.
 

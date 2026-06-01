@@ -157,3 +157,16 @@ func TestUsageDocumentsInit(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageDocumentsCompileAndVisualizeModes(t *testing.T) {
+	for _, want := range []string{
+		"besht compile <file.bsh>",
+		"besht compile --check <file.bsh>",
+		"besht visualize <file.bsh>",
+		"Alias for besht compile",
+	} {
+		if !strings.Contains(usage, want) {
+			t.Fatalf("usage missing %q", want)
+		}
+	}
+}

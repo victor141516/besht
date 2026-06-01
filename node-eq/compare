@@ -51,7 +51,7 @@ function compileFlagsFor(bshFile: string): string[] {
 function runViaShell(bshFile: string, scriptArgs: string[]): { stdout: string; code: number } {
   const tmpDir = mkdtempSync(`${tmpdir()}/_besht_cmp_`)
   const tmp = `${tmpDir}/${basename(bshFile, ".bsh")}.sh`
-  const compile = run(compilerPath, [bshFile, ...compileFlagsFor(bshFile)])
+  const compile = run(compilerPath, ["compile", bshFile, ...compileFlagsFor(bshFile)])
   if (compile.code !== 0) {
     rmSync(tmpDir, { recursive: true, force: true })
     return { stdout: `[COMPILE ERROR]\n${compile.stderr}`, code: compile.code }

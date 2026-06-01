@@ -17,21 +17,24 @@ Write and edit besht scripts. Besht is a TypeScript-flavored language that compi
 ## Compile
 
 ```sh
-besht script.bsh                    # print compiled sh to stdout
+besht compile script.bsh            # print compiled sh to stdout
 besht init                          # write ./stdlib.d.bsh declarations
 besht init --force                  # overwrite ./stdlib.d.bsh declarations
-besht script.bsh -o out.sh          # write to file
-besht --check script.bsh            # validate imports, commands, and unsupported fetch APIs
-besht script.bsh | sh               # compile and run
-besht script.bsh --split -o build/  # compile each file to its own .sh
-besht script.bsh --opt-no-add-binaries-check  # omit runtime self-check when present
-besht script.bsh --opt-no-source-map            # omit source comments from compiled output
-besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to fall back to .ts
-besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
-besht script.bsh --opt-use-jq                  # enable jq-backed JSON.stringify() codegen
+besht compile script.bsh -o out.sh  # write to file
+besht compile --check script.bsh    # validate imports, commands, and unsupported fetch APIs
+besht visualize script.bsh          # inspect source and compiled shell side by side in the terminal
+besht compile script.bsh | sh       # compile and run
+besht compile script.bsh --split -o build/  # compile each file to its own .sh
+besht compile script.bsh --opt-no-add-binaries-check  # omit runtime self-check when present
+besht compile script.bsh --opt-no-source-map           # omit source comments from compiled output
+besht compile script.bsh --opt-resolve-ts-imports      # allow extensionless imports to fall back to .ts
+besht compile script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
+besht compile script.bsh --opt-use-jq                  # enable jq-backed JSON.stringify() codegen
 ```
 
 Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits runtime self-checks only when generated output needs the corresponding utilities; simple direct-output scripts skip them. When options leave the runtime preamble empty, generated entry scripts keep a single blank separator between the header and the first shell statement.
+
+`besht visualize <file.bsh>` does not write a compiled file. It opens a terminal viewer with Besht source on the left and compiled shell on the right; the displayed shell omits source-map comments.
 
 ## Variable Declarations
 
@@ -115,7 +118,7 @@ let first: string = response.text()
 let second: string = response.text() // reuses the stored body
 ```
 
-This slice supports only `fetch(url).text()` and assigned response `.text()`. It does not support `await`, options objects, POST/method overrides, headers, request bodies, `.json()`, `.status`, `.ok`, `.headers`, streaming, abort, or clone yet. `besht --check` rejects unsupported response properties and methods.
+This slice supports only `fetch(url).text()` and assigned response `.text()`. It does not support `await`, options objects, POST/method overrides, headers, request bodies, `.json()`, `.status`, `.ok`, `.headers`, streaming, abort, or clone yet. `besht compile --check` rejects unsupported response properties and methods.
 
 ## Print
 
@@ -707,7 +710,7 @@ $(...defaultCmd).run();
 // Mixed command-name spread is rejected: use $(...cmd) as the whole command vector.
 ```
 
-Named imports can reference exported functions, classes, and exported top-level values. Default values use `export default <expr>` and `import name from "./module"`. By default extensionless imports resolve only to `.bsh`; pass `--opt-resolve-ts-imports` to use `.ts` when `.bsh` is absent. With `--split -o build/`, each `.bsh` or opt-in `.ts` module is compiled separately.
+Named imports can reference exported functions, classes, and exported top-level values. Default values use `export default <expr>` and `import name from "./module"`. By default extensionless imports resolve only to `.bsh`; pass `--opt-resolve-ts-imports` to use `.ts` when `.bsh` is absent. With `besht compile --split -o build/`, each `.bsh` or opt-in `.ts` module is compiled separately.
 
 Existing POSIX shell files can be imported only with named imports and an assertion:
 
