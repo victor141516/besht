@@ -237,6 +237,33 @@ if (a == b) {
 	assertContains(t, out, `[ "$_bst_left" = "$_bst_right" ]`)
 }
 
+func TestCodegen_StaticComparisons(t *testing.T) {
+	out := compile(t, `let same = "a" === "a"
+let diff = "a" !== "b"
+let less = 2 < 3
+let atLeast = 3 >= 3
+if ("a" === "a") {
+    $("echo", "same").run()
+}`)
+	assertContains(t, out, `same=1`)
+	assertContains(t, out, `diff=1`)
+	assertContains(t, out, `less=1`)
+	assertContains(t, out, `atLeast=1`)
+	assertContains(t, out, `if true; then`)
+	assertNotContains(t, out, `_bst_left='a'`)
+	assertNotContains(t, out, `awk -v _a=2 -v _b=3`)
+}
+
+func TestCodegen_StaticComparisonsKeepDynamicFallback(t *testing.T) {
+	out := compile(t, `let a = "a"
+let same = a === "a"
+let n = 2
+let less = n < 3`)
+	assertContains(t, out, `_bst_left="$a"`)
+	assertContains(t, out, `_bst_right='a'`)
+	assertContains(t, out, `awk -v _a=$n -v _b=3`)
+}
+
 func TestCodegen_WhileLoop(t *testing.T) {
 	out := compile(t, `let n: number = 5
 while (n > 0) {

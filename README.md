@@ -89,6 +89,7 @@ Files use the `.bsh` extension.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
+- Static scalar equality comparisons and static numeric relational comparisons compile to constants; dynamic comparisons keep the multiline-safe shell/`awk` path.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static ASCII string literal `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments compile to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
 - Static ASCII string literal `.split()` calls with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
