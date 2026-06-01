@@ -3393,6 +3393,10 @@ func (g *Generator) staticASCIIStringExprValue(expr ast.Expression) (string, boo
 	}
 }
 
+func (g *Generator) staticASCIIStringValue(expr ast.Expression) (string, bool) {
+	return g.staticASCIIStringExprValue(expr)
+}
+
 func staticIntValue(expr ast.Expression) (int, bool) {
 	switch e := expr.(type) {
 	case *ast.IntLit:
@@ -9448,11 +9452,47 @@ func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, b
 	if e.Method != "split" {
 		return "", false, nil
 	}
-	values, ok := staticStringSplitValues(e)
+	values, ok := g.staticStringSplitValues(e)
 	if !ok {
 		return "", false, nil
 	}
 	return shellQuote(strings.Join(values, "\n")), true, nil
+}
+
+func (g *Generator) staticStringSplitValues(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticStringSplitValues(e.Expr)
+	case *ast.MethodCallExpr:
+		if e.Method != "split" || len(e.Args) != 1 {
+			return nil, false
+		}
+		recv, ok := g.staticASCIIStringValue(e.Receiver)
+		if !ok {
+			return nil, false
+		}
+		sep, ok := g.staticASCIIStringValue(e.Args[0])
+		if !ok {
+			return nil, false
+		}
+		var values []string
+		if sep == "" {
+			values = make([]string, 0, len(recv))
+			for i := 0; i < len(recv); i++ {
+				values = append(values, recv[i:i+1])
+			}
+		} else {
+			values = strings.Split(recv, sep)
+		}
+		for _, value := range values {
+			if strings.Contains(value, "\n") {
+				return nil, false
+			}
+		}
+		return values, true
+	default:
+		return nil, false
+	}
 }
 
 func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {

@@ -281,7 +281,7 @@ Static ASCII string expressions built from literals, variables bound to static A
 
 Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile compactly while keeping the same Besht behavior.
 
-Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools.
+Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines; variables bound to static ASCII strings can use the same split folding. Dynamic and non-ASCII splits use POSIX tools.
 
 ## Sets and Nested Lists
 

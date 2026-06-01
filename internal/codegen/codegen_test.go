@@ -1495,14 +1495,16 @@ func TestCodegen_StringToLowerCase(t *testing.T) {
 }
 
 func TestCodegen_StringSplit(t *testing.T) {
-	out := compile(t, `let s: string = "a,b,c"
-let parts: list<string> = s.split(",")`)
+	out := compile(t, `function splitIt(s: string) {
+    let parts: list<string> = s.split(",")
+}`)
 	assertContains(t, out, `tr ',' '\n'`)
 }
 
 func TestCodegen_StringSplitEmptySeparator(t *testing.T) {
-	out := compile(t, `let s: string = "abc"
-let parts: list<string> = s.split("")`)
+	out := compile(t, `function splitChars(s: string) {
+    let parts: list<string> = s.split("")
+}`)
 	assertContains(t, out, `for(i=1;i<=length($0);i++) print substr($0,i,1)`)
 }
 
@@ -1687,6 +1689,46 @@ let padded: string = ("a" + "b").padStart(5, "0" + "1")`)
 	assertNotContains(t, out, `tr '[:lower:]'`)
 	assertNotContains(t, out, `sed 's/^[[:space:]]`)
 	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticStringBindingMethods(t *testing.T) {
+	out := compile(t, `let raw = "  alpha  "
+let word = "alpha"
+let trimmed = raw.trim()
+let upper = word.toUpperCase()
+let has = word.includes("ph")
+console.log(raw.trim())
+console.log(word.includes("ph"))
+if (word.startsWith("al")) console.log(word.toUpperCase())
+console.log(`+"`char=${word.charAt(1)}`"+`)
+let pieces = word.split("p")`)
+	assertContains(t, out, `raw='  alpha  '`)
+	assertContains(t, out, `word='alpha'`)
+	assertContains(t, out, `trimmed='alpha'`)
+	assertContains(t, out, `upper='ALPHA'`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `printf '%s\n' 'alpha'`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' 'ALPHA'`)
+	assertContains(t, out, `printf '%s\n' "char=l"`)
+	assertContains(t, out, "pieces='al\nha'")
+	assertNotContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `_bst_starts_with`)
+	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `cut -c`)
+}
+
+func TestCodegen_StaticStringBindingMethodsKeepControlFlowFallback(t *testing.T) {
+	out := compile(t, `let word = "alpha"
+if (false) {
+    word = "beta"
+}
+console.log(word.trim())
+if (word.includes("ph")) console.log("has")`)
+	assertContains(t, out, `sed 's/^[[:space:]]`)
+	assertContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `printf '%s\n' 'alpha'`)
 }
 
 func TestCodegen_StringLength(t *testing.T) {

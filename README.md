@@ -97,7 +97,7 @@ Files use the `.bsh` extension.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static boolean `if` conditions and ternary expressions, including variables bound to static boolean expressions, fold to the selected branch or value; dynamic and control-flow-assigned conditions keep normal shell tests.
 - Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
-- Static ASCII string literal `.split()` calls with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
+- Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
 - Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants; dynamic and control-flow-assigned arithmetic keeps shell arithmetic or POSIX `awk`.
 - Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
@@ -471,7 +471,7 @@ Static ASCII string expressions built from literals, variables bound to static A
 
 Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 
-Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools such as `tr` and `awk`.
+Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools such as `tr` and `awk`.
 
 Primitive values have basic formatting helpers:
 
