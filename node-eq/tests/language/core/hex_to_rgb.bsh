@@ -1,0 +1,14 @@
+function hexToRgb(hex: string): string {
+    let clean = hex.startsWith("#") ? hex.slice(1) : hex
+    let r = Number.parseInt(clean.slice(0, 2), 16)
+    let g = Number.parseInt(clean.slice(2, 4), 16)
+    let b = Number.parseInt(clean.slice(4, 6), 16)
+
+    return `${r} ${g} ${b}`
+}
+
+console.log(hexToRgb("#FFFFFF"))
+console.log(hexToRgb("000000"))
+console.log(hexToRgb("#336699"))
+console.log(hexToRgb("ff00aa"))
+console.log(hexToRgb("#0a10ff") === "10 16 255")

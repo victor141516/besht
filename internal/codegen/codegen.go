@@ -776,6 +776,37 @@ const (
 `
 	beshtRuntimeHelperIncludes = `_bst_includes()    { case "$1" in *"$2"*) return 0;; *) return 1;; esac; }
 `
+	beshtRuntimeHelperParseInt = `_bst_parse_int() {
+  awk -v _s="$1" -v _radix="${2-}" -v _start="${3-}" -v _end="${4-}" '
+BEGIN {
+  if (_start != "") {
+    _len = length(_s); _a = int(_start); _b = (_end == "" ? _len : int(_end));
+    if (_a < 0) _a = _len + _a; if (_b < 0) _b = _len + _b;
+    if (_a < 0) _a = 0; if (_a > _len) _a = _len;
+    if (_b < 0) _b = 0; if (_b > _len) _b = _len;
+    if (_b < _a) _b = _a;
+    _s = substr(_s, _a + 1, _b - _a);
+  }
+  sub(/^[[:space:]]+/, "", _s);
+  _sign = 1;
+  if (substr(_s, 1, 1) == "+") _s = substr(_s, 2);
+  else if (substr(_s, 1, 1) == "-") { _sign = -1; _s = substr(_s, 2); }
+  _r = (_radix == "" ? 10 : int(_radix));
+  if (_r == 0) _r = 10;
+  if (_r == 16 && (substr(_s, 1, 2) == "0x" || substr(_s, 1, 2) == "0X")) _s = substr(_s, 3);
+  else if (_radix == "" && (substr(_s, 1, 2) == "0x" || substr(_s, 1, 2) == "0X")) { _r = 16; _s = substr(_s, 3); }
+  if (_r < 2 || _r > 36) { printf "0"; exit; }
+  _digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+  _value = 0; _seen = 0;
+  for (_i = 1; _i <= length(_s); _i++) {
+    _d = index(_digits, tolower(substr(_s, _i, 1))) - 1;
+    if (_d < 0 || _d >= _r) break;
+    _value = _value * _r + _d; _seen++;
+  }
+  printf "%d", (_seen ? _sign * _value : 0);
+}'
+}
+`
 	beshtRuntimeHelperNullish = `_BESHT_NULLISH_SENTINEL=__BESHT_NULLISH_$$
 `
 	beshtRuntimeHelperArgs = `_bst_args_has() { case "
@@ -885,6 +916,9 @@ func runtimeHelpersSource(helpers map[string]bool) string {
 	}
 	if helpers["includes"] {
 		sb.WriteString(beshtRuntimeHelperIncludes)
+	}
+	if helpers["parseInt"] {
+		sb.WriteString(beshtRuntimeHelperParseInt)
 	}
 	if helpers["nullish"] || helpers["args"] {
 		sb.WriteString(beshtRuntimeHelperNullish)
@@ -5286,6 +5320,55 @@ func arrayFromLengthArg(e *ast.BuiltinCallExpr) (ast.Expression, bool) {
 	return obj.Fields[0].Value, true
 }
 
+func (g *Generator) genDynamicParseInt(e *ast.BuiltinCallExpr) (string, error) {
+	g.requireRuntimeHelper("parseInt")
+	radix := ""
+	if len(e.Args) == 2 {
+		radixStr, err := g.genExprValue(e.Args[1])
+		if err != nil {
+			return "", err
+		}
+		radix = ensureArgSafe(radixStr)
+	}
+
+	if slice, ok := unwrapAsExpr(e.Args[0]).(*ast.MethodCallExpr); ok && slice.Method == "slice" && len(slice.Args) >= 1 && len(slice.Args) <= 2 {
+		if recvType := g.inferReceiverType(slice.Receiver); recvType != nil && recvType.Kind != ast.TypeString {
+			goto genericDynamicParseInt
+		}
+		recv, err := g.genExprValue(slice.Receiver)
+		if err != nil {
+			return "", err
+		}
+		start, err := g.genExprValue(slice.Args[0])
+		if err != nil {
+			return "", err
+		}
+		if radix == "" {
+			radix = "''"
+		}
+		parts := []string{ensureArgSafe(recv), radix, ensureArgSafe(start)}
+		if len(slice.Args) == 2 {
+			end, err := g.genExprValue(slice.Args[1])
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, ensureArgSafe(end))
+		}
+		return fmt.Sprintf("$(_bst_parse_int %s)", strings.Join(parts, " ")), nil
+	}
+
+genericDynamicParseInt:
+	argStr, err := g.genExprValue(e.Args[0])
+	if err != nil {
+		return "", err
+	}
+	parts := []string{ensureArgSafe(argStr)}
+	if radix != "" {
+		parts = append(parts, radix)
+	}
+	return fmt.Sprintf("$(_bst_parse_int %s)", strings.Join(parts, " ")), nil
+}
+
 func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	switch e.Name {
 	case "Besht.fs.isFile", "Besht.fs.isDir", "Besht.fs.isReadable", "Besht.fs.isWritable", "Besht.fs.isExecutable", "Besht.strings.isEmpty", "Besht.strings.isNonEmpty":
@@ -5326,11 +5409,7 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 			}
 		}
 	dynamicParseInt:
-		argStr, err := g.genExprValue(e.Args[0])
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("$(( %s + 0 ))", stripQuotes(argStr)), nil
+		return g.genDynamicParseInt(e)
 
 	case "Number.parseFloat":
 		argStr, err := g.genExprValue(e.Args[0])
@@ -7490,6 +7569,24 @@ func (g *Generator) genMathMethod(e *ast.MethodCallExpr) (string, error) {
 	return "", fmt.Errorf("Math has no method %q", e.Method)
 }
 
+func stringAtAwkExpr(recv, index string, allowNegative bool) string {
+	negativeClause := ""
+	if allowNegative {
+		negativeClause = "if(_i<0)_i=length(_s)+_i;"
+	}
+	return fmt.Sprintf("$(awk %s %s 'BEGIN{_i=int(_idx);%s if(_i<0||_i>=length(_s)) exit; printf \"%%s\", substr(_s,_i+1,1)}')", awkArg("_s", recv), awkArg("_idx", index), negativeClause)
+}
+
+func stringSliceAwkExpr(recv, start, end string) string {
+	endArg := ""
+	endExpr := "length(_s)"
+	if end != "" {
+		endArg = " " + awkArg("_end", end)
+		endExpr = "_end"
+	}
+	return fmt.Sprintf("$(awk %s %s%s 'BEGIN{_len=length(_s);_a=int(_start);_b=int(%s);if(_a<0)_a=_len+_a;if(_b<0)_b=_len+_b;if(_a<0)_a=0;if(_a>_len)_a=_len;if(_b<0)_b=0;if(_b>_len)_b=_len;if(_b<_a)_b=_a;printf \"%%s\", substr(_s,_a+1,_b-_a)}')", awkArg("_s", recv), awkArg("_start", start), endArg, endExpr)
+}
+
 func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string, error) {
 	arg0 := func() (string, error) {
 		if len(e.Args) == 0 {
@@ -7664,7 +7761,7 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("$(printf '%%s' %s | cut -c$(( %s + 1 )))", ensureArgSafe(recv), stripQuotes(a0)), nil
+		return stringAtAwkExpr(recv, a0, true), nil
 
 	case "charAt":
 		a0, err := arg0()
@@ -7678,16 +7775,14 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 		if err != nil {
 			return "", err
 		}
-		startClean := stripQuotes(startStr)
 		if len(e.Args) == 1 {
-			return fmt.Sprintf("$(printf '%%s' %s | cut -c$(( %s + 1 ))-)", ensureArgSafe(recv), startClean), nil
+			return stringSliceAwkExpr(recv, startStr, ""), nil
 		}
 		endStr, err := g.genExprValue(e.Args[1])
 		if err != nil {
 			return "", err
 		}
-		endClean := stripQuotes(endStr)
-		return fmt.Sprintf("$(printf '%%s' %s | cut -c$(( %s + 1 ))-$(( %s )))", ensureArgSafe(recv), startClean, endClean), nil
+		return stringSliceAwkExpr(recv, startStr, endStr), nil
 
 	case "substring":
 		startStr, err := g.genExprValue(e.Args[0])
@@ -8036,7 +8131,7 @@ func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
 	indexClean := stripQuotes(indexStr)
 	listArg := ensureArgSafe(listStr)
 	if recvType := g.inferReceiverType(e.Expr); recvType != nil && recvType.Kind == ast.TypeString {
-		return fmt.Sprintf("$(printf '%%s' %s | cut -c$(( %s + 1 )))", ensureArgSafe(listStr), indexClean), nil
+		return stringAtAwkExpr(listStr, indexStr, false), nil
 	}
 	if recvType := g.inferReceiverType(e.Expr); recvType != nil && recvType.Kind == ast.TypeList && recvType.Elem != nil && recvType.Elem.Kind == ast.TypeList {
 		return fmt.Sprintf("$(printf '%%s\\n' %s | sed -n \"$(( %s + 1 ))p\" | tr '\\037' '\\n')", listArg, indexClean), nil
@@ -8226,7 +8321,7 @@ func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (str
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("$(if %s; then printf '%%s' %s; else printf '%%s' %s; fi)", cond, thenVal, elseVal), nil
+	return fmt.Sprintf("$(if %s; then printf '%%s' %s; else printf '%%s' %s; fi)", cond, ensureArgSafe(thenVal), ensureArgSafe(elseVal)), nil
 }
 
 func (g *Generator) genPropagateRHS(e *ast.PropagateExpr) (string, error) {

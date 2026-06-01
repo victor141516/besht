@@ -1177,7 +1177,8 @@ let s: string = n.toString()`)
 func TestCodegen_IntBuiltin(t *testing.T) {
 	out := compile(t, `let s: string = "42"
 let n: number = Number.parseInt(s)`)
-	assertContains(t, out, `$(( $s + 0 ))`)
+	assertContains(t, out, `_bst_parse_int()`)
+	assertContains(t, out, `n=$(_bst_parse_int "$s")`)
 }
 
 func TestCodegen_NumberParseIntOneAndTwoArgs(t *testing.T) {
@@ -1186,6 +1187,7 @@ let b: number = Number.parseInt("42", 10)`)
 	assertContains(t, out, `a=42`)
 	assertContains(t, out, `b=42`)
 	assertNotContains(t, out, `$(( 42 + 0 ))`)
+	assertNotContains(t, out, `_bst_parse_int()`)
 }
 
 func TestCodegen_NumberParseIntStaticPrefix(t *testing.T) {
@@ -1196,6 +1198,15 @@ let c: number = Number.parseInt("-10px", 10)`)
 	assertContains(t, out, `b=255`)
 	assertContains(t, out, `c=-10`)
 	assertNotContains(t, out, `$(( 2a + 0 ))`)
+}
+
+func TestCodegen_NumberParseIntSliceUsesAwkHelper(t *testing.T) {
+	out := compile(t, `function parseHex(hex: string): number {
+    return Number.parseInt(hex.slice(0, 2), 16)
+}`)
+	assertContains(t, out, `_bst_parse_int()`)
+	assertContains(t, out, `_bst_parse_int "$_parseHex_hex" 16 0 2`)
+	assertNotContains(t, out, `cut -c`)
 }
 
 func TestCodegen_ListConcatMethod(t *testing.T) {
@@ -2208,14 +2219,18 @@ let p: string = s.padEnd(10, ".")`)
 func TestCodegen_StringAt(t *testing.T) {
 	out := compile(t, `let s: string = "hello"
 let c: string = s.at(0)`)
-	assertContains(t, out, `cut -c`)
+	assertContains(t, out, `awk`)
+	assertContains(t, out, `substr(_s,_i+1,1)`)
+	assertNotContains(t, out, `cut -c`)
 }
 
 func TestCodegen_StringSlice(t *testing.T) {
 	out := compile(t, `function sliceIt(s: string) {
     let sub: string = s.slice(0, 5)
 }`)
-	assertContains(t, out, `cut -c`)
+	assertContains(t, out, `awk`)
+	assertContains(t, out, `substr(_s,_a+1,_b-_a)`)
+	assertNotContains(t, out, `cut -c`)
 }
 
 func TestCodegen_StringConcatMethodNew(t *testing.T) {
