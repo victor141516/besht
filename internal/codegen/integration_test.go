@@ -601,7 +601,8 @@ if (n > 5) {
 }
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `if awk -v _a=$n -v _b=5`)
+	assertContains(t, out, `if [ "$n" -gt 5 ]; then`)
+	assertNotContains(t, out, `if awk -v _a=$n -v _b=5`)
 	assertContains(t, out, `echo big`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `echo small`)
@@ -1147,8 +1148,21 @@ while (n > 0) {
 }
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `while awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `while [ "$n" -gt 0 ]; do`)
+	assertNotContains(t, out, `while awk -v _a=$n -v _b=0`)
 	assertContains(t, out, `done`)
+}
+
+func TestIntegration_IntegerComparisonLoopRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let n = 3
+while (n > 0) {
+    console.log(n)
+    n--
+}
+`)
+	if out != "3\n2\n1\n" {
+		t.Fatalf("integer loop output: got %q", out)
+	}
 }
 
 func TestIntegration_BuiltinFileCheck(t *testing.T) {
@@ -1317,14 +1331,16 @@ func TestIntegration_TernaryNumber(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", "let x = 10\nlet y = 3\nlet bigger = x > y ? x : y\nconsole.log(`bigger=${bigger}`)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `bigger=$(if awk -v _a=$x -v _b=$y`)
+	assertContains(t, out, `bigger=$(if [ "$x" -gt "$y" ]; then printf '%s' "$x"; else printf '%s' "$y"; fi)`)
+	assertNotContains(t, out, `bigger=$(if awk -v _a=$x -v _b=$y`)
 }
 
 func TestIntegration_TernaryString(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", "let x = 10\nlet label = x > 5 ? \"big\" : \"small\"\nconsole.log(label)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
+	assertContains(t, out, `label=$(if [ "$x" -gt 5 ]; then printf '%s' 'big'; else printf '%s' 'small'; fi)`)
+	assertNotContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
 }
 
 func TestIntegration_StaticBooleanConditions(t *testing.T) {
