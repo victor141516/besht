@@ -531,6 +531,30 @@ console.log(Box.Items[1])`)
 	}
 }
 
+func TestIntegration_StaticListIndexRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let items = ["a", "b"]
+console.log(items[0])
+console.log(["x", "y"][1])
+console.log("left:right".split(":")[0])
+`)
+	out := compileFile(t, path)
+	assertNotContains(t, out, `sed -n "$(( 0 + 1 ))p"`)
+	assertNotContains(t, out, `sed -n "$(( 1 + 1 ))p"`)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
+	}
+	if string(output) != "a\ny\nleft\n" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestIntegration_SetValuesWithSpacesAndNestedListLiterals(t *testing.T) {
 	out := runCompiledShell(t, `const seen = new Set<string>()
 seen.add("a b")

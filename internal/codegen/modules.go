@@ -1263,6 +1263,9 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.objAliasMap = make(map[string]objectRef)
 	g.objFieldsMap = make(map[string][]string)
 	g.objPropTypeMap = make(map[string]*ast.Type)
+	g.stringConstMap = make(map[string]string)
+	g.staticListMap = make(map[string][]string)
+	g.controlAssigned = make(map[string]bool)
 	g.fnParamTypes = make(map[string]*ast.Type)
 	g.fnParamNames = make(map[string][]string)
 	g.classMap = make(map[string]*ast.ClassDecl)
@@ -1339,6 +1342,7 @@ func (g *moduleGenerator) generateModule(prog *ast.Program) (string, error) {
 
 	g.collectObjectTypes(prog.Statements)
 	g.collectArgsSchema(prog.Statements)
+	g.controlAssigned = collectControlFlowAssignments(prog.Statements)
 
 	rewriteFnCalls(prog.Statements, g.importMap, g.qualifyFnName)
 
