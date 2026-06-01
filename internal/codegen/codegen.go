@@ -1756,7 +1756,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 }
 
 func (g *Generator) genIf(s *ast.IfStmt) error {
-	if value, ok := staticBoolValue(s.Condition); ok {
+	if value, ok := g.staticBooleanValue(s.Condition); ok {
 		if value {
 			for _, stmt := range s.Then.Statements {
 				if err := g.genStmt(stmt); err != nil {
@@ -2186,6 +2186,29 @@ func staticASCIIStringValue(expr ast.Expression) (string, bool) {
 		}
 	}
 	return value, true
+}
+
+func (g *Generator) staticASCIIStringValue(expr ast.Expression) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticASCIIStringValue(e.Expr)
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return "", false
+		}
+		value, ok := g.stringConstMap[g.resolveVarName(e.Name)]
+		if !ok {
+			return "", false
+		}
+		for i := 0; i < len(value); i++ {
+			if value[i] >= utf8.RuneSelf {
+				return "", false
+			}
+		}
+		return value, true
+	default:
+		return staticASCIIStringValue(expr)
+	}
 }
 
 func staticIntValue(expr ast.Expression) (int, bool) {
@@ -3969,6 +3992,15 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 			return false, true
+		}
+	case *ast.MethodCallExpr:
+		switch e.Method {
+		case "includes", "startsWith", "endsWith":
+			val, ok, err := g.genStaticStringMethod(e)
+			if err != nil || !ok {
+				return false, false
+			}
+			return val == "1", true
 		}
 	}
 	return false, false
@@ -6458,7 +6490,7 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 }
 
 func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := staticASCIIStringValue(e.Receiver)
+	recv, ok := g.staticASCIIStringValue(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -6467,7 +6499,7 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 		if len(e.Args) == 0 {
 			return "", false, fmt.Errorf("%s() requires an argument", e.Method)
 		}
-		value, ok := staticASCIIStringValue(e.Args[0])
+		value, ok := g.staticASCIIStringValue(e.Args[0])
 		return value, ok, nil
 	}
 	intArg := func(idx int, fallback int) (int, bool) {
@@ -6584,7 +6616,7 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 }
 
 func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := staticASCIIStringValue(e.Receiver)
+	recv, ok := g.staticASCIIStringValue(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -6592,7 +6624,7 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 		if len(e.Args) <= idx {
 			return "", false
 		}
-		return staticASCIIStringValue(e.Args[idx])
+		return g.staticASCIIStringValue(e.Args[idx])
 	}
 	staticIntArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -6716,11 +6748,47 @@ func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, b
 	if e.Method != "split" {
 		return "", false, nil
 	}
-	values, ok := staticStringSplitValues(e)
+	values, ok := g.staticStringSplitValues(e)
 	if !ok {
 		return "", false, nil
 	}
 	return shellQuote(strings.Join(values, "\n")), true, nil
+}
+
+func (g *Generator) staticStringSplitValues(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticStringSplitValues(e.Expr)
+	case *ast.MethodCallExpr:
+		if e.Method != "split" || len(e.Args) != 1 {
+			return nil, false
+		}
+		recv, ok := g.staticASCIIStringValue(e.Receiver)
+		if !ok {
+			return nil, false
+		}
+		sep, ok := g.staticASCIIStringValue(e.Args[0])
+		if !ok {
+			return nil, false
+		}
+		var values []string
+		if sep == "" {
+			values = make([]string, 0, len(recv))
+			for i := 0; i < len(recv); i++ {
+				values = append(values, recv[i:i+1])
+			}
+		} else {
+			values = strings.Split(recv, sep)
+		}
+		for _, value := range values {
+			if strings.Contains(value, "\n") {
+				return nil, false
+			}
+		}
+		return values, true
+	default:
+		return nil, false
+	}
 }
 
 func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
@@ -6941,7 +7009,7 @@ func computedKeyValidation(varName string) string {
 }
 
 func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (string, error) {
-	if value, ok := staticBoolValue(e.Condition); ok {
+	if value, ok := g.staticBooleanValue(e.Condition); ok {
 		if value {
 			return g.genExprRHS(e.Then, targetType)
 		}
@@ -6963,35 +7031,6 @@ func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (str
 	return fmt.Sprintf("$(if %s; then printf '%%s' %s; else printf '%%s' %s; fi)", cond, thenVal, elseVal), nil
 }
 
-func staticBoolValue(expr ast.Expression) (bool, bool) {
-	switch e := expr.(type) {
-	case *ast.BoolLit:
-		return e.Value, true
-	case *ast.AsExpr:
-		return staticBoolValue(e.Expr)
-	case *ast.UnaryExpr:
-		if e.Op == "!" {
-			value, ok := staticBoolValue(e.Expr)
-			if ok {
-				return !value, true
-			}
-		}
-	case *ast.BinaryExpr:
-		left, leftOK := staticBoolValue(e.Left)
-		right, rightOK := staticBoolValue(e.Right)
-		if !leftOK || !rightOK {
-			return false, false
-		}
-		switch e.Op {
-		case "&&":
-			return left && right, true
-		case "||":
-			return left || right, true
-		}
-	}
-	return false, false
-}
-
 func (g *Generator) genPropagateRHS(e *ast.PropagateExpr) (string, error) {
 	inner, err := g.genExprValue(e.Expr)
 	if err != nil {
@@ -7005,6 +7044,13 @@ func (g *Generator) genPropagateRHS(e *ast.PropagateExpr) (string, error) {
 }
 
 func (g *Generator) genCondition(expr ast.Expression) (string, error) {
+	if value, ok := g.staticBooleanValue(expr); ok {
+		if value {
+			return "true", nil
+		}
+		return "false", nil
+	}
+
 	switch e := expr.(type) {
 	case *ast.BinaryExpr:
 		if e.Op == "??" {

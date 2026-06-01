@@ -2426,6 +2426,20 @@ if (Boolean("")) console.log("condition false")`)
 	}
 }
 
+func TestIntegration_StaticStringBindingMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let raw = "  alpha  "
+let word = "alpha"
+console.log(raw.trim())
+console.log(word.includes("ph"))
+if (word.startsWith("al")) console.log(word.toUpperCase())
+console.log(`+"`char=${word.charAt(1)}`"+`)
+console.log(word.split("p").join("|"))`)
+	want := "alpha\ntrue\nALPHA\nchar=l\nal|ha\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_ObjectKeysRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let user = { id: 1, name: "Victor" }
 user.active = true

@@ -269,11 +269,11 @@ Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.
 
 ## String and List Search
 
-Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literal searches and `charAt()` calls with static arguments compile to constants. Lists also support `items.includes(x)` for exact item membership.
+Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literal searches and `charAt()` calls with static arguments compile to constants; variables bound to static ASCII strings can use the same folding when they are not assigned inside control flow. Lists also support `items.includes(x)` for exact item membership.
 
-Static ASCII string literal transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments compile to constants. Dynamic and non-ASCII transforms use POSIX tools.
+Static ASCII string literal transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments compile to constants; variables bound to static ASCII strings can use the same transform folding. Dynamic and non-ASCII transforms use POSIX tools.
 
-Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools.
+Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines; variables bound to static ASCII strings can use the same split folding. Dynamic and non-ASCII splits use POSIX tools.
 
 ## Sets and Nested Lists
 
