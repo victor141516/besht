@@ -1285,6 +1285,7 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.classMap = make(map[string]*ast.ClassDecl)
 	g.varClassMap = make(map[string]string)
 	g.listLenMap = make(map[string]string)
+	g.intVars = make(map[string]bool)
 	g.runtimeHelpers = make(map[string]bool)
 	g.argsOptions = make(map[string]bool)
 	g.argsFlags = make(map[string]bool)

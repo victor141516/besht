@@ -212,7 +212,7 @@ b`                                // multiline-safe string equality
 
 `||` and `&&` in value position return actual values (JS semantics): `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. In condition position (`if`/`while`), they return 1/0 as booleans. `a ?? b` returns `b` only when `a` is `null`/`undefined`; it preserves empty string, `0`, and `false`. Static `??` expressions compile to the selected side when the left side is known.
 
-Static scalar equality comparisons and static numeric relational comparisons compile to constants. Dynamic comparisons keep the multiline-safe shell or POSIX `awk` path.
+Static scalar equality comparisons and static numeric relational comparisons compile to constants. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 
 ## Switch / Case
 

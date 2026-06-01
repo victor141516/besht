@@ -40,6 +40,7 @@ type Generator struct {
 	currentClass     string
 	currentThisVar   string
 	floatVars        map[string]bool
+	intVars          map[string]bool
 	listLenMap       map[string]string
 	runtimeHelpers   map[string]bool
 	argsOptions      map[string]bool
@@ -141,6 +142,7 @@ func New() *Generator {
 		classMap:         make(map[string]*ast.ClassDecl),
 		varClassMap:      make(map[string]string),
 		floatVars:        make(map[string]bool),
+		intVars:          make(map[string]bool),
 		listLenMap:       make(map[string]string),
 		runtimeHelpers:   make(map[string]bool),
 		argsOptions:      make(map[string]bool),
@@ -1083,6 +1085,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	if g.isFloatExpr(s.Value) {
 		g.floatVars[varName] = true
 	}
+	g.updateIntegerBinding(varName, s.Value)
 	if value, ok := stringLiteralValue(s.Value); ok {
 		if g.stringConstMap == nil {
 			g.stringConstMap = make(map[string]string)
@@ -1533,6 +1536,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	} else {
 		delete(g.floatVars, varName)
 	}
+	g.updateIntegerBinding(varName, s.Value)
 	if value, ok := stringLiteralValue(s.Value); ok {
 		if g.stringConstMap == nil {
 			g.stringConstMap = make(map[string]string)
@@ -5754,6 +5758,40 @@ func (g *Generator) isFloatExpr(expr ast.Expression) bool {
 	return false
 }
 
+func (g *Generator) updateIntegerBinding(varName string, expr ast.Expression) {
+	if g.intVars == nil {
+		g.intVars = make(map[string]bool)
+	}
+	if g.isIntegerExpr(expr) {
+		g.intVars[varName] = true
+		return
+	}
+	delete(g.intVars, varName)
+}
+
+func (g *Generator) isIntegerExpr(expr ast.Expression) bool {
+	switch e := expr.(type) {
+	case *ast.IntLit:
+		return true
+	case *ast.AsExpr:
+		return g.isIntegerExpr(e.Expr)
+	case *ast.UnaryExpr:
+		return e.Op == "-" && g.isIntegerExpr(e.Expr)
+	case *ast.IdentExpr:
+		return g.intVars[g.resolveVarName(e.Name)]
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case "+", "-", "*", "%":
+			return g.isIntegerExpr(e.Left) && g.isIntegerExpr(e.Right)
+		default:
+			return false
+		}
+	case *ast.UpdateExpr:
+		return g.intVars[g.resolveVarName(e.Name)]
+	}
+	return false
+}
+
 func (g *Generator) fnReturnsFloat(stmts []ast.Statement) bool {
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
@@ -8042,15 +8080,42 @@ func (g *Generator) genBinaryCondition(e *ast.BinaryExpr) (string, error) {
 		}
 		return truthyCondition(val), nil
 	case ">":
+		if cond, ok := g.genIntegerComparisonCondition(e, leftStr, rightStr, "-gt"); ok {
+			return cond, nil
+		}
 		return fmt.Sprintf("awk -v _a=%s -v _b=%s 'BEGIN{OFMT=\"%%.17g\";exit !(_a > _b)}'", stripQuotes(leftStr), stripQuotes(rightStr)), nil
 	case "<":
+		if cond, ok := g.genIntegerComparisonCondition(e, leftStr, rightStr, "-lt"); ok {
+			return cond, nil
+		}
 		return fmt.Sprintf("awk -v _a=%s -v _b=%s 'BEGIN{OFMT=\"%%.17g\";exit !(_a < _b)}'", stripQuotes(leftStr), stripQuotes(rightStr)), nil
 	case ">=":
+		if cond, ok := g.genIntegerComparisonCondition(e, leftStr, rightStr, "-ge"); ok {
+			return cond, nil
+		}
 		return fmt.Sprintf("awk -v _a=%s -v _b=%s 'BEGIN{OFMT=\"%%.17g\";exit !(_a >= _b)}'", stripQuotes(leftStr), stripQuotes(rightStr)), nil
 	case "<=":
+		if cond, ok := g.genIntegerComparisonCondition(e, leftStr, rightStr, "-le"); ok {
+			return cond, nil
+		}
 		return fmt.Sprintf("awk -v _a=%s -v _b=%s 'BEGIN{OFMT=\"%%.17g\";exit !(_a <= _b)}'", stripQuotes(leftStr), stripQuotes(rightStr)), nil
 	}
 	return "", fmt.Errorf("unknown binary operator %q in condition", e.Op)
+}
+
+func (g *Generator) genIntegerComparisonCondition(e *ast.BinaryExpr, leftStr, rightStr, op string) (string, bool) {
+	if !g.isIntegerExpr(e.Left) || !g.isIntegerExpr(e.Right) {
+		return "", false
+	}
+	return fmt.Sprintf("[ %s %s %s ]", integerTestOperand(leftStr), op, integerTestOperand(rightStr)), true
+}
+
+func integerTestOperand(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "$") {
+		return "\"" + value + "\""
+	}
+	return value
 }
 
 func binaryStringTest(left, op, right string) string {

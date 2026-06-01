@@ -149,7 +149,8 @@ func TestCodegen_IfSimple(t *testing.T) {
 if (n > 0) {
     $("echo", "pos").run()
 }`)
-	assertContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `if [ "$n" -gt 0 ]; then`)
+	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
 	assertContains(t, out, `echo pos`)
 	assertContains(t, out, `fi`)
 }
@@ -161,7 +162,8 @@ if (n > 0) {
 } else {
     $("echo", "neg").run()
 }`)
-	assertContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `if [ "$n" -gt 0 ]; then`)
+	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `fi`)
 }
@@ -175,8 +177,10 @@ if (n > 10) {
 } else {
     $("echo", "zero").run()
 }`)
-	assertContains(t, out, `awk -v _a=$n -v _b=10`)
-	assertContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `if [ "$n" -gt 10 ]; then`)
+	assertContains(t, out, `elif [ "$n" -gt 0 ]; then`)
+	assertNotContains(t, out, `awk -v _a=$n -v _b=10`)
+	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `fi`)
 }
@@ -262,7 +266,8 @@ let n = 2
 let less = n < 3`)
 	assertContains(t, out, `_bst_left="$a"`)
 	assertContains(t, out, `_bst_right='a'`)
-	assertContains(t, out, `awk -v _a=$n -v _b=3`)
+	assertContains(t, out, `less=$(if [ "$n" -lt 3 ]; then printf 1; else printf 0; fi)`)
+	assertNotContains(t, out, `awk -v _a=$n -v _b=3`)
 }
 
 func TestCodegen_WhileLoop(t *testing.T) {
@@ -270,7 +275,8 @@ func TestCodegen_WhileLoop(t *testing.T) {
 while (n > 0) {
     $("echo", "${n}").run()
 }`)
-	assertContains(t, out, `while awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `while [ "$n" -gt 0 ]; do`)
+	assertNotContains(t, out, `while awk -v _a=$n -v _b=0`)
 	assertContains(t, out, `done`)
 }
 
@@ -396,13 +402,15 @@ func TestCodegen_TernaryNumber(t *testing.T) {
 	out := compile(t, `let x: number = 10
 let y: number = 3
 let bigger: number = x > y ? x : y`)
-	assertContains(t, out, `awk -v _a=$x -v _b=$y`)
+	assertContains(t, out, `bigger=$(if [ "$x" -gt "$y" ]; then printf '%s' "$x"; else printf '%s' "$y"; fi)`)
+	assertNotContains(t, out, `awk -v _a=$x -v _b=$y`)
 }
 
 func TestCodegen_TernaryString(t *testing.T) {
 	out := compile(t, `let x: number = 10
 let label: string = x > 5 ? "big" : "small"`)
-	assertContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
+	assertContains(t, out, `label=$(if [ "$x" -gt 5 ]; then printf '%s' 'big'; else printf '%s' 'small'; fi)`)
+	assertNotContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
 }
 
 func TestCodegen_StaticBooleanTernary(t *testing.T) {
@@ -761,7 +769,8 @@ func TestCodegen_ComparisonLt(t *testing.T) {
 if (n < 10) {
     $("echo", "small").run()
 }`)
-	assertContains(t, out, `exit !(_a < _b)`)
+	assertContains(t, out, `if [ "$n" -lt 10 ]; then`)
+	assertNotContains(t, out, `exit !(_a < _b)`)
 }
 
 func TestCodegen_ComparisonGte(t *testing.T) {
@@ -769,7 +778,8 @@ func TestCodegen_ComparisonGte(t *testing.T) {
 if (n >= 5) {
     $("echo", "ok").run()
 }`)
-	assertContains(t, out, `exit !(_a >= _b)`)
+	assertContains(t, out, `if [ "$n" -ge 5 ]; then`)
+	assertNotContains(t, out, `exit !(_a >= _b)`)
 }
 
 func TestCodegen_ComparisonLte(t *testing.T) {
@@ -777,7 +787,27 @@ func TestCodegen_ComparisonLte(t *testing.T) {
 if (n <= 10) {
     $("echo", "ok").run()
 }`)
-	assertContains(t, out, `exit !(_a <= _b)`)
+	assertContains(t, out, `if [ "$n" -le 10 ]; then`)
+	assertNotContains(t, out, `exit !(_a <= _b)`)
+}
+
+func TestCodegen_ComparisonFloatFallback(t *testing.T) {
+	out := compile(t, `let n: number = 2.5
+if (n < 3) {
+    $("echo", "small").run()
+}`)
+	assertContains(t, out, `awk -v _a=$n -v _b=3`)
+	assertContains(t, out, `exit !(_a < _b)`)
+}
+
+func TestCodegen_ComparisonIntegerBindingInvalidatedByFloatAssignment(t *testing.T) {
+	out := compile(t, `let n: number = 2
+n = Math.sqrt(4)
+if (n < 3) {
+    $("echo", "small").run()
+}`)
+	assertContains(t, out, `awk -v _a=$n -v _b=3`)
+	assertContains(t, out, `exit !(_a < _b)`)
 }
 
 func TestCodegen_ComparisonNeqInt(t *testing.T) {
