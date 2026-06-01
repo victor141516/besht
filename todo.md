@@ -58,6 +58,94 @@ Implementation notes:
 
 ---
 
+## Optional jq-backed codegen and JSON support
+
+Add one opt-in compiler flag, `--opt-use-jq`, that permits generated output to depend on `jq`. Without this flag, `JSON.parse()` and `JSON.stringify()` should produce a compile-time semantic error explaining that they require `--opt-use-jq`. With the flag enabled, codegen may also choose `jq` for other operations when it materially simplifies generated shell, but the existing POSIX/static-folding paths should remain the default when they are smaller or clearer.
+
+Runtime dependency checks should follow the existing external-binary check model:
+
+- Passing `--opt-use-jq` alone must not force a check.
+- If generated shell actually calls `jq`, emit a runtime check that `jq` is installed and working.
+- `--opt-no-add-binaries-check` suppresses the `jq` check too.
+
+Introduce an internal JSON representation hint such as `TypeJSON`, exposed to users as a `JSONValue` annotation. This remains a compiler representation hint, not compile-time type checking.
+
+Suggested standard declarations:
+
+```ts
+type JSONValue = string
+
+declare namespace JSON {
+    function parse(value: string): JSONValue
+    function stringify(value): string
+}
+```
+
+`JSON.parse(text)` should:
+
+- evaluate `text` safely;
+- validate and canonicalize immediately with `jq -c .`;
+- store compact valid JSON as a `JSONValue`;
+- on invalid JSON, print a Besht-specific runtime error such as `[besht] JSON.parse() failed` and exit nonzero.
+
+JSON property/index access should be as close to native JavaScript behavior as practical:
+
+```ts
+let data = JSON.parse(body)
+let user = data.user          // JSONValue
+let first = data.items[0]     // JSONValue
+```
+
+- Property/index access on a `JSONValue` returns another `JSONValue`.
+- Missing final properties behave like JavaScript `undefined`, so `data.user.name ?? "Anonymous"` can use the fallback when `user` exists but `name` is absent.
+- JSON `null` behaves as Besht nullish for `??`.
+- Accessing through a missing or null intermediate value should fail like JavaScript unless optional chaining is used. For example, `data.missing.name` should fail, while `data.missing?.name ?? "fallback"` should use the fallback.
+
+JSON scalar extraction should be driven by annotations or `as` assertions only when the source expression is JSON-backed:
+
+```ts
+let name: string = data.user.name
+let count = data.count as number
+let ok: boolean = data.enabled
+```
+
+Supported first-slice extraction targets:
+
+- `string`
+- `number`
+- `boolean`
+- `JSONValue`
+
+Extraction rules:
+
+- Missing final property and JSON `null` produce Besht nullish so `??` can handle them.
+- Non-null JSON values with the wrong asserted type fail loudly at runtime with a Besht-specific error.
+- Normal non-JSON `expr as Type` and `let x: Type = expr` remain compile-time-erased annotations. Do not introduce compile-time type mismatch errors.
+
+`JSON.stringify(value)` should always require `--opt-use-jq`, even for static values the compiler could theoretically fold without jq. First-slice accepted inputs:
+
+- `JSONValue`, canonicalized or passed through compactly with `jq -c .`;
+- strings, numbers, booleans, null/undefined;
+- scalar lists;
+- scalar object literals or named objects that the compiler can serialize safely.
+
+Reject commands, fetch responses, sets, and unsupported nested Besht values until a broader representation is designed. Use `jq` where it helps with dynamic escaping or assembly, but do not require every compiler-built JSON literal to be piped back through `jq` when direct emission is safe.
+
+Implementation plan:
+
+1. Add `UseJQ bool` to `codegen.Options`, wire `--opt-use-jq` through `cmd/besht/main.go`, usage text, CLI tests, README.md, AGENTS.md, and `skills/besht-scripting/SKILL.md`.
+2. Add `TypeJSON` / `JSONValue` representation support in AST type parsing, checker inference, module export/import type inference, and codegen `varTypeMap`.
+3. Teach parser/checker/codegen that `JSON.parse` and `JSON.stringify` are compiler-known builtins, and exempt `JSON` from module/class qualification like `Object`, `Array`, `Number`, and `Math`.
+4. Add semantic validation that rejects JSON builtins without `UseJQ`, while preserving the no compile-time type-checking policy.
+5. Track jq usage in codegen and extend runtime check generation so a jq check appears only when emitted shell calls jq and `NoCheck` is false.
+6. Implement `JSON.parse()` codegen with safe input handling, `jq -c .`, and Besht-specific parse failure output.
+7. Implement JSON path lowering for property and index access on `JSONValue`, including optional chaining and JS-like missing/intermediate behavior.
+8. Implement JSON scalar extraction/assertion for `string`, `number`, `boolean`, and `JSONValue` via both `as Type` and let/const annotations.
+9. Implement first-slice `JSON.stringify()` for safe scalar/list/object inputs and `JSONValue`.
+10. Add checker, codegen, integration, split-mode/runtime-check, and node-eq coverage where practical.
+
+---
+
 ## Checker package cleanup after removing type checking
 
 **Status: type checking has been removed; package naming cleanup remains future work.** `internal/checker` now owns semantic validation and representation/surface checks: function/declaration signature collection, name and const validation, builtin/method arity, fetch surface validation, object surface validation, statement-only `forEach()` validation, and similar checks for code the compiler cannot emit safely.
