@@ -1986,7 +1986,7 @@ func TestIntegration_BraceInterpolationUnaffected(t *testing.T) {
 	// Template literal for interpolation
 	path := writeFile(t, dir, "main.bsh", "let name: string = \"Alice\"\nlet msg: string = `Hello ${name}`\nconsole.log(msg)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `"Hello ${name}"`)
+	assertContains(t, out, `msg="Hello Alice"`)
 }
 
 func TestIntegration_ClassesCompileAndRun(t *testing.T) {
@@ -2469,6 +2469,21 @@ console.log(greeting.indexOf("l"))
 console.log(greeting.lastIndexOf("l"))
 if (greeting.includes(needle)) console.log("yes")`)
 	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\nyes\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticBuiltStringMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(("he" + "llo").toUpperCase())
+console.log(`+"`  ${\"hi\" + \"!\"}  `"+`.trim())
+console.log(("a" + "b").padStart(5, "0" + "1"))
+console.log(("ab" + "cd").includes("b" + "c"))
+console.log(`+"`${\"he\"}llo`"+`.startsWith("h" + "e"))
+console.log(("hel" + "lo").endsWith("l" + "o"))
+console.log(("he" + "llo").indexOf("l"))
+console.log(("he" + "llo").lastIndexOf("l"))`)
+	want := "HELLO\nhi!\n010ab\ntrue\ntrue\ntrue\n2\n3\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

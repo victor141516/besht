@@ -5258,9 +5258,24 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 	case *ast.RawStringLit:
 		return e.Value, true, nil
 	case *ast.TemplateLit:
-		if len(e.Exprs) == 0 {
-			return strings.Join(e.Parts, ""), true, nil
+		var b strings.Builder
+		for i, part := range e.Parts {
+			b.WriteString(part)
+			if i < len(e.Exprs) {
+				value, ok, err := g.staticStringFragment(e.Exprs[i])
+				if err != nil || !ok {
+					return "", ok, err
+				}
+				b.WriteString(value)
+			}
 		}
+		return b.String(), true, nil
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return "", false, nil
+		}
+		value, ok := g.stringConstMap[g.resolveVarName(e.Name)]
+		return value, ok, nil
 	case *ast.IntLit:
 		return strconv.FormatInt(e.Value, 10), true, nil
 	case *ast.FloatLit:
@@ -5298,6 +5313,19 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 			}
 			return "false", true, nil
 		}
+		if e.Op == "+" {
+			left, leftOK, err := g.staticStringFragment(e.Left)
+			if err != nil {
+				return "", true, err
+			}
+			right, rightOK, err := g.staticStringFragment(e.Right)
+			if err != nil {
+				return "", true, err
+			}
+			if leftOK && rightOK {
+				return left + right, true, nil
+			}
+		}
 	case *ast.BuiltinCallExpr:
 		if value, ok := g.staticBooleanValue(e); ok {
 			if value {
@@ -5306,17 +5334,38 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 			return "false", true, nil
 		}
 	case *ast.MethodCallExpr:
-		if e.Method != "toString" {
-			return "", false, nil
-		}
-		if len(e.Args) != 0 {
-			return "", true, fmt.Errorf("toString() takes no arguments")
-		}
-		if value, ok, err := g.staticStringFragment(e.Receiver); ok || err != nil {
+		if value, ok, err := g.staticASCIIStringTransformValue(e); ok || err != nil {
 			return value, ok, err
+		}
+		if value, ok := g.staticBooleanValue(e); ok {
+			if value {
+				return "true", true, nil
+			}
+			return "false", true, nil
+		}
+		if e.Method == "toString" {
+			if len(e.Args) != 0 {
+				return "", true, fmt.Errorf("toString() takes no arguments")
+			}
+			if value, ok, err := g.staticStringFragment(e.Receiver); ok || err != nil {
+				return value, ok, err
+			}
 		}
 	}
 	return "", false, nil
+}
+
+func (g *Generator) staticASCIIStringFragment(expr ast.Expression) (string, bool, error) {
+	value, ok, err := g.staticStringFragment(expr)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			return "", false, nil
+		}
+	}
+	return value, true, nil
 }
 
 func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
@@ -8319,17 +8368,16 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 }
 
 func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := g.staticASCIIStringExprValue(e.Receiver)
-	if !ok {
-		return "", false, nil
+	recv, ok, err := g.staticASCIIStringFragment(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
 	}
 
 	stringArg := func() (string, bool, error) {
 		if len(e.Args) == 0 {
 			return "", false, fmt.Errorf("%s() requires an argument", e.Method)
 		}
-		value, ok := g.staticASCIIStringExprValue(e.Args[0])
-		return value, ok, nil
+		return g.staticASCIIStringFragment(e.Args[0])
 	}
 	intArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -8445,15 +8493,15 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 }
 
 func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := g.staticASCIIStringExprValue(e.Receiver)
-	if !ok {
-		return "", false, nil
+	recv, ok, err := g.staticASCIIStringFragment(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
 	}
-	staticArg := func(idx int) (string, bool) {
+	staticArg := func(idx int) (string, bool, error) {
 		if len(e.Args) <= idx {
-			return "", false
+			return "", false, nil
 		}
-		return g.staticASCIIStringExprValue(e.Args[idx])
+		return g.staticASCIIStringFragment(e.Args[idx])
 	}
 	staticIntArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -8552,10 +8600,10 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 		}
 		fill := " "
 		if len(e.Args) == 2 {
-			var ok bool
-			fill, ok = staticArg(1)
-			if !ok {
-				return "", false, nil
+			var err error
+			fill, ok, err = staticArg(1)
+			if err != nil || !ok {
+				return "", ok, err
 			}
 		}
 		if targetLen <= len(recv) || fill == "" {
@@ -8568,6 +8616,18 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 			return padding + recv, true, nil
 		}
 		return recv + padding, true, nil
+	case "charAt":
+		if len(e.Args) != 1 {
+			return "", true, fmt.Errorf("%s() requires an argument", e.Method)
+		}
+		idx, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		if idx < 0 || idx >= len(recv) {
+			return "", true, nil
+		}
+		return recv[idx : idx+1], true, nil
 	default:
 		return "", false, nil
 	}

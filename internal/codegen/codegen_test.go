@@ -464,7 +464,7 @@ try {
 } catch (code: status) {
     let cs: string = code.toString()
 }`)
-	assertContains(t, out, `ss=$(printf '%s' "$s")`)
+	assertContains(t, out, `ss='x'`)
 	assertContains(t, out, `ts=$(if [ $t = 1 ]; then printf true; else printf false; fi)`)
 	assertContains(t, out, `fs=$(if [ $f = 1 ]; then printf true; else printf false; fi)`)
 	assertContains(t, out, `cs=$(printf '%s' "$code")`)
@@ -867,12 +867,12 @@ func TestCodegen_StringConcatMethod(t *testing.T) {
 	out := compile(t, `let a: string = "hello"
 let b: string = " world"
 let c: string = a + b`)
-	assertContains(t, out, `"${a}${b}"`)
+	assertContains(t, out, `c="hello world"`)
 }
 
 func TestCodegen_TemplateLitConcatWithVar(t *testing.T) {
 	out := compile(t, "let name: string = \"Alice\"\nlet greeting: string = `Hello, ` + name")
-	assertContains(t, out, `"Hello, ${name}"`)
+	assertContains(t, out, `greeting="Hello, Alice"`)
 }
 
 func TestCodegen_BreakInLoop(t *testing.T) {
@@ -1480,6 +1480,18 @@ while (true) {
 let upper = greeting.toUpperCase()`)
 	assertContains(t, out, `tr '[:lower:]' '[:upper:]'`)
 	assertNotContains(t, out, `upper='HELLO'`)
+}
+
+func TestCodegen_StaticBuiltStringTransforms(t *testing.T) {
+	out := compile(t, `let upper: string = ("he" + "llo").toUpperCase()
+let trimmed: string = `+"`  ${\"hi\" + \"!\"}  `"+`.trim()
+let padded: string = ("a" + "b").padStart(5, "0" + "1")`)
+	assertContains(t, out, `upper='HELLO'`)
+	assertContains(t, out, `trimmed='hi!'`)
+	assertContains(t, out, `padded='010ab'`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `awk`)
 }
 
 func TestCodegen_StringLength(t *testing.T) {
@@ -2377,6 +2389,26 @@ let has = greeting.includes("ell")`)
 	assertNotContains(t, out, `has=1`)
 }
 
+func TestCodegen_StaticBuiltStringSearchMethods(t *testing.T) {
+	out := compile(t, `let has: boolean = ("ab" + "cd").includes("b" + "c")
+let sw: boolean = `+"`${\"he\"}llo`"+`.startsWith("h" + "e")
+let ew: boolean = ("hel" + "lo").endsWith("l" + "o")
+let first: number = ("he" + "llo").indexOf("l")
+let last: number = ("he" + "llo").lastIndexOf("l")
+console.log(("abc" + "def").includes("cd"))`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `sw=1`)
+	assertContains(t, out, `ew=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=3`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `_bst_starts_with`)
+	assertNotContains(t, out, `_bst_ends_with`)
+	assertNotContains(t, out, `if [ 1 = 1 ]; then printf true`)
+	assertNotContains(t, out, `awk`)
+}
+
 func TestCodegen_StaticStringCharAt(t *testing.T) {
 	out := compile(t, `let c: string = "hello".charAt(1)
 let missing: string = "hello".charAt(99)`)
@@ -2773,7 +2805,7 @@ func TestCodegen_EscapedDollarNotTreatedAsVar(t *testing.T) {
 
 func TestCodegen_TemplateLitInterpolatesVar(t *testing.T) {
 	out := compile(t, "let name: string = \"world\"\nlet msg: string = `Hello ${name}!`")
-	assertContains(t, out, `"Hello ${name}!"`)
+	assertContains(t, out, `msg="Hello world!"`)
 }
 
 func TestCodegen_TemplateLiteralEscapesShellSpecialDollars(t *testing.T) {
