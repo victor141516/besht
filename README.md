@@ -93,6 +93,7 @@ Files use the `.bsh` extension.
 - Static ASCII string literal `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments compile to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
 - Static ASCII string literal `.split()` calls with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls keep the shell arithmetic path.
+- Static numeric arithmetic over literal numbers compiles to constants; dynamic arithmetic keeps shell arithmetic or POSIX `awk`.
 - Static numeric literal `.toString()`/`.toFixed()` calls and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
 - Static ASCII string literal transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments compile to constants; dynamic and non-ASCII transforms keep the POSIX tool path.
 - `switch/case/default` compiles to shell `case/esac`.

@@ -394,6 +394,8 @@ let lines = Number.parseInt(raw)
 let lines10 = Number.parseInt(raw, 10)
 ```
 
+Static numeric arithmetic over literal numbers compiles to constants. Dynamic arithmetic keeps shell arithmetic or POSIX `awk`.
+
 Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal `.toString()` and `.toFixed()` calls also compile to constants.
 
 ## Command Execution

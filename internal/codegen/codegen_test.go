@@ -296,6 +296,33 @@ count += 2`)
 	assertContains(t, out, `count=$(( $count + 2 ))`)
 }
 
+func TestCodegen_StaticArithmetic(t *testing.T) {
+	out := compile(t, `let sum = 2 + 3
+let diff = 10 - 4
+let product = 6 * 7
+let quotient = 5 / 2
+let remainder = 7 % 4
+let nested = (2 + 3) * 4
+let negated = -3`)
+	assertContains(t, out, `sum=5`)
+	assertContains(t, out, `diff=6`)
+	assertContains(t, out, `product=42`)
+	assertContains(t, out, `quotient=2.5`)
+	assertContains(t, out, `remainder=3`)
+	assertContains(t, out, `nested=20`)
+	assertContains(t, out, `negated=-3`)
+	assertNotContains(t, out, `$(( 2 + 3 ))`)
+	assertNotContains(t, out, `awk -v _a=5 -v _b=2`)
+}
+
+func TestCodegen_StaticArithmeticKeepsDynamicFallback(t *testing.T) {
+	out := compile(t, `let a = 2
+let sum = a + 3
+let divZero = 1 / 0`)
+	assertContains(t, out, `sum=$(( $a + 3 ))`)
+	assertContains(t, out, `divZero=$(awk -v _a=1 -v _b=0`)
+}
+
 func TestCodegen_TemplateLiteralExpression(t *testing.T) {
 	out := compile(t, "let a: number = 1\nlet b: number = 2\nlet msg: string = `sum=${a + b}`")
 	assertContains(t, out, `sum=`)
