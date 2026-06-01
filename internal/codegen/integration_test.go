@@ -611,13 +611,24 @@ if (n > 5) {
 func TestIntegration_ForRange(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "range.bsh", `for (i in Besht.iter.range(1, 3)) {
-    $("echo", "${i}").run()
+    console.log(i)
 }
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `while [`)
-	assertContains(t, out, `-le 3`)
+	assertContains(t, out, `for i in 1 2 3; do`)
+	assertContains(t, out, `printf '%s\n' "$i"`)
 	assertContains(t, out, `done`)
+	assertNotContains(t, out, `while [`)
+}
+
+func TestIntegration_ForRangeStaticArithmeticRuntime(t *testing.T) {
+	out := runCompiledShell(t, `for (i in Besht.iter.range(1 + 1, 2 * 2)) {
+    console.log(i)
+}
+`)
+	if out != "2\n3\n4\n" {
+		t.Fatalf("range output: got %q", out)
+	}
 }
 
 func TestIntegration_TryCatch(t *testing.T) {

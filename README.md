@@ -344,6 +344,8 @@ for (i in Besht.iter.range(1, 10)) {
 for (i in Besht.iter.range(1, 10)) total += i
 ```
 
+Small static range bounds compile to compact POSIX `for` loops. Dynamic or very large ranges keep a counter `while` loop.
+
 **For — list:**
 
 ```ts
@@ -781,7 +783,7 @@ Iteration helpers:
 
 | API                            | Description                              |
 | ------------------------------ | ---------------------------------------- |
-| `Besht.iter.range(start, end)` | Inclusive ascending integer range list   |
+| `Besht.iter.range(start, end)` | Inclusive ascending integer range; small static ranges compile to compact `for` loops |
 
 List operations should use native list syntax and methods:
 

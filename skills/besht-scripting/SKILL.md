@@ -163,6 +163,8 @@ Besht.strings.isNonEmpty(value) // [ -n value ]
 Besht.iter.range(1, 5)       // 1, 2, 3, 4, 5
 ```
 
+Small static `Besht.iter.range()` loops compile to compact POSIX `for` loops; dynamic or very large ranges keep a counter loop.
+
 ## All Variables Declared with `let`
 
 ```ts
@@ -535,6 +537,8 @@ for (i in Besht.iter.range(1, 10)) {
 
 for (i in Besht.iter.range(1, 10)) total += i
 ```
+
+Small static range bounds emit compact `for i in ...; do` shell. Use variables freely when the bounds are dynamic.
 
 **For — list:**
 
