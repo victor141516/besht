@@ -88,9 +88,9 @@ Files use the `.bsh` extension.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
-- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; dynamic booleans keep the general formatting path.
+- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value. Dynamic booleans keep the general formatting path.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
-- Static scalar equality comparisons and static numeric relational comparisons compile to constants; dynamic comparisons keep the multiline-safe shell/`awk` path.
+- Static scalar equality comparisons and static numeric relational comparisons, including arithmetic literal operands, compile to constants; dynamic comparisons keep the multiline-safe shell/`awk` path.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static boolean `if` conditions and ternary expressions fold to the selected branch or value; dynamic conditions keep normal shell tests.
 - Static ASCII string literals and variables bound to static ASCII string literals fold `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
