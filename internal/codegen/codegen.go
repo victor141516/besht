@@ -4335,6 +4335,9 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 		if n, ok := staticStringByteLength(e.Receiver); ok {
 			return strconv.Itoa(n), nil
 		}
+		if n, ok := g.staticStringIdentifierByteLength(e.Receiver); ok {
+			return strconv.Itoa(n), nil
+		}
 	}
 	recv, err := g.genExprValue(e.Receiver)
 	if err != nil {
@@ -4355,6 +4358,18 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 		return fmt.Sprintf("$(printf '%%s' %s | wc -c | tr -d ' ')", recv), nil
 	}
 	return "", fmt.Errorf("unknown property %q", e.Property)
+}
+
+func (g *Generator) staticStringIdentifierByteLength(expr ast.Expression) (int, bool) {
+	ident, ok := expr.(*ast.IdentExpr)
+	if !ok || g.controlAssigned[ident.Name] {
+		return 0, false
+	}
+	value, ok := g.stringConstMap[g.resolveVarName(ident.Name)]
+	if !ok {
+		return 0, false
+	}
+	return len(value), true
 }
 
 func (g *Generator) genObjectRefProperty(ref objectRef, property string, pos ast.Pos) string {

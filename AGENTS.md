@@ -286,6 +286,8 @@ The compiler assigns each `$()` call a unique identity during the semantic analy
 
 Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static `!`/`&&`/`||` expressions render directly as `true`/`false`; dynamic boolean expressions keep the general formatting path.
 
+Variables bound to static string literals may fold `.length` to a numeric constant. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
+
 ### Variable Name Mangling
 
 ### Variable Name Mangling

@@ -1409,10 +1409,12 @@ console.log(files.concat(other).join(","))`)
 }
 
 func TestIntegration_StaticLiteralLengthRuntime(t *testing.T) {
-	out := runCompiledShell(t, `console.log("hello".length)
+	out := runCompiledShell(t, `let greeting = "hello"
+console.log(greeting.length)
+console.log("hello".length)
 console.log(["a", "b", "c"].length)
 console.log([true, false].length)`)
-	want := "5\n3\n2\n"
+	want := "5\n5\n3\n2\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
