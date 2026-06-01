@@ -9397,6 +9397,22 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 			return "", false, nil
 		}
 		return strings.Repeat(recv, count), true, nil
+	case "replace", "replaceAll":
+		if len(e.Args) != 2 {
+			return "", true, fmt.Errorf("%s() requires two arguments", e.Method)
+		}
+		search, ok, err := staticArg(0)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		replacement, ok, err := staticArg(1)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		if e.Method == "replace" {
+			return strings.Replace(recv, search, replacement, 1), true, nil
+		}
+		return strings.ReplaceAll(recv, search, replacement), true, nil
 	case "padStart", "padEnd":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", true, fmt.Errorf("%s() takes one or two arguments", e.Method)
@@ -9435,6 +9451,17 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 			return "", true, nil
 		}
 		return recv[idx : idx+1], true, nil
+	case "concat":
+		var b strings.Builder
+		b.WriteString(recv)
+		for _, arg := range e.Args {
+			value, ok, err := g.staticASCIIStringFragment(arg)
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			b.WriteString(value)
+		}
+		return b.String(), true, nil
 	default:
 		return "", false, nil
 	}

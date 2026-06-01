@@ -1651,15 +1651,17 @@ func TestCodegen_StringEndsWithCondition(t *testing.T) {
 }
 
 func TestCodegen_StringReplace(t *testing.T) {
-	out := compile(t, `let s: string = "hello world"
-let r: string = s.replace("world", "besht")`)
+	out := compile(t, `function replaceIt(s: string) {
+    let r: string = s.replace("world", "besht")
+}`)
 	assertContains(t, out, `sed "s/world/besht/"`)
 
 }
 
 func TestCodegen_StringReplaceAll(t *testing.T) {
-	out := compile(t, `let s: string = "aaa"
-let r: string = s.replaceAll("a", "b")`)
+	out := compile(t, `function replaceAllIt(s: string) {
+    let r: string = s.replaceAll("a", "b")
+}`)
 	assertContains(t, out, `sed "s/a/b/g"`)
 
 }
@@ -1672,7 +1674,11 @@ let sliced: string = "hello".slice(1, 4)
 let sub: string = "hello".substring(4, 1)
 let repeated: string = "ha".repeat(3)
 let padded: string = "hi".padStart(5, "0")
-let ended: string = "hi".padEnd(5, ".")`)
+let ended: string = "hi".padEnd(5, ".")
+let replaced: string = "hello world".replace("world", "besht")
+let replacedAll: string = "hello world".replaceAll("l", "L")
+let literalMeta: string = "a.b.c".replaceAll(".", "!")
+let joined: string = "hello".concat(" ", "besht")`)
 	assertContains(t, out, `trimmed='hi'`)
 	assertContains(t, out, `upper='HELLO'`)
 	assertContains(t, out, `lower='hello'`)
@@ -1681,7 +1687,12 @@ let ended: string = "hi".padEnd(5, ".")`)
 	assertContains(t, out, `repeated='hahaha'`)
 	assertContains(t, out, `padded='000hi'`)
 	assertContains(t, out, `ended='hi...'`)
+	assertContains(t, out, `replaced='hello besht'`)
+	assertContains(t, out, `replacedAll='heLLo worLd'`)
+	assertContains(t, out, `literalMeta='a!b!c'`)
+	assertContains(t, out, `joined='hello besht'`)
 	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `sed "s/`)
 	assertNotContains(t, out, `tr '[:lower:]'`)
 	assertNotContains(t, out, `cut -c`)
 	assertNotContains(t, out, `awk`)
@@ -1693,12 +1704,19 @@ let spaced = "  hi  "
 let fill = "."
 let upper = greeting.toUpperCase()
 let trimmed = spaced.trim()
-let padded = greeting.padStart(8, fill)`)
+let padded = greeting.padStart(8, fill)
+let replaced = greeting.replace("ell", "ipp")
+let replacedAll = greeting.replaceAll("l", "L")
+let joined = greeting.concat(fill, "txt")`)
 	assertContains(t, out, `upper='HELLO'`)
 	assertContains(t, out, `trimmed='hi'`)
 	assertContains(t, out, `padded='...hello'`)
+	assertContains(t, out, `replaced='hippo'`)
+	assertContains(t, out, `replacedAll='heLLo'`)
+	assertContains(t, out, `joined='hello.txt'`)
 	assertNotContains(t, out, `tr '[:lower:]'`)
 	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `sed "s/`)
 	assertNotContains(t, out, `printf '%8s'`)
 }
 
@@ -1783,6 +1801,20 @@ if (word.includes("ph")) console.log("has")`)
 	assertContains(t, out, `sed 's/^[[:space:]]`)
 	assertContains(t, out, `_bst_includes`)
 	assertNotContains(t, out, `printf '%s\n' 'alpha'`)
+}
+
+func TestCodegen_StaticStringReplaceConcatFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let greeting = "hello"
+while (true) {
+    greeting = "bye"
+    break
+}
+let replaced = greeting.replace("ell", "ipp")
+let joined = greeting.concat("!")`)
+	assertContains(t, out, `sed "s/ell/ipp/"`)
+	assertContains(t, out, `"${greeting}!"`)
+	assertNotContains(t, out, `replaced='hippo'`)
+	assertNotContains(t, out, `joined='hello!'`)
 }
 
 func TestCodegen_StringLength(t *testing.T) {
@@ -2657,10 +2689,10 @@ func TestCodegen_StringSlice(t *testing.T) {
 }
 
 func TestCodegen_StringConcatMethodNew(t *testing.T) {
-	out := compile(t, `let a: string = "hello"
-let b: string = " world"
-let c: string = a.concat(b)`)
-	assertContains(t, out, `"${a}${b}"`)
+	out := compile(t, `function joinIt(a: string, b: string) {
+    let c: string = a.concat(b)
+}`)
+	assertContains(t, out, `"${_joinIt_a}${_joinIt_b}"`)
 }
 
 func TestCodegen_StringIndexOf(t *testing.T) {
