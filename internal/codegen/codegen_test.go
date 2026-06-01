@@ -1178,7 +1178,8 @@ let l2: list<string> = l.push("b")`)
 func TestCodegen_ListJoin(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.join(", ")`)
-	assertContains(t, out, `NR>1{printf s}`)
+	assertContains(t, out, `s='a, b, c'`)
+	assertNotContains(t, out, `NR>1{printf s}`)
 }
 
 func TestCodegen_StaticListLiteralJoin(t *testing.T) {
@@ -1197,11 +1198,50 @@ func TestCodegen_StaticListLiteralToString(t *testing.T) {
 func TestCodegen_ListToString(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.toString()`)
-	assertContains(t, out, `awk -v s=','`)
-	assertContains(t, out, `NR>1{printf s}`)
+	assertContains(t, out, `s='a,b,c'`)
+	assertNotContains(t, out, `awk -v s=','`)
 	assertNotContains(t, out, `_bst_includes()`)
 	assertNotContains(t, out, `local `)
 	assertNotContains(t, out, `[[`)
+}
+
+func TestCodegen_StaticListVariableMethods(t *testing.T) {
+	out := compile(t, `let files = ["a", "b", "c"]
+let text = files.join("|")
+let comma = files.toString()
+let has = files.includes("b")
+let first = files.indexOf("c")
+let last = files.lastIndexOf("a")
+let nums = Array.from({ length: 3 })
+let numsText = nums.join(",")
+let parts = "x:y:z".split(":")
+let partsText = parts.join("+")
+console.log(files.includes("b"))`)
+	assertContains(t, out, `text='a|b|c'`)
+	assertContains(t, out, `comma='a,b,c'`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=0`)
+	assertContains(t, out, `numsText='0,1,2'`)
+	assertContains(t, out, `partsText='x+y+z'`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `grep -qxF 'b'`)
+	assertNotContains(t, out, `awk -v _needle`)
+	assertNotContains(t, out, `awk -v s=`)
+}
+
+func TestCodegen_StaticListVariableMethodsFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let files = ["a", "b"]
+while (true) {
+    files = ["c", "d"]
+    break
+}
+let text = files.join("|")
+let has = files.includes("b")`)
+	assertContains(t, out, `awk -v s='|'`)
+	assertContains(t, out, `grep -qxF 'b'`)
+	assertNotContains(t, out, `text='a|b'`)
+	assertNotContains(t, out, `has=1`)
 }
 
 func TestCodegen_ListLength(t *testing.T) {
@@ -1943,8 +1983,8 @@ let sub: string = s.substring(1, 4)`)
 func TestCodegen_ListLastIndexOf(t *testing.T) {
 	out := compile(t, `let l: string[] = ["a", "b", "a"]
 let i: number = l.lastIndexOf("a")`)
-	assertContains(t, out, `awk`)
-	assertContains(t, out, `-1`)
+	assertContains(t, out, `i=2`)
+	assertNotContains(t, out, `awk`)
 }
 
 func TestCodegen_ListUnshift(t *testing.T) {

@@ -1435,6 +1435,23 @@ console.log(files.concat(other).join(","))`)
 	}
 }
 
+func TestIntegration_StaticListVariableMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let files = ["a", "b", "c"]
+console.log(files.join("|"))
+console.log(files.toString())
+console.log(files.includes("b"))
+console.log(files.indexOf("c"))
+console.log(files.lastIndexOf("a"))
+let nums = Array.from({ length: 3 })
+console.log(nums.join(","))
+let parts = "x:y:z".split(":")
+console.log(parts.join("+"))`)
+	want := "a|b|c\na,b,c\ntrue\n2\n0\n0,1,2\nx+y+z\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticLiteralLengthRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let greeting = "hello"
 console.log(greeting.length)

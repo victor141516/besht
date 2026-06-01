@@ -15,40 +15,41 @@ import (
 const nullishSentinelVar = "_BESHT_NULLISH_SENTINEL"
 
 type Generator struct {
-	sb              strings.Builder
-	indent          int
-	currentFn       string
-	fnReturnMap     map[string]*ast.Type
-	varTypeMap      map[string]*ast.Type // codegen-level var → inferred type (list detection)
-	inFunction      bool
-	inLoop          bool
-	topLevel        bool
-	paramMap        map[string]string // besht param name → mangled shell var name
-	globalVarMap    map[string]string // top-level/imported besht name → shell var name
-	objAliasMap     map[string]objectRef
-	objFieldsMap    map[string][]string  // object var name → list of field names
-	objPropTypeMap  map[string]*ast.Type // "varName.propName" → property type
-	stringConstMap  map[string]string
-	staticListMap   map[string][]string
-	controlAssigned map[string]bool
-	fnParamTypes    map[string]*ast.Type // current fn param name → type annotation
-	fnParamNames    map[string][]string  // function name → param names (in order)
-	classMap        map[string]*ast.ClassDecl
-	varClassMap     map[string]string
-	currentClass    string
-	currentThisVar  string
-	floatVars       map[string]bool
-	listLenMap      map[string]string
-	runtimeHelpers  map[string]bool
-	argsOptions     map[string]bool
-	argsFlags       map[string]bool
-	NoCheck         bool
-	NoSourceMap     bool
-	cmdAnalysis     *CmdAnalysis
-	cmdScope        *cmdScope
-	cmdChains       map[string]ast.Expression
-	reduceReturns   []reduceReturnContext
-	mapReturns      []mapReturnContext
+	sb               strings.Builder
+	indent           int
+	currentFn        string
+	fnReturnMap      map[string]*ast.Type
+	varTypeMap       map[string]*ast.Type // codegen-level var → inferred type (list detection)
+	inFunction       bool
+	inLoop           bool
+	topLevel         bool
+	paramMap         map[string]string // besht param name → mangled shell var name
+	globalVarMap     map[string]string // top-level/imported besht name → shell var name
+	objAliasMap      map[string]objectRef
+	objFieldsMap     map[string][]string  // object var name → list of field names
+	objPropTypeMap   map[string]*ast.Type // "varName.propName" → property type
+	stringConstMap   map[string]string
+	staticListMap    map[string][]string
+	staticListValues map[string][]string
+	controlAssigned  map[string]bool
+	fnParamTypes     map[string]*ast.Type // current fn param name → type annotation
+	fnParamNames     map[string][]string  // function name → param names (in order)
+	classMap         map[string]*ast.ClassDecl
+	varClassMap      map[string]string
+	currentClass     string
+	currentThisVar   string
+	floatVars        map[string]bool
+	listLenMap       map[string]string
+	runtimeHelpers   map[string]bool
+	argsOptions      map[string]bool
+	argsFlags        map[string]bool
+	NoCheck          bool
+	NoSourceMap      bool
+	cmdAnalysis      *CmdAnalysis
+	cmdScope         *cmdScope
+	cmdChains        map[string]ast.Expression
+	reduceReturns    []reduceReturnContext
+	mapReturns       []mapReturnContext
 }
 
 type reduceReturnContext struct {
@@ -122,28 +123,29 @@ type Options struct {
 
 func New() *Generator {
 	return &Generator{
-		fnReturnMap:     make(map[string]*ast.Type),
-		varTypeMap:      make(map[string]*ast.Type),
-		paramMap:        make(map[string]string),
-		globalVarMap:    make(map[string]string),
-		objAliasMap:     make(map[string]objectRef),
-		objFieldsMap:    make(map[string][]string),
-		objPropTypeMap:  make(map[string]*ast.Type),
-		stringConstMap:  make(map[string]string),
-		staticListMap:   make(map[string][]string),
-		controlAssigned: make(map[string]bool),
-		fnParamTypes:    make(map[string]*ast.Type),
-		fnParamNames:    make(map[string][]string),
-		classMap:        make(map[string]*ast.ClassDecl),
-		varClassMap:     make(map[string]string),
-		floatVars:       make(map[string]bool),
-		listLenMap:      make(map[string]string),
-		runtimeHelpers:  make(map[string]bool),
-		argsOptions:     make(map[string]bool),
-		argsFlags:       make(map[string]bool),
-		cmdScope:        newCmdScope(nil),
-		cmdChains:       make(map[string]ast.Expression),
-		topLevel:        true,
+		fnReturnMap:      make(map[string]*ast.Type),
+		varTypeMap:       make(map[string]*ast.Type),
+		paramMap:         make(map[string]string),
+		globalVarMap:     make(map[string]string),
+		objAliasMap:      make(map[string]objectRef),
+		objFieldsMap:     make(map[string][]string),
+		objPropTypeMap:   make(map[string]*ast.Type),
+		stringConstMap:   make(map[string]string),
+		staticListMap:    make(map[string][]string),
+		staticListValues: make(map[string][]string),
+		controlAssigned:  make(map[string]bool),
+		fnParamTypes:     make(map[string]*ast.Type),
+		fnParamNames:     make(map[string][]string),
+		classMap:         make(map[string]*ast.ClassDecl),
+		varClassMap:      make(map[string]string),
+		floatVars:        make(map[string]bool),
+		listLenMap:       make(map[string]string),
+		runtimeHelpers:   make(map[string]bool),
+		argsOptions:      make(map[string]bool),
+		argsFlags:        make(map[string]bool),
+		cmdScope:         newCmdScope(nil),
+		cmdChains:        make(map[string]ast.Expression),
+		topLevel:         true,
 	}
 }
 
@@ -2011,46 +2013,51 @@ func staticScalarListValuesWithoutNewlines(expr ast.Expression) ([]string, bool)
 	return values, true
 }
 
-func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
+func staticListValuesWithoutNewlinesExpr(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
-	case *ast.ListLit:
-		return staticForListWords(e)
 	case *ast.MethodCallExpr:
 		values, ok := staticStringSplitValues(e)
 		if !ok {
 			return nil, false
 		}
-		words := make([]string, 0, len(values))
-		for _, value := range values {
-			words = append(words, shellQuote(value))
-		}
-		return words, true
-	case *ast.BuiltinCallExpr:
-		values, ok := staticScalarListValuesWithoutNewlines(e)
-		if !ok {
-			return nil, false
-		}
-		words := make([]string, 0, len(values))
-		for _, value := range values {
-			words = append(words, shellQuote(value))
-		}
-		return words, true
+		return values, true
 	case *ast.AsExpr:
-		return staticForListWordsExpr(e.Expr)
+		return staticListValuesWithoutNewlinesExpr(e.Expr)
 	default:
+		return staticScalarListValuesWithoutNewlines(expr)
+	}
+}
+
+func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
+	values, ok := staticListValuesWithoutNewlinesExpr(expr)
+	if !ok {
 		return nil, false
 	}
+	words := make([]string, 0, len(values))
+	for _, value := range values {
+		words = append(words, shellQuote(value))
+	}
+	return words, true
 }
 
 func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression) {
 	if g.staticListMap == nil {
 		g.staticListMap = make(map[string][]string)
 	}
-	if words, ok := staticForListWordsExpr(expr); ok {
+	if g.staticListValues == nil {
+		g.staticListValues = make(map[string][]string)
+	}
+	if values, ok := staticListValuesWithoutNewlinesExpr(expr); ok {
+		words := make([]string, 0, len(values))
+		for _, value := range values {
+			words = append(words, shellQuote(value))
+		}
 		g.staticListMap[varName] = words
+		g.staticListValues[varName] = values
 		return
 	}
 	delete(g.staticListMap, varName)
+	delete(g.staticListValues, varName)
 }
 
 func staticListLiteralValue(list *ast.ListLit) (string, bool) {
@@ -2754,6 +2761,8 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 					if err != nil {
 						return err
 					}
+					delete(g.staticListMap, recvVar)
+					delete(g.staticListValues, recvVar)
 					g.line(fmt.Sprintf("%s=%s", recvVar, val))
 					return nil
 				}
@@ -4039,6 +4048,14 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 			return false, true
+		}
+	case *ast.MethodCallExpr:
+		if e.Method == "includes" {
+			value, ok, err := g.genStaticListSearchMethod(e)
+			if err != nil || !ok {
+				return false, false
+			}
+			return value == "1", true
 		}
 	}
 	return false, false
@@ -5603,7 +5620,7 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 }
 
 func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	values, ok := staticScalarListValuesWithoutNewlines(e.Receiver)
+	values, ok := g.staticListValuesWithoutNewlines(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -5634,7 +5651,7 @@ func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bo
 	default:
 		return "", false, nil
 	}
-	values, ok := staticScalarListValues(e.Receiver)
+	values, ok := g.staticListValuesForSearch(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -5669,6 +5686,43 @@ func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bo
 		return "0", true, nil
 	}
 	return strconv.Itoa(index), true, nil
+}
+
+func (g *Generator) staticListValuesWithoutNewlines(expr ast.Expression) ([]string, bool) {
+	if values, ok := staticListValuesWithoutNewlinesExpr(expr); ok {
+		return values, true
+	}
+	if ident, ok := expr.(*ast.IdentExpr); ok {
+		if g.controlAssigned[ident.Name] {
+			return nil, false
+		}
+		values, ok := g.staticListValues[g.resolveVarName(ident.Name)]
+		return values, ok
+	}
+	if e, ok := expr.(*ast.AsExpr); ok {
+		return g.staticListValuesWithoutNewlines(e.Expr)
+	}
+	return nil, false
+}
+
+func (g *Generator) staticListValuesForSearch(expr ast.Expression) ([]string, bool) {
+	if values, ok := staticScalarListValues(expr); ok {
+		return values, true
+	}
+	if values, ok := staticStringSplitValues(expr); ok {
+		return values, true
+	}
+	if ident, ok := expr.(*ast.IdentExpr); ok {
+		if g.controlAssigned[ident.Name] {
+			return nil, false
+		}
+		values, ok := g.staticListValues[g.resolveVarName(ident.Name)]
+		return values, ok
+	}
+	if e, ok := expr.(*ast.AsExpr); ok {
+		return g.staticListValuesForSearch(e.Expr)
+	}
+	return nil, false
 }
 
 func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {
@@ -6959,6 +7013,7 @@ func (g *Generator) genIndexAssign(s *ast.IndexAssignStmt) error {
 		return err
 	}
 	delete(g.staticListMap, listVar)
+	delete(g.staticListValues, listVar)
 	g.line(fmt.Sprintf("%s=$(printf '%%s\\n' \"$%s\" | awk -v n=$(( %s + 1 )) -v v=%s '{if (NR==n) print v; else print}')", listVar, listVar, stripQuotes(indexStr), val))
 	return nil
 }
