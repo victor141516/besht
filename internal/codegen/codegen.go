@@ -1931,6 +1931,9 @@ func (g *Generator) genForRange(s *ast.ForStmt, r *ast.BuiltinCallExpr) error {
 	if len(r.Args) != 2 {
 		return fmt.Errorf("Besht.iter.range() takes 2 arguments")
 	}
+	if words, ok := staticRangeWords(r.Args[0], r.Args[1]); ok {
+		return g.genForStaticRange(s, words)
+	}
 	startStr, err := g.genExprValue(r.Args[0])
 	if err != nil {
 		return err
@@ -1950,6 +1953,61 @@ func (g *Generator) genForRange(s *ast.ForStmt, r *ast.BuiltinCallExpr) error {
 		}
 	}
 	g.line(fmt.Sprintf("%s=$(( %s + 1 ))", iVar, iVar))
+	g.pop()
+	g.line("done")
+	g.undeclareLoopVar(s.VarName)
+	return nil
+}
+
+const maxStaticRangeInline = 128
+const maxStaticIntegralFold = 9007199254740991.0
+
+func staticRangeWords(startExpr, endExpr ast.Expression) ([]string, bool) {
+	start, ok := staticIntegralNumberValue(startExpr)
+	if !ok {
+		return nil, false
+	}
+	end, ok := staticIntegralNumberValue(endExpr)
+	if !ok {
+		return nil, false
+	}
+	if end < start {
+		return []string{}, true
+	}
+	diff := uint64(end) - uint64(start)
+	if diff >= maxStaticRangeInline {
+		return nil, false
+	}
+	words := make([]string, 0, int(diff)+1)
+	for i := int64(0); i <= int64(diff); i++ {
+		words = append(words, strconv.FormatInt(start+i, 10))
+	}
+	return words, true
+}
+
+func staticIntegralNumberValue(expr ast.Expression) (int64, bool) {
+	value, ok := staticArithmeticNumberValue(expr)
+	if !ok || value != math.Trunc(value) {
+		return 0, false
+	}
+	if value < -maxStaticIntegralFold || value > maxStaticIntegralFold {
+		return 0, false
+	}
+	return int64(value), true
+}
+
+func (g *Generator) genForStaticRange(s *ast.ForStmt, words []string) error {
+	if len(words) == 0 {
+		return nil
+	}
+	iVar := g.declareLoopVar(s.VarName)
+	g.line(fmt.Sprintf("for %s in %s; do", iVar, strings.Join(words, " ")))
+	g.push()
+	for _, stmt := range s.Body.Statements {
+		if err := g.genStmt(stmt); err != nil {
+			return err
+		}
+	}
 	g.pop()
 	g.line("done")
 	g.undeclareLoopVar(s.VarName)

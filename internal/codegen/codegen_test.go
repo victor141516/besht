@@ -275,11 +275,43 @@ while (n > 0) {
 
 func TestCodegen_ForRange(t *testing.T) {
 	out := compile(t, `for (i in Besht.iter.range(1, 10)) {
-    $("echo", "${i}").run()
+    console.log(i)
 }`)
-	assertContains(t, out, `while [`)
-	assertContains(t, out, `-le 10`)
+	assertContains(t, out, `for i in 1 2 3 4 5 6 7 8 9 10; do`)
+	assertContains(t, out, `printf '%s\n' "$i"`)
 	assertContains(t, out, `done`)
+	assertNotContains(t, out, `while [`)
+	assertNotContains(t, out, `i=$(( i + 1 ))`)
+}
+
+func TestCodegen_ForRangeStaticArithmetic(t *testing.T) {
+	out := compile(t, `for (i in Besht.iter.range(1 + 1, 2 * 2)) {
+    console.log(i)
+}`)
+	assertContains(t, out, `for i in 2 3 4; do`)
+	assertContains(t, out, `printf '%s\n' "$i"`)
+	assertNotContains(t, out, `while [`)
+}
+
+func TestCodegen_ForRangeDynamicFallback(t *testing.T) {
+	out := compile(t, `let start = 1
+let end = 3
+for (i in Besht.iter.range(start, end)) {
+    console.log(i)
+}`)
+	assertContains(t, out, `i="$start"`)
+	assertContains(t, out, `while [ "$i" -le "$end" ]; do`)
+	assertContains(t, out, `i=$(( i + 1 ))`)
+}
+
+func TestCodegen_ForRangeLargeStaticFallback(t *testing.T) {
+	out := compile(t, `for (i in Besht.iter.range(1, 129)) {
+    console.log(i)
+}`)
+	assertContains(t, out, `i=1`)
+	assertContains(t, out, `while [ "$i" -le 129 ]; do`)
+	assertContains(t, out, `i=$(( i + 1 ))`)
+	assertNotContains(t, out, `for i in 1 2 3`)
 }
 
 func TestCodegen_ForList(t *testing.T) {
