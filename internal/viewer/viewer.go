@@ -1,8 +1,10 @@
 package viewer
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,24 +29,43 @@ type group struct {
 }
 
 type sourceCache struct {
-	files map[string][]string
+	files     map[string]sourceFile
+	highlight HighlightFunc
+}
+
+type sourceFile struct {
+	lines []string
+}
+
+type HighlightFunc func(code, language string) ([]string, error)
+
+type RenderOptions struct {
+	Highlight HighlightFunc
 }
 
 // Build compiles entryPath and returns a side-by-side source/shell view.
 // Source comments are enabled internally for mapping, but never appear in the
 // rendered shell pane.
 func Build(entryPath string, opts codegen.Options, width int) (string, error) {
+	return BuildWithOptions(entryPath, opts, width, RenderOptions{})
+}
+
+func BuildWithOptions(entryPath string, opts codegen.Options, width int, renderOpts RenderOptions) (string, error) {
 	opts.NoSourceMap = false
 	compiled, err := codegen.CompileFile(entryPath, opts)
 	if err != nil {
 		return "", err
 	}
-	return Render(compiled, width)
+	return RenderWithOptions(compiled, width, renderOpts)
 }
 
 func Render(compiled string, width int) (string, error) {
+	return RenderWithOptions(compiled, width, RenderOptions{})
+}
+
+func RenderWithOptions(compiled string, width int, opts RenderOptions) (string, error) {
 	groups, maxShellLine := parseGroups(compiled)
-	cache := sourceCache{files: make(map[string][]string)}
+	cache := sourceCache{files: make(map[string]sourceFile), highlight: opts.Highlight}
 	multipleSources := hasMultipleSources(groups)
 	leftLabelWidth := 1
 	for _, group := range groups {
@@ -59,6 +80,7 @@ func Render(compiled string, width int) (string, error) {
 	rightLabelWidth := max(1, len(strconv.Itoa(maxShellLine)))
 
 	leftTextWidth, rightTextWidth := paneWidths(width, leftLabelWidth, rightLabelWidth)
+	shellLines := highlightedShellLines(groups, maxShellLine, opts.Highlight)
 	var out strings.Builder
 	for _, group := range groups {
 		rowCount := max(1, len(group.shell))
@@ -78,7 +100,7 @@ func Render(compiled string, width int) (string, error) {
 			rightText := ""
 			if i < len(group.shell) {
 				rightLabel = strconv.Itoa(group.shell[i].number)
-				rightText = group.shell[i].text
+				rightText = shellLines[group.shell[i].number-1]
 			}
 
 			fmt.Fprintf(&out, "%*s | %s || %*s | %s\n",
@@ -92,6 +114,41 @@ func Render(compiled string, width int) (string, error) {
 		}
 	}
 	return out.String(), nil
+}
+
+func NewBatHighlighter() (HighlightFunc, bool) {
+	path, err := exec.LookPath("bat")
+	if err != nil {
+		return nil, false
+	}
+	return func(code, language string) ([]string, error) {
+		cmd := exec.Command(path, "--language="+language, "--color=always", "--style=plain", "--paging=never", "--wrap=never")
+		cmd.Stdin = strings.NewReader(code)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("bat highlight %s: %w: %s", language, err, strings.TrimSpace(stderr.String()))
+		}
+		return splitLines(string(out)), nil
+	}, true
+}
+
+func highlightedShellLines(groups []group, maxShellLine int, highlight HighlightFunc) []string {
+	lines := make([]string, maxShellLine)
+	for _, group := range groups {
+		for _, shellLine := range group.shell {
+			lines[shellLine.number-1] = shellLine.text
+		}
+	}
+	if highlight == nil || len(lines) == 0 {
+		return lines
+	}
+	highlighted, err := highlight(strings.Join(lines, "\n")+"\n", "sh")
+	if err != nil || len(highlighted) != len(lines) {
+		return lines
+	}
+	return highlighted
 }
 
 func parseGroups(compiled string) ([]group, int) {
@@ -175,19 +232,25 @@ func parseSourceComment(line string) (sourceRef, bool) {
 }
 
 func (c *sourceCache) lineText(ref sourceRef) (string, error) {
-	lines, ok := c.files[ref.file]
+	file, ok := c.files[ref.file]
 	if !ok {
 		src, err := os.ReadFile(ref.file)
 		if err != nil {
 			return "", fmt.Errorf("cannot read mapped source %s: %w", ref.file, err)
 		}
-		lines = splitSourceLines(string(src))
-		c.files[ref.file] = lines
+		lines := splitSourceLines(string(src))
+		if c.highlight != nil {
+			if highlighted, err := c.highlight(string(src), "TypeScript"); err == nil && len(highlighted) == len(lines) {
+				lines = highlighted
+			}
+		}
+		file = sourceFile{lines: lines}
+		c.files[ref.file] = file
 	}
-	if ref.line <= 0 || ref.line > len(lines) {
+	if ref.line <= 0 || ref.line > len(file.lines) {
 		return "", nil
 	}
-	return lines[ref.line-1], nil
+	return file.lines[ref.line-1], nil
 }
 
 func splitSourceLines(s string) []string {
@@ -248,18 +311,40 @@ func truncate(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if runeLen(s) <= width {
+	if visibleLen(s) <= width {
 		return s
 	}
 	if width == 1 {
 		return ">"
 	}
-	runes := []rune(s)
-	return string(runes[:width-1]) + ">"
+	limit := width - 1
+	visible := 0
+	sawANSI := false
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		if end, ok := ansiSequenceEnd(s, i); ok {
+			out.WriteString(s[i:end])
+			sawANSI = true
+			i = end
+			continue
+		}
+		if visible >= limit {
+			break
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		out.WriteRune(r)
+		visible++
+		i += size
+	}
+	if sawANSI {
+		out.WriteString("\x1b[0m")
+	}
+	out.WriteString(">")
+	return out.String()
 }
 
 func padRight(s string, width int) string {
-	padding := width - runeLen(s)
+	padding := width - visibleLen(s)
 	if padding <= 0 {
 		return s
 	}
@@ -267,8 +352,48 @@ func padRight(s string, width int) string {
 }
 
 func runeLen(s string) int {
+	return visibleLen(s)
+}
+
+func visibleLen(s string) int {
 	if utf8.ValidString(s) {
-		return utf8.RuneCountInString(s)
+		count := 0
+		for i := 0; i < len(s); {
+			if end, ok := ansiSequenceEnd(s, i); ok {
+				i = end
+				continue
+			}
+			_, size := utf8.DecodeRuneInString(s[i:])
+			count++
+			i += size
+		}
+		return count
 	}
 	return len(s)
+}
+
+func stripANSI(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		if end, ok := ansiSequenceEnd(s, i); ok {
+			i = end
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		out.WriteRune(r)
+		i += size
+	}
+	return out.String()
+}
+
+func ansiSequenceEnd(s string, start int) (int, bool) {
+	if start+2 >= len(s) || s[start] != '\x1b' || s[start+1] != '[' {
+		return 0, false
+	}
+	for i := start + 2; i < len(s); i++ {
+		if s[i] >= '@' && s[i] <= '~' {
+			return i + 1, true
+		}
+	}
+	return 0, false
 }

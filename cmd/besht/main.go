@@ -38,6 +38,9 @@ Flags:
   --check      Validate imports, command usage, and unsupported fetch APIs; do not generate output
   --version    Show version and exit
   -h, --help   Show this message
+
+Visualize:
+  Uses bat for TypeScript and shell syntax highlighting when bat is installed and output is a terminal.
 `
 
 const version = "0.1.0"
@@ -106,7 +109,7 @@ func runCompile(args []string) {
 func runVisualize(args []string) {
 	cfg := parseArgs(args, "visualize", false, false, false)
 	validateInputFile(cfg.inputFile)
-	out, err := viewer.Build(cfg.inputFile, cfg.codegenOptions(), terminalWidth())
+	out, err := viewer.BuildWithOptions(cfg.inputFile, cfg.codegenOptions(), terminalWidth(), visualRenderOptions())
 	if err != nil {
 		fatal("%s", err)
 	}

@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +76,83 @@ func TestBuildUsesSourceMapsInternallyButDoesNotDisplayThem(t *testing.T) {
 	}
 	if !strings.Contains(out, "name='Ada'") || !strings.Contains(out, "printf '%s\\n' \"$name\"") {
 		t.Fatalf("visualization should include compiled shell lines:\n%s", out)
+	}
+}
+
+func TestRenderWithHighlighterColorsBothPanes(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "main.bsh")
+	if err := os.WriteFile(srcPath, []byte("let name = \"Ada\"\nconsole.log(name)\n"), 0644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	compiled := strings.Join([]string{
+		"#!/bin/sh",
+		"# besht:" + srcPath + ":1:1",
+		"name='Ada'",
+		"# besht:" + srcPath + ":2:1",
+		"printf '%s\\n' \"$name\"",
+	}, "\n") + "\n"
+	calls := make(map[string]int)
+	highlight := func(code, language string) ([]string, error) {
+		if strings.Contains(code, "# besht:") {
+			return nil, fmt.Errorf("source map comments should not be highlighted as shell")
+		}
+		calls[language]++
+		lines := splitLines(code)
+		for i, line := range lines {
+			lines[i] = "\x1b[31m" + line + "\x1b[0m"
+		}
+		return lines, nil
+	}
+
+	out, err := RenderWithOptions(compiled, 80, RenderOptions{Highlight: highlight})
+	if err != nil {
+		t.Fatalf("RenderWithOptions: %v", err)
+	}
+	if calls["TypeScript"] != 1 || calls["sh"] != 1 {
+		t.Fatalf("highlight calls: got %#v, want TypeScript=1 and sh=1", calls)
+	}
+	if !strings.Contains(out, "\x1b[31m") {
+		t.Fatalf("rendered output should include ANSI color sequences:\n%s", out)
+	}
+	plain := stripANSI(out)
+	if strings.Contains(plain, "# besht:") {
+		t.Fatalf("rendered output should hide source comments:\n%s", plain)
+	}
+	if !strings.Contains(plain, "1 | let name = \"Ada\"") || !strings.Contains(plain, "3 | printf '%s\\n' \"$name\"") {
+		t.Fatalf("rendered output should preserve side-by-side content after stripping ANSI:\n%s", plain)
+	}
+}
+
+func TestANSIWidthHelpersIgnoreEscapeSequences(t *testing.T) {
+	colored := "\x1b[31mabcdef\x1b[0m"
+	if got := visibleLen(colored); got != 6 {
+		t.Fatalf("visibleLen: got %d, want 6", got)
+	}
+	if got := stripANSI(padRight("\x1b[31mabc\x1b[0m", 5)); got != "abc  " {
+		t.Fatalf("padRight with ANSI: got %q, want %q", got, "abc  ")
+	}
+	if got := stripANSI(truncate(colored, 4)); got != "abc>" {
+		t.Fatalf("truncate with ANSI: got %q, want %q", got, "abc>")
+	}
+}
+
+func TestNewBatHighlighterUsesBatWhenAvailable(t *testing.T) {
+	highlight, ok := NewBatHighlighter()
+	if !ok {
+		t.Skip("bat is not installed")
+	}
+	ts, err := highlight("let x = 1\n", "TypeScript")
+	if err != nil {
+		t.Fatalf("TypeScript highlight: %v", err)
+	}
+	sh, err := highlight("printf '%s\\n' hi\n", "sh")
+	if err != nil {
+		t.Fatalf("shell highlight: %v", err)
+	}
+	if !strings.Contains(strings.Join(ts, "\n"), "\x1b[") || !strings.Contains(strings.Join(sh, "\n"), "\x1b[") {
+		t.Fatalf("bat output should contain ANSI sequences, got ts=%q sh=%q", ts, sh)
 	}
 }
 

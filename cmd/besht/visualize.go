@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/victor141516/besht/internal/viewer"
 )
 
 func terminalWidth() int {
@@ -35,6 +37,24 @@ func showInTerminal(content string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func visualRenderOptions() viewer.RenderOptions {
+	if !shouldUseColor() {
+		return viewer.RenderOptions{}
+	}
+	highlight, ok := viewer.NewBatHighlighter()
+	if !ok {
+		return viewer.RenderOptions{}
+	}
+	return viewer.RenderOptions{Highlight: highlight}
+}
+
+func shouldUseColor() bool {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return isTerminal(os.Stdout)
 }
 
 func isTerminal(file *os.File) bool {

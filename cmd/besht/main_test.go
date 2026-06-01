@@ -164,6 +164,7 @@ func TestUsageDocumentsCompileAndVisualizeModes(t *testing.T) {
 		"besht compile --check <file.bsh>",
 		"besht visualize <file.bsh>",
 		"Alias for besht compile",
+		"Uses bat for TypeScript and shell syntax highlighting",
 	} {
 		if !strings.Contains(usage, want) {
 			t.Fatalf("usage missing %q", want)
