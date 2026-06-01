@@ -3047,6 +3047,38 @@ console.log(counts)`)
 	}
 }
 
+func TestIntegration_StaticObjectConsolePrintRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let user = { id: 1, name: "Ada", active: true }
+console.log(user)
+console.error(user)
+user.name = "Grace"
+console.log(user)`)
+	outShell, err := codegen.CompileFile(path, codegen.Options{})
+	if err != nil {
+		t.Fatalf("compile object print fixture: %v", err)
+	}
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(outShell), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run shell: %v\nstdout:\n%s\nstderr:\n%s\n--- script ---\n%s", err, stdout.String(), stderr.String(), outShell)
+	}
+	first := "{\n  id: 1,\n  name: Ada,\n  active: true,\n}\n"
+	second := "{\n  id: 1,\n  name: Grace,\n  active: true,\n}\n"
+	if stdout.String() != first+second {
+		t.Fatalf("stdout: got %q", stdout.String())
+	}
+	if stderr.String() != first {
+		t.Fatalf("stderr: got %q", stderr.String())
+	}
+}
+
 func TestIntegration_ObjectValuesEntriesRejectAliasMutatedRootListValues(t *testing.T) {
 	tests := []struct {
 		name    string

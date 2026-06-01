@@ -1471,6 +1471,21 @@ console.log(counts[key])`)
 	assertContains(t, out, `if [ -z "$_objk_4_19" ]`)
 }
 
+func TestCodegen_ConsoleLogStaticObjectUsesPrintfArguments(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
+console.log(user)
+console.error(user)`)
+	assertContains(t, out, `printf '{
+  id: %s,
+  name: %s,
+  active: %s,
+}
+' "$_obj_user_id" "$_obj_user_name" "$(if [ "$_obj_user_active" = 1 ]; then printf true; else printf false; fi)"`)
+	assertContains(t, out, `"$_obj_user_id" "$_obj_user_name" "$(if [ "$_obj_user_active" = 1 ]; then printf true; else printf false; fi)" >&2`)
+	assertNotContains(t, out, `id: "$_obj_user_id"`)
+	assertNotContains(t, out, `active: $(if`)
+}
+
 func TestCodegen_ConsoleLogList(t *testing.T) {
 	out := compile(t, `let nums = [0, 1]
 console.log(nums)`)

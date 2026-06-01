@@ -3846,20 +3846,21 @@ func (g *Generator) genObjectPrintCode(varName, dest string) string {
 		redirect = " >&2"
 	}
 	if fields, ok := g.objFieldsMap[varName]; ok && len(fields) > 0 {
-		var parts []string
-		for i, field := range fields {
+		var format strings.Builder
+		format.WriteString("{\n")
+		var args []string
+		for _, field := range fields {
 			propVar := objectPropVar(varName, field)
 			propType := g.objPropTypeMap[varName+"."+field]
-			if i > 0 {
-				parts = append(parts, ", ")
-			}
+			format.WriteString("  " + field + ": %s,\n")
 			if propType != nil && propType.Kind == ast.TypeBoolean {
-				parts = append(parts, field+": $(if [ \"$"+propVar+"\" = 1 ]; then printf true; else printf false; fi)")
+				args = append(args, ensureArgSafe("$(if [ \"$"+propVar+"\" = 1 ]; then printf true; else printf false; fi)"))
 			} else {
-				parts = append(parts, field+": \"$"+propVar+"\"")
+				args = append(args, "\"$"+propVar+"\"")
 			}
 		}
-		return "printf '{ " + strings.Join(parts, "") + " }\\n'" + redirect
+		format.WriteString("}\n")
+		return "printf " + shellQuote(format.String()) + " " + strings.Join(args, " ") + redirect
 	}
 	var lines []string
 	lines = append(lines, "printf '{\\n'"+redirect)
