@@ -99,7 +99,7 @@ Files use the `.bsh` extension.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
 - Static scalar list literals compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the `printf` builder.
 - Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
-- Static string literal and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths keep the POSIX `wc` path.
+- Static string literals, variables bound to static string literals, and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths keep the POSIX `wc` path.
 - `for (... of [...])` and loops over variables bound to static scalar list literals compile to compact shell `for` loops when values do not contain newlines; dynamic lists keep the newline-safe read loop.
 - Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
 - Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles compile to constants; dynamic searches keep the POSIX `grep`/`awk` path.

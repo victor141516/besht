@@ -1000,7 +1000,19 @@ let ended: string = "hi".padEnd(5, ".")`)
 func TestCodegen_StringLength(t *testing.T) {
 	out := compile(t, `let s: string = "hello"
 let n: number = s.length`)
+	assertContains(t, out, `n=5`)
+	assertNotContains(t, out, `wc -c`)
+}
+
+func TestCodegen_StringLengthFallsBackAfterControlFlowAssignment(t *testing.T) {
+	out := compile(t, `let s: string = "hello"
+while (true) {
+    let n: number = s.length
+    s = "hello!"
+    break
+}`)
 	assertContains(t, out, `wc -c`)
+	assertNotContains(t, out, `n=5`)
 }
 
 func TestCodegen_StaticStringLiteralLength(t *testing.T) {
