@@ -2006,6 +2006,25 @@ let hasLiteral: boolean = Object.hasOwn({ value: "x", enabled: true }, "enabled"
 	assertNotContains(t, out, `_bst_object_keys`)
 }
 
+func TestCodegen_BooleanPropertyCondition(t *testing.T) {
+	out := compile(t, `let user = { name: "Ada", active: true }
+if (user.active) {
+    console.log("active")
+}`)
+	assertContains(t, out, `if [ "$_obj_user_active" = 1 ]; then`)
+	assertContains(t, out, `printf '%s\n' 'active'`)
+	assertNotContains(t, out, `_bst_cond="$_obj_user_active"`)
+}
+
+func TestCodegen_StringPropertyConditionKeepsTruthyFallback(t *testing.T) {
+	out := compile(t, `let user = { name: "Ada", active: true }
+if (user.name) {
+    console.log("named")
+}`)
+	assertContains(t, out, `if (_bst_cond="$_obj_user_name"; [ -n "$_bst_cond" ] && [ "$_bst_cond" != 0 ]); then`)
+	assertNotContains(t, out, `if [ "$_obj_user_name" = 1 ]; then`)
+}
+
 func TestCodegen_StaticObjectLiteralAPIs(t *testing.T) {
 	out := compile(t, `let keys = Object.keys({ name: "Ada", active: true })
 let values = Object.values({ name: "Ada", active: true })

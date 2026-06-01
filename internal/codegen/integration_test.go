@@ -2508,6 +2508,19 @@ console.log(Object.hasOwn(counts, "c"))`)
 	}
 }
 
+func TestIntegration_BooleanPropertyConditionRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { name: "Ada", active: true }
+let other = { name: "", active: false }
+if (user.active) console.log("active")
+if (other.active) console.log("bad")
+else console.log("inactive")
+if (user.name) console.log("named")`)
+	want := "active\ninactive\nnamed\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticBooleanConsoleArgsRuntime(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `console.log(Boolean(""))
