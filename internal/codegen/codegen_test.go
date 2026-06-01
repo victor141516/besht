@@ -2101,6 +2101,45 @@ let hasLiteral: boolean = Object.hasOwn({ value: "x", enabled: true }, "enabled"
 	assertNotContains(t, out, `_bst_object_keys`)
 }
 
+func TestCodegen_StaticNamedObjectKeysAndHasOwn(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
+let keys = Object.keys(user)
+let count = Object.keys(user).length
+let joined = Object.keys(user).join(",")
+let hasName = Object.hasOwn(user, "name")
+let missing = Object.hasOwn(user, "missing")
+let invalid = Object.hasOwn(user, "bad-key")
+console.log(Object.hasOwn(user, "active"))
+for (key of Object.keys(user)) {
+    console.log(key)
+}`)
+	assertContains(t, out, "keys='id\nname\nactive'")
+	assertContains(t, out, `count=3`)
+	assertContains(t, out, `joined='id,name,active'`)
+	assertContains(t, out, `hasName=1`)
+	assertContains(t, out, `missing=0`)
+	assertContains(t, out, `invalid=0`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `for key in 'id' 'name' 'active'; do`)
+	assertNotContains(t, out, `_bst_obj_key='active'`)
+	assertNotContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `wc -l`)
+	assertNotContains(t, out, `while IFS= read -r key`)
+}
+
+func TestCodegen_StaticNamedObjectKeysFallbackAfterMutation(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada" }
+user.active = true
+let joined = Object.keys(user).join(",")
+let hasActive = Object.hasOwn(user, "active")`)
+	assertContains(t, out, `case " $_objkeys_user " in *" active "*)`)
+	assertContains(t, out, `joined=$(printf '%s`)
+	assertContains(t, out, `hasActive=$(_bst_obj_key='active'`)
+	assertContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `joined='id,name,active'`)
+	assertNotContains(t, out, `hasActive=1`)
+}
+
 func TestCodegen_BooleanPropertyCondition(t *testing.T) {
 	out := compile(t, `let user = { name: "Ada", active: true }
 if (user.active) {
