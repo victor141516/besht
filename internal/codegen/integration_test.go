@@ -1332,6 +1332,20 @@ if (false) {
 	}
 }
 
+func TestIntegration_StaticArithmeticRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(2 + 3)
+console.log(10 - 4)
+console.log(6 * 7)
+console.log(5 / 2)
+console.log(7 % 4)
+console.log((2 + 3) * 4)
+console.log(-3 + 5)`)
+	want := "5\n6\n42\n2.5\n3\n20\n2\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_NumberMethods(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", "let n = 42\nlet ns = n.toString()\nlet pi = 3.14159\nlet fixed = pi.toFixed(2)\nconsole.log(ns)\nconsole.log(fixed)\n")

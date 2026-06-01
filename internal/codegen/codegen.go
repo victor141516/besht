@@ -2402,6 +2402,48 @@ func staticIntNumberValue(expr ast.Expression) (int, bool) {
 	return int(v), true
 }
 
+func staticArithmeticNumberValue(expr ast.Expression) (float64, bool) {
+	if value, ok := staticNumberValue(expr); ok {
+		return value, true
+	}
+	e, ok := expr.(*ast.BinaryExpr)
+	if !ok {
+		return 0, false
+	}
+	left, leftOK := staticArithmeticNumberValue(e.Left)
+	right, rightOK := staticArithmeticNumberValue(e.Right)
+	if !leftOK || !rightOK {
+		return 0, false
+	}
+	switch e.Op {
+	case "+":
+		return left + right, true
+	case "-":
+		return left - right, true
+	case "*":
+		return left * right, true
+	case "/":
+		if right == 0 {
+			return 0, false
+		}
+		return left / right, true
+	case "%":
+		if right == 0 {
+			return 0, false
+		}
+		return math.Mod(left, right), true
+	default:
+		return 0, false
+	}
+}
+
+func formatStaticArithmeticNumber(v float64) string {
+	if v == 0 {
+		v = 0
+	}
+	return strconv.FormatFloat(v, 'g', 16, 64)
+}
+
 func formatStaticNumber(v float64) string {
 	if v == 0 {
 		v = 0
@@ -3977,6 +4019,10 @@ func (g *Generator) genFnArgs(args []ast.Expression) ([]string, error) {
 }
 
 func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (string, error) {
+	if value, ok := staticArithmeticNumberValue(e); ok {
+		return formatStaticArithmeticNumber(value), nil
+	}
+
 	leftStr, err := g.genExprValue(e.Left)
 	if err != nil {
 		return "", err
@@ -4100,6 +4146,12 @@ func (g *Generator) genUpdateRHS(e *ast.UpdateExpr) string {
 }
 
 func (g *Generator) genUnaryRHS(e *ast.UnaryExpr) (string, error) {
+	if e.Op == "-" {
+		if value, ok := staticNumberValue(e); ok {
+			return formatStaticArithmeticNumber(value), nil
+		}
+	}
+
 	inner, err := g.genExprValue(e.Expr)
 	if err != nil {
 		return "", err
