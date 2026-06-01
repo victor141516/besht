@@ -771,6 +771,18 @@ console.log(msg)`)
 	assertContains(t, out, `printf '%s\n'`)
 }
 
+func TestCodegen_StaticBooleanConsoleArgs(t *testing.T) {
+	out := compile(t, `console.log(Boolean(""))
+console.log(Boolean("x"))
+console.log(!false)
+console.error(true && false)`)
+	assertContains(t, out, `printf '%s\n' false`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' false >&2`)
+	assertNotContains(t, out, `$(if [ 0 = 1 ]; then printf true; else printf false; fi)`)
+	assertNotContains(t, out, `$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+}
+
 func TestCodegen_IndexExpr(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
 let first: string = files[0]`)

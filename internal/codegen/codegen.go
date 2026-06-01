@@ -3761,6 +3761,12 @@ func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
 func (g *Generator) genArgs(args []ast.Expression) ([]string, error) {
 	var out []string
 	for _, arg := range args {
+		if g.isBooleanExpr(arg) {
+			if val, ok := g.genStaticBooleanArg(arg); ok {
+				out = append(out, val)
+				continue
+			}
+		}
 		val, err := g.genExprValue(arg)
 		if err != nil {
 			return nil, err
@@ -3771,6 +3777,102 @@ func (g *Generator) genArgs(args []ast.Expression) ([]string, error) {
 		out = append(out, ensureArgSafe(val))
 	}
 	return out, nil
+}
+
+func (g *Generator) genStaticBooleanArg(expr ast.Expression) (string, bool) {
+	value, ok := g.staticBooleanValue(expr)
+	if !ok {
+		return "", false
+	}
+	if value {
+		return "true", true
+	}
+	return "false", true
+}
+
+func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticBooleanValue(e.Expr)
+	case *ast.BoolLit:
+		return e.Value, true
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			value, ok := g.staticTruthyValue(e.Expr)
+			if ok {
+				return !value, true
+			}
+		}
+	case *ast.BinaryExpr:
+		left, leftOK := g.staticBooleanValue(e.Left)
+		right, rightOK := g.staticBooleanValue(e.Right)
+		if !leftOK || !rightOK {
+			return false, false
+		}
+		switch e.Op {
+		case "&&":
+			return left && right, true
+		case "||":
+			return left || right, true
+		}
+	case *ast.BuiltinCallExpr:
+		switch e.Name {
+		case "Boolean":
+			if len(e.Args) != 1 {
+				return false, false
+			}
+			return g.staticTruthyValue(e.Args[0])
+		case "Array.isArray":
+			if len(e.Args) != 1 {
+				return false, false
+			}
+			t := g.inferReceiverType(e.Args[0])
+			return t != nil && t.Kind == ast.TypeList, true
+		case "Number.isFinite":
+			if len(e.Args) != 1 {
+				return false, false
+			}
+			return true, true
+		case "Number.isNaN":
+			if len(e.Args) != 1 {
+				return false, false
+			}
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticTruthyValue(e.Expr)
+	case *ast.BoolLit:
+		return e.Value, true
+	case *ast.UndefinedLit, *ast.NullLit:
+		return false, true
+	case *ast.StringLit:
+		return e.Value != "", true
+	case *ast.RawStringLit:
+		return e.Value != "", true
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return strings.Join(e.Parts, "") != "", true
+		}
+	case *ast.IntLit:
+		return e.Value != 0, true
+	case *ast.FloatLit:
+		f, err := strconv.ParseFloat(e.Value, 64)
+		if err != nil {
+			return false, false
+		}
+		return f != 0, true
+	case *ast.ListLit, *ast.ObjectLit, *ast.NewExpr:
+		return true, true
+	case *ast.BuiltinCallExpr:
+		return g.staticBooleanValue(e)
+	}
+	return false, false
 }
 
 func (g *Generator) genFnArgs(args []ast.Expression) ([]string, error) {

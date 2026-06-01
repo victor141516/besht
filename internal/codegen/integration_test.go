@@ -1,6 +1,7 @@
 package codegen_test
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2437,6 +2438,35 @@ console.log(Object.hasOwn(counts, "c"))`)
 	want := "id,name,active,role\n1,Victor,true,admin\nid=1\nactive=true\nrole=admin\nid,name,active,role\nid,name,active,role\ntrue\nfalse\nfalse\ntrue\nhas active\ntrue\nother\nid,name,active,role\neditor:id,name,active,role\nother\nid,name,active,role\nother\n\nvalue,enabled\nx,true\nenabled=true\ntrue\nU,D\nU,D\ntrue\nU,D\na,b\n2,1\ntrue\nfalse\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticBooleanConsoleArgsRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `console.log(Boolean(""))
+console.log(Boolean("x"))
+console.log(!false)
+console.error(true && false)
+`)
+	out := compileFile(t, path)
+	assertNotContains(t, out, `$(if [ 0 = 1 ]; then printf true; else printf false; fi)`)
+	assertNotContains(t, out, `$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run shell: %v\nstdout:\n%s\nstderr:\n%s\n--- script ---\n%s", err, stdout.String(), stderr.String(), out)
+	}
+	if stdout.String() != "false\ntrue\ntrue\n" {
+		t.Fatalf("stdout: got %q", stdout.String())
+	}
+	if stderr.String() != "false\n" {
+		t.Fatalf("stderr: got %q", stderr.String())
 	}
 }
 

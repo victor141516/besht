@@ -740,7 +740,7 @@ Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known lists
 ```
 
-Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions.
+Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`.
 
 ## Operators
 
