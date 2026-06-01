@@ -2521,6 +2521,18 @@ if (user.name) console.log("named")`)
 	}
 }
 
+func TestIntegration_StaticObjectPropertyReadsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { name: "Ada", city: "Paris", active: true }
+console.log(user.name)
+if (user.active) console.log(user.city)
+user.name = "Grace"
+console.log(user.name)`)
+	want := "Ada\nParis\nGrace\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticBooleanConsoleArgsRuntime(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `console.log(Boolean(""))

@@ -15,40 +15,42 @@ import (
 const nullishSentinelVar = "_BESHT_NULLISH_SENTINEL"
 
 type Generator struct {
-	sb              strings.Builder
-	indent          int
-	currentFn       string
-	fnReturnMap     map[string]*ast.Type
-	varTypeMap      map[string]*ast.Type // codegen-level var → inferred type (list detection)
-	inFunction      bool
-	inLoop          bool
-	topLevel        bool
-	paramMap        map[string]string // besht param name → mangled shell var name
-	globalVarMap    map[string]string // top-level/imported besht name → shell var name
-	objAliasMap     map[string]objectRef
-	objFieldsMap    map[string][]string  // object var name → list of field names
-	objPropTypeMap  map[string]*ast.Type // "varName.propName" → property type
-	stringConstMap  map[string]string
-	staticListMap   map[string][]string
-	controlAssigned map[string]bool
-	fnParamTypes    map[string]*ast.Type // current fn param name → type annotation
-	fnParamNames    map[string][]string  // function name → param names (in order)
-	classMap        map[string]*ast.ClassDecl
-	varClassMap     map[string]string
-	currentClass    string
-	currentThisVar  string
-	floatVars       map[string]bool
-	listLenMap      map[string]string
-	runtimeHelpers  map[string]bool
-	argsOptions     map[string]bool
-	argsFlags       map[string]bool
-	NoCheck         bool
-	NoSourceMap     bool
-	cmdAnalysis     *CmdAnalysis
-	cmdScope        *cmdScope
-	cmdChains       map[string]ast.Expression
-	reduceReturns   []reduceReturnContext
-	mapReturns      []mapReturnContext
+	sb                strings.Builder
+	indent            int
+	currentFn         string
+	fnReturnMap       map[string]*ast.Type
+	varTypeMap        map[string]*ast.Type // codegen-level var → inferred type (list detection)
+	inFunction        bool
+	inLoop            bool
+	topLevel          bool
+	paramMap          map[string]string // besht param name → mangled shell var name
+	globalVarMap      map[string]string // top-level/imported besht name → shell var name
+	objAliasMap       map[string]objectRef
+	objFieldsMap      map[string][]string  // object var name → list of field names
+	objPropTypeMap    map[string]*ast.Type // "varName.propName" → property type
+	objectConstMap    map[string]string    // "varName.propName" → static shell value
+	objectConstUnsafe map[string]bool
+	stringConstMap    map[string]string
+	staticListMap     map[string][]string
+	controlAssigned   map[string]bool
+	fnParamTypes      map[string]*ast.Type // current fn param name → type annotation
+	fnParamNames      map[string][]string  // function name → param names (in order)
+	classMap          map[string]*ast.ClassDecl
+	varClassMap       map[string]string
+	currentClass      string
+	currentThisVar    string
+	floatVars         map[string]bool
+	listLenMap        map[string]string
+	runtimeHelpers    map[string]bool
+	argsOptions       map[string]bool
+	argsFlags         map[string]bool
+	NoCheck           bool
+	NoSourceMap       bool
+	cmdAnalysis       *CmdAnalysis
+	cmdScope          *cmdScope
+	cmdChains         map[string]ast.Expression
+	reduceReturns     []reduceReturnContext
+	mapReturns        []mapReturnContext
 }
 
 type reduceReturnContext struct {
@@ -122,28 +124,30 @@ type Options struct {
 
 func New() *Generator {
 	return &Generator{
-		fnReturnMap:     make(map[string]*ast.Type),
-		varTypeMap:      make(map[string]*ast.Type),
-		paramMap:        make(map[string]string),
-		globalVarMap:    make(map[string]string),
-		objAliasMap:     make(map[string]objectRef),
-		objFieldsMap:    make(map[string][]string),
-		objPropTypeMap:  make(map[string]*ast.Type),
-		stringConstMap:  make(map[string]string),
-		staticListMap:   make(map[string][]string),
-		controlAssigned: make(map[string]bool),
-		fnParamTypes:    make(map[string]*ast.Type),
-		fnParamNames:    make(map[string][]string),
-		classMap:        make(map[string]*ast.ClassDecl),
-		varClassMap:     make(map[string]string),
-		floatVars:       make(map[string]bool),
-		listLenMap:      make(map[string]string),
-		runtimeHelpers:  make(map[string]bool),
-		argsOptions:     make(map[string]bool),
-		argsFlags:       make(map[string]bool),
-		cmdScope:        newCmdScope(nil),
-		cmdChains:       make(map[string]ast.Expression),
-		topLevel:        true,
+		fnReturnMap:       make(map[string]*ast.Type),
+		varTypeMap:        make(map[string]*ast.Type),
+		paramMap:          make(map[string]string),
+		globalVarMap:      make(map[string]string),
+		objAliasMap:       make(map[string]objectRef),
+		objFieldsMap:      make(map[string][]string),
+		objPropTypeMap:    make(map[string]*ast.Type),
+		objectConstMap:    make(map[string]string),
+		objectConstUnsafe: make(map[string]bool),
+		stringConstMap:    make(map[string]string),
+		staticListMap:     make(map[string][]string),
+		controlAssigned:   make(map[string]bool),
+		fnParamTypes:      make(map[string]*ast.Type),
+		fnParamNames:      make(map[string][]string),
+		classMap:          make(map[string]*ast.ClassDecl),
+		varClassMap:       make(map[string]string),
+		floatVars:         make(map[string]bool),
+		listLenMap:        make(map[string]string),
+		runtimeHelpers:    make(map[string]bool),
+		argsOptions:       make(map[string]bool),
+		argsFlags:         make(map[string]bool),
+		cmdScope:          newCmdScope(nil),
+		cmdChains:         make(map[string]ast.Expression),
+		topLevel:          true,
 	}
 }
 
@@ -259,6 +263,89 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 		walkStmt(stmt, false)
 	}
 	return assigned
+}
+
+func collectObjectConstUnsafeRoots(stmts []ast.Statement) map[string]bool {
+	unsafe := make(map[string]bool)
+	markIdent := func(expr ast.Expression) {
+		if ident, ok := expr.(*ast.IdentExpr); ok {
+			unsafe[ident.Name] = true
+		}
+	}
+
+	walkArgsStatements(stmts, func(expr ast.Expression) {
+		call, ok := expr.(*ast.FnCallExpr)
+		if !ok {
+			return
+		}
+		for _, arg := range call.Args {
+			markIdent(arg)
+		}
+	})
+
+	var walkStmt func(ast.Statement)
+	var walkBlock func(*ast.Block)
+	walkBlock = func(block *ast.Block) {
+		if block == nil {
+			return
+		}
+		for _, stmt := range block.Statements {
+			walkStmt(stmt)
+		}
+	}
+	walkStmt = func(stmt ast.Statement) {
+		switch s := stmt.(type) {
+		case nil, *ast.ImportDecl, *ast.DeclareStmt, *ast.DeclareFnStmt, *ast.BreakStmt, *ast.ContinueStmt:
+			return
+		case *ast.LetDecl:
+			markIdent(s.Value)
+		case *ast.Assignment:
+			unsafe[s.Name] = true
+		case *ast.IndexAssignStmt:
+			unsafe[s.Name] = true
+		case *ast.PropertyAssignStmt:
+			unsafe[s.Object] = true
+		case *ast.IfStmt:
+			walkBlock(s.Then)
+			for _, elseif := range s.ElseIfs {
+				walkBlock(elseif.Body)
+			}
+			walkBlock(s.Else)
+		case *ast.WhileStmt:
+			walkBlock(s.Body)
+		case *ast.ForStmt:
+			walkBlock(s.Body)
+		case *ast.CStyleForStmt:
+			walkStmt(s.Init)
+			walkStmt(s.Update)
+			walkBlock(s.Body)
+		case *ast.TryStmt:
+			walkBlock(s.Body)
+			walkBlock(s.Catch)
+		case *ast.SwitchStmt:
+			for _, swCase := range s.Cases {
+				walkBlock(swCase.Body)
+			}
+		case *ast.FnDecl:
+			walkBlock(s.Body)
+		case *ast.ClassDecl:
+			if s.Constructor != nil {
+				walkBlock(s.Constructor.Body)
+			}
+			for _, method := range s.Methods {
+				walkBlock(method.Body)
+			}
+			for _, accessor := range s.Accessors {
+				walkBlock(accessor.Body)
+			}
+		case *ast.Block:
+			walkBlock(s)
+		}
+	}
+	for _, stmt := range stmts {
+		walkStmt(stmt)
+	}
+	return unsafe
 }
 
 func walkArgsStmt(stmt ast.Statement, visit func(ast.Expression)) {
@@ -744,6 +831,7 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 
 	g.collectGlobalBindings(prog.Statements)
 	g.controlAssigned = collectControlFlowAssignments(prog.Statements)
+	g.objectConstUnsafe = collectObjectConstUnsafeRoots(prog.Statements)
 	for _, stmt := range prog.Statements {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
@@ -929,6 +1017,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 			if pt != nil {
 				g.objPropTypeMap[varName+"."+field.Key] = pt
 			}
+			g.recordObjectStaticFieldValue(varName, field.Key, field.Value)
 			g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
 		}
 		g.objFieldsMap[varName] = fields
@@ -1458,6 +1547,7 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 
 func (g *Generator) genAssignment(s *ast.Assignment) error {
 	varName := g.resolveVarName(s.Name)
+	g.deleteObjectStaticValues(varName)
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
 		return err
 	}
@@ -1558,6 +1648,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevFnParamTypes := g.fnParamTypes
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
+	prevObjectConstMap := g.objectConstMap
 	prevStringConstMap := g.stringConstMap
 	g.currentFn = s.Name
 	g.inFunction = true
@@ -1566,6 +1657,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.fnParamTypes = make(map[string]*ast.Type)
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
+	g.objectConstMap = cloneStringMap(prevObjectConstMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 
 	for i, param := range s.Params {
@@ -1596,6 +1688,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.fnParamTypes = prevFnParamTypes
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
+	g.objectConstMap = prevObjectConstMap
 	g.stringConstMap = prevStringConstMap
 	g.pop()
 	g.line("}")
@@ -1697,6 +1790,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevObjAliasMap := g.objAliasMap
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
+	prevObjectConstMap := g.objectConstMap
 	prevStringConstMap := g.stringConstMap
 	prevClass := g.currentClass
 	prevThis := g.currentThisVar
@@ -1707,6 +1801,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objAliasMap = cloneObjectRefMap(prevObjAliasMap)
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
+	g.objectConstMap = cloneStringMap(prevObjectConstMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.currentClass = c.Name
 	g.currentThisVar = ""
@@ -1746,6 +1841,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objAliasMap = prevObjAliasMap
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
+	g.objectConstMap = prevObjectConstMap
 	g.stringConstMap = prevStringConstMap
 	g.currentClass = prevClass
 	g.currentThisVar = prevThis
@@ -1972,6 +2068,14 @@ func staticScalarValue(expr ast.Expression) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func staticScalarShellValue(expr ast.Expression) (string, bool) {
+	value, ok := staticScalarValue(expr)
+	if !ok {
+		return "", false
+	}
+	return shellQuote(value), true
 }
 
 func staticScalarListValues(expr ast.Expression) ([]string, bool) {
@@ -3225,10 +3329,43 @@ func (g *Generator) recordObjectStaticFieldType(varName, field string, value ast
 	g.objFieldsMap[varName] = appendUniqueString(g.objFieldsMap[varName], field)
 }
 
+func (g *Generator) recordObjectStaticFieldValue(varName, field string, value ast.Expression) {
+	if g.objectConstMap == nil {
+		g.objectConstMap = make(map[string]string)
+	}
+	if val, ok := staticScalarShellValue(value); ok {
+		g.objectConstMap[varName+"."+field] = val
+		return
+	}
+	delete(g.objectConstMap, varName+"."+field)
+}
+
+func (g *Generator) deleteObjectStaticFieldValue(varName, field string) {
+	delete(g.objectConstMap, varName+"."+field)
+}
+
+func (g *Generator) deleteObjectStaticValues(varName string) {
+	prefix := varName + "."
+	for key := range g.objectConstMap {
+		if strings.HasPrefix(key, prefix) {
+			delete(g.objectConstMap, key)
+		}
+	}
+}
+
+func (g *Generator) staticObjectPropertyValue(receiver string, varName string, property string) (string, bool) {
+	if g.objectConstUnsafe[receiver] || g.objectConstUnsafe[varName] {
+		return "", false
+	}
+	value, ok := g.objectConstMap[varName+"."+property]
+	return value, ok
+}
+
 func (g *Generator) recordObjectAssignmentType(ref objectRef, field string, value ast.Expression, dynamicField bool) objectRef {
 	pt := g.inferReceiverType(value)
 	if ref.StaticName != "" {
 		if dynamicField {
+			g.deleteObjectStaticValues(ref.StaticName)
 			for _, knownField := range g.objFieldsMap[ref.StaticName] {
 				if typ := g.objPropTypeMap[ref.StaticName+"."+knownField]; typ != nil && typ.Kind == ast.TypeBoolean {
 					g.objPropTypeMap[ref.StaticName+"."+knownField] = typeString
@@ -3238,6 +3375,7 @@ func (g *Generator) recordObjectAssignmentType(ref objectRef, field string, valu
 				g.objPropTypeMap[ref.StaticName+".*"] = pt
 			}
 		} else {
+			g.deleteObjectStaticFieldValue(ref.StaticName, field)
 			g.recordObjectStaticFieldType(ref.StaticName, field, value)
 			if unsupportedObjectValueType(pt) {
 				g.objPropTypeMap[ref.StaticName+".*"] = pt
@@ -3970,6 +4108,23 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 			return false, true
 		}
+	case *ast.PropertyExpr:
+		if e.Optional {
+			return false, false
+		}
+		ident, ok := e.Receiver.(*ast.IdentExpr)
+		if !ok {
+			return false, false
+		}
+		t := g.inferReceiverType(e)
+		if t == nil || t.Kind != ast.TypeBoolean {
+			return false, false
+		}
+		val, ok := g.staticObjectPropertyValue(ident.Name, g.resolveVarName(ident.Name), e.Property)
+		if !ok {
+			return false, false
+		}
+		return val == "1" || val == "'1'", true
 	}
 	return false, false
 }
@@ -4366,6 +4521,9 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorSet, false); ok {
 				return "", fmt.Errorf("property %q has a setter but no getter", e.Property)
 			}
+		}
+		if val, ok := g.staticObjectPropertyValue(ident.Name, varName, e.Property); ok {
+			return val, nil
 		}
 		if ref, ok := g.objAliasMap[ident.Name]; ok {
 			return g.genObjectRefProperty(ref, e.Property, e.Pos), nil

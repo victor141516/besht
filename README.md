@@ -109,6 +109,7 @@ Files use the `.bsh` extension.
 - Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
 - Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles compile to constants; dynamic searches keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; named objects keep compiler-managed metadata so mutations stay visible.
+- Direct reads of scalar properties from static object literal bindings compile to constants when the object is not assigned, computed-assigned, aliased, or passed to a function.
 - Object literals compile to per-property shell variables; `Object.keys(obj)` returns known object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership.
 - Boolean object properties used directly in conditions compile to direct `= 1` shell tests; non-boolean property conditions keep generic JavaScript-style truthiness.
 - Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters.
