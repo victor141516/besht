@@ -539,7 +539,7 @@ for (let f of files) {
 for (f of files) $("echo", f).run()
 ```
 
-Static scalar list literals, and variables bound to them, compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
+Static scalar list literals, static scalar `Array.of(...)` calls, static `Array.from({ length: N })` calls, and variables bound to them compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
 
 **For — command output (line by line):**
 
@@ -636,6 +636,8 @@ let allFiles = files.concat(otherFiles)
 Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice. Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static.
 
 Static scalar list literals compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the generated `printf` builder.
+
+Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder.
 
 Static string literal and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
 

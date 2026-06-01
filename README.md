@@ -96,6 +96,7 @@ Files use the `.bsh` extension.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
 - Static scalar list literals compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the `printf` builder.
+- Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
 - Static string literal and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths keep the POSIX `wc` path.
 - `for (... of [...])` and loops over variables bound to static scalar list literals compile to compact shell `for` loops when values do not contain newlines; dynamic lists keep the newline-safe read loop.
 - Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
@@ -118,7 +119,7 @@ Files use the `.bsh` extension.
 - Nested lists such as `string[][]` preserve row structure for `.map()`, nested indexing, and row `.length`.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
 - Semicolons are optional (only required inside `for` headers).
-- `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
+- `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.of(...)` creates a list from the given values; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
 - `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use compiler-managed object key metadata and do not emit runtime helpers.
 - `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
 - Arrow callbacks support expression and block bodies for list `.map()`, `.reduce()`, and statement-position `.forEach()`; `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, and `.forEach()` callbacks may also receive a zero-based index parameter.
