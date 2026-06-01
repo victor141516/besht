@@ -877,6 +877,25 @@ let parts: list<string> = s.split("")`)
 	assertContains(t, out, `for(i=1;i<=length($0);i++) print substr($0,i,1)`)
 }
 
+func TestCodegen_StaticStringSplit(t *testing.T) {
+	out := compile(t, `let parts = "a,b,c".split(",")
+let chars = "abc".split("")
+let count = "a,b,c".split(",").length`)
+	assertContains(t, out, "parts='a\nb\nc'")
+	assertContains(t, out, "chars='a\nb\nc'")
+	assertContains(t, out, `count=3`)
+	assertNotContains(t, out, `tr ',' '\n'`)
+	assertNotContains(t, out, `for(i=1;i<=length($0);i++)`)
+}
+
+func TestCodegen_StaticStringSplitForLoop(t *testing.T) {
+	out := compile(t, `for (part of "a,b,c".split(",")) {
+    console.log(part)
+}`)
+	assertContains(t, out, `for part in 'a' 'b' 'c'; do`)
+	assertNotContains(t, out, `tr ',' '\n'`)
+}
+
 func TestCodegen_SetHasAdd(t *testing.T) {
 	out := compile(t, `const seen = new Set<string>()
 seen.add("a")
