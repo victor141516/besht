@@ -286,7 +286,7 @@ function log(msg: string) {
 
 ### Print
 
-`console.log()` writes a string to stdout with a trailing newline. `console.error()` writes the same format to stderr. Lists print in Bun-style `[ a, b ]` format; objects print each property on its own line.
+`console.log()` writes a string to stdout with a trailing newline. `console.error()` writes the same format to stderr. Lists print in Bun-style `[ a, b ]` format; static scalar list output compiles to one quoted `printf` line, while dynamic and newline-sensitive lists keep the generic formatter. Objects print each property on its own line.
 
 ```ts
 console.log("Usage: myscript [options]");

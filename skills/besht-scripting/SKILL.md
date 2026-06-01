@@ -120,7 +120,7 @@ This slice supports only `fetch(url).text()` and assigned response `.text()`. It
 console.log("Usage: myscript [options]");
 console.log("Result: " + value);
 console.error("Something went wrong");
-console.log(["a", "b"]); // [ a, b ]
+console.log(["a", "b"]); // [ a, b ]; static scalar list output compiles to one printf
 
 // Objects are printed in multi-line format
 console.log({ apple: 3, banana: 2 });

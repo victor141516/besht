@@ -1474,6 +1474,30 @@ console.log(counts[key])`)
 func TestCodegen_ConsoleLogList(t *testing.T) {
 	out := compile(t, `let nums = [0, 1]
 console.log(nums)`)
+	assertContains(t, out, `printf '%s\n' '[ 0, 1 ]'`)
+	assertNotContains(t, out, `awk 'BEGIN{first=1}`)
+	assertNotContains(t, out, `printf '[ '`)
+}
+
+func TestCodegen_StaticConsoleListValues(t *testing.T) {
+	out := compile(t, `console.log(["a", "b"])
+console.log([])
+console.error([1, true, "x"])
+let xs = ["a", "b"]
+console.log(xs.concat(["c"]))
+let words = ["can't", "stop"]
+console.log(words)`)
+	assertContains(t, out, `printf '%s\n' '[ a, b ]'`)
+	assertContains(t, out, `printf '%s\n' '[  ]'`)
+	assertContains(t, out, `printf '%s\n' '[ 1, 1, x ]' >&2`)
+	assertContains(t, out, `printf '%s\n' '[ a, b, c ]'`)
+	assertContains(t, out, `printf '%s\n' '[ can'"'"'t, stop ]'`)
+	assertNotContains(t, out, `awk 'BEGIN{first=1}`)
+	assertNotContains(t, out, `printf '[ '`)
+}
+
+func TestCodegen_ConsoleListKeepsRuntimeFormatterForDynamicOrNewlineValues(t *testing.T) {
+	out := compile(t, "let nums = [0, 1]\nwhile (true) {\n    nums = nums.push(2)\n    break\n}\nconsole.log(nums)\nconsole.log([`a\\nb`])")
 	assertContains(t, out, `printf '[ '`)
 	assertContains(t, out, `awk 'BEGIN{first=1}`)
 	assertContains(t, out, `printf ' ]\n'`)

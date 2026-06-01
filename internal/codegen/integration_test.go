@@ -1490,6 +1490,19 @@ for (value of xs.concat(["c"])) {
 	}
 }
 
+func TestIntegration_StaticConsoleListRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(["a", "b"])
+console.log([])
+let xs = ["a", "b"]
+console.log(xs.concat(["c"]))
+let words = ["can't", "stop"]
+console.log(words)`)
+	want := "[ a, b ]\n[  ]\n[ a, b, c ]\n[ can't, stop ]\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_ArrowCallbackQualifiesImportedFunction(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "lib/fmt.bsh", `export function bang(s: string): string {
