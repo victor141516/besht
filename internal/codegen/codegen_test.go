@@ -1243,6 +1243,33 @@ let fromSplit: string = "a,b".split(",")[1]`)
 	assertNotContains(t, out, `sed -n "$(( 1 + 1 ))p"`)
 }
 
+func TestCodegen_StaticNestedListIndexExpr(t *testing.T) {
+	out := compile(t, `let key: string = Object.entries({ name: "Ada", active: true })[0][0]
+let value: string = Object.entries({ name: "Ada", active: true })[0][1]
+let entries = Object.entries({ name: "Ada", active: true })
+let namedKey: string = entries[1][0]
+let namedValue: string = entries[1][1]
+let cell: string = [["a", "b"], ["c", "d"]][1][0]`)
+	assertContains(t, out, `key='name'`)
+	assertContains(t, out, `value='Ada'`)
+	assertContains(t, out, `namedKey='active'`)
+	assertContains(t, out, `namedValue='true'`)
+	assertContains(t, out, `cell='c'`)
+	assertNotContains(t, out, `tr '\037' '\n'`)
+	assertNotContains(t, out, `sed -n "$(( 1 + 1 ))p"`)
+}
+
+func TestCodegen_StaticNestedListIndexSkipsControlFlowAssignedVars(t *testing.T) {
+	out := compile(t, `let entries = Object.entries({ name: "Ada" })
+while (true) {
+    entries = Object.entries({ name: "Grace" })
+    break
+}
+let value: string = entries[0][1]`)
+	assertContains(t, out, `tr '\037' '\n'`)
+	assertNotContains(t, out, `value='Ada'`)
+}
+
 func TestCodegen_StaticListOutOfRangeIndexKeepsRuntimePath(t *testing.T) {
 	out := compile(t, `let missing: string = ["a", "b"][3]`)
 	assertContains(t, out, `sed -n "$(( 3 + 1 ))p"`)

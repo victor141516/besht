@@ -9105,6 +9105,9 @@ func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
 	if recvType != nil && recvType.Kind == ast.TypeObject {
 		return g.genComputedPropertyAccess(e)
 	}
+	if value, ok := g.staticNestedListIndexValue(e); ok {
+		return value, nil
+	}
 	if recvType == nil || recvType.Kind != ast.TypeList || recvType.Elem == nil || recvType.Elem.Kind != ast.TypeList {
 		if value, ok := g.staticListIndexValue(e); ok {
 			return value, nil
@@ -9127,6 +9130,77 @@ func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
 		return fmt.Sprintf("$(printf '%%s\\n' %s | sed -n \"$(( %s + 1 ))p\" | tr '\\037' '\\n')", listArg, indexClean), nil
 	}
 	return fmt.Sprintf("$(printf '%%s\\n' %s | sed -n \"$(( %s + 1 ))p\")", listArg, indexClean), nil
+}
+
+func (g *Generator) staticNestedListIndexValue(e *ast.IndexExpr) (string, bool) {
+	col, ok := staticIntLiteral(e.Index)
+	if !ok || col < 0 {
+		return "", false
+	}
+	rowIndex, ok := e.Expr.(*ast.IndexExpr)
+	if !ok {
+		return "", false
+	}
+	row, ok := staticIntLiteral(rowIndex.Index)
+	if !ok || row < 0 {
+		return "", false
+	}
+	containerType := g.inferReceiverType(rowIndex.Expr)
+	if containerType == nil || containerType.Kind != ast.TypeList || containerType.Elem == nil || containerType.Elem.Kind != ast.TypeList {
+		return "", false
+	}
+	rows, ok := g.staticNestedListRows(rowIndex.Expr)
+	if !ok || row >= len(rows) {
+		return "", false
+	}
+	cols := strings.Split(rows[row], "\037")
+	if col >= len(cols) {
+		return "", false
+	}
+	return shellQuote(cols[col]), true
+}
+
+func (g *Generator) staticNestedListRows(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticNestedListRows(e.Expr)
+	case *ast.ListLit:
+		rows := make([]string, 0, len(e.Elements))
+		for _, elem := range e.Elements {
+			values, ok := staticScalarListValues(elem)
+			if !ok {
+				return nil, false
+			}
+			for _, value := range values {
+				if strings.ContainsAny(value, "\n\037") {
+					return nil, false
+				}
+			}
+			rows = append(rows, strings.Join(values, "\037"))
+		}
+		return rows, true
+	case *ast.BuiltinCallExpr:
+		if e.Name == "Object.entries" {
+			return staticObjectBuiltinListValues(e)
+		}
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return nil, false
+		}
+		words, ok := g.staticListMap[g.resolveVarName(e.Name)]
+		if !ok {
+			return nil, false
+		}
+		rows := make([]string, 0, len(words))
+		for _, word := range words {
+			if !strings.HasPrefix(strings.TrimSpace(word), "'") {
+				return nil, false
+			}
+			rows = append(rows, singleQuotedToRaw(word))
+		}
+		return rows, true
+	}
+	return nil, false
 }
 
 func (g *Generator) staticListIndexValue(e *ast.IndexExpr) (string, bool) {
