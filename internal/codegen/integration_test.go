@@ -2657,6 +2657,20 @@ for (ch of "xy".split("")) {
 	}
 }
 
+func TestIntegration_StaticStringVariableSplitRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let csv: string = "a,b,c"
+let sep: string = ","
+let parts: list<string> = csv.split(sep)
+console.log(parts.length)
+for (part of csv.split(sep)) {
+    console.log(part)
+}`)
+	want := "3\na\nb\nc\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PureJSAPIsDoNotExecuteHostileStrings(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "owned")

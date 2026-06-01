@@ -1581,6 +1581,40 @@ func TestCodegen_StaticStringSplitForLoop(t *testing.T) {
 	assertNotContains(t, out, `tr ',' '\n'`)
 }
 
+func TestCodegen_StaticStringVariableSplit(t *testing.T) {
+	out := compile(t, `let csv: string = "a,b,c"
+let sep: string = ","
+let parts: list<string> = csv.split(sep)
+let count: number = csv.split(sep).length`)
+	assertContains(t, out, "parts='a\nb\nc'")
+	assertContains(t, out, `count=3`)
+	assertNotContains(t, out, `tr '$sep' '\n'`)
+	assertNotContains(t, out, `tr ',' '\n'`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticStringVariableSplitForLoop(t *testing.T) {
+	out := compile(t, `let csv: string = "a,b,c"
+let sep: string = ","
+for (part of csv.split(sep)) {
+    console.log(part)
+}`)
+	assertContains(t, out, `for part in 'a' 'b' 'c'; do`)
+	assertNotContains(t, out, `tr '$sep' '\n'`)
+	assertNotContains(t, out, `while IFS= read`)
+}
+
+func TestCodegen_StaticStringVariableSplitFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let csv: string = "a,b,c"
+while (true) {
+    csv = "x,y"
+    break
+}
+let parts: list<string> = csv.split(",")`)
+	assertContains(t, out, `tr ',' '\n'`)
+	assertNotContains(t, out, "parts='a\nb\nc'")
+}
+
 func TestCodegen_SetHasAdd(t *testing.T) {
 	out := compile(t, `const seen = new Set<string>()
 seen.add("a")
