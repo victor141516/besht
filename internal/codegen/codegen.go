@@ -1715,6 +1715,9 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		if iter.Name == "Besht.iter.range" {
 			return g.genForRange(s, iter)
 		}
+		if words, ok := staticForListWordsExpr(iter); ok {
+			return g.genForStaticList(s, words)
+		}
 	case *ast.IdentExpr:
 		if words, ok := g.staticListMap[g.resolveVarName(iter.Name)]; ok {
 			return g.genForStaticList(s, words)
@@ -1870,6 +1873,8 @@ func staticScalarListValues(expr ast.Expression) ([]string, bool) {
 			values = append(values, value)
 		}
 		return values, true
+	case *ast.BuiltinCallExpr:
+		return staticObjectBuiltinListValues(e)
 	case *ast.AsExpr:
 		return staticScalarListValues(e.Expr)
 	default:
@@ -1894,6 +1899,16 @@ func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
 	case *ast.ListLit:
 		return staticForListWords(e)
+	case *ast.BuiltinCallExpr:
+		values, ok := staticScalarListValuesWithoutNewlines(e)
+		if !ok {
+			return nil, false
+		}
+		words := make([]string, 0, len(values))
+		for _, value := range values {
+			words = append(words, shellQuote(value))
+		}
+		return words, true
 	case *ast.AsExpr:
 		return staticForListWordsExpr(e.Expr)
 	default:
@@ -1934,6 +1949,81 @@ func staticStringByteLength(expr ast.Expression) (int, bool) {
 		return staticStringByteLength(e.Expr)
 	}
 	return 0, false
+}
+
+func staticObjectScalarValue(expr ast.Expression) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.BoolLit:
+		if e.Value {
+			return "true", true
+		}
+		return "false", true
+	case *ast.AsExpr:
+		return staticObjectScalarValue(e.Expr)
+	default:
+		return staticScalarValue(expr)
+	}
+}
+
+func staticObjectLiteralKeys(obj *ast.ObjectLit) ([]string, bool) {
+	keys := make([]string, 0, len(obj.Fields))
+	for _, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return nil, false
+		}
+		keys = append(keys, field.Key)
+	}
+	return keys, true
+}
+
+func staticObjectLiteralValues(obj *ast.ObjectLit) ([]string, bool) {
+	values := make([]string, 0, len(obj.Fields))
+	for _, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return nil, false
+		}
+		value, ok := staticObjectScalarValue(field.Value)
+		if !ok || strings.Contains(value, "\n") {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
+}
+
+func staticObjectLiteralEntries(obj *ast.ObjectLit) ([]string, bool) {
+	entries := make([]string, 0, len(obj.Fields))
+	for _, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return nil, false
+		}
+		value, ok := staticObjectScalarValue(field.Value)
+		if !ok || strings.Contains(value, "\n") {
+			return nil, false
+		}
+		entries = append(entries, field.Key+"\037"+value)
+	}
+	return entries, true
+}
+
+func staticObjectBuiltinListValues(e *ast.BuiltinCallExpr) ([]string, bool) {
+	if len(e.Args) != 1 {
+		return nil, false
+	}
+	obj, ok := e.Args[0].(*ast.ObjectLit)
+	if !ok {
+		return nil, false
+	}
+	switch e.Name {
+	case "Object.keys":
+		return staticObjectLiteralKeys(obj)
+	case "Object.values":
+		return staticObjectLiteralValues(obj)
+	case "Object.entries":
+		return staticObjectLiteralEntries(obj)
+	default:
+		return nil, false
+	}
 }
 
 func staticScalarListLength(expr ast.Expression) (int, bool) {
@@ -3022,6 +3112,11 @@ func (g *Generator) genObjectHasOwn(objExpr, keyExpr ast.Expression) (string, er
 	if as, ok := objExpr.(*ast.AsExpr); ok {
 		return g.genObjectHasOwn(as.Expr, keyExpr)
 	}
+	if obj, ok := objExpr.(*ast.ObjectLit); ok {
+		if key, ok := staticScalarValue(keyExpr); ok {
+			return g.genStaticObjectLiteralHasOwn(obj, key)
+		}
+	}
 	keyStr, err := g.genExprValue(keyExpr)
 	if err != nil {
 		return "", err
@@ -3041,6 +3136,27 @@ func (g *Generator) genObjectHasOwn(objExpr, keyExpr ast.Expression) (string, er
 		}
 	}
 	return "", fmt.Errorf("Object.hasOwn() requires an object literal or named object")
+}
+
+func (g *Generator) genStaticObjectLiteralHasOwn(obj *ast.ObjectLit, key string) (string, error) {
+	keys, ok := staticObjectLiteralKeys(obj)
+	if !ok {
+		for _, field := range obj.Fields {
+			if err := validateStaticObjectKey(field.Key); err != nil {
+				return "", err
+			}
+		}
+		return "0", nil
+	}
+	if key == "" || validateStaticObjectKey(key) != nil {
+		return "0", nil
+	}
+	for _, field := range keys {
+		if field == key {
+			return "1", nil
+		}
+	}
+	return "0", nil
 }
 
 func (g *Generator) genObjectLiteralHasOwn(obj *ast.ObjectLit, keyStr string) (string, error) {
@@ -3066,6 +3182,9 @@ func (g *Generator) genObjectLiteralHasOwn(obj *ast.ObjectLit, keyStr string) (s
 }
 
 func (g *Generator) genObjectLiteralKeys(obj *ast.ObjectLit) (string, error) {
+	if keys, ok := staticObjectLiteralKeys(obj); ok {
+		return shellQuote(strings.Join(keys, "\n")), nil
+	}
 	tmp := fmt.Sprintf("_objlit_%d_%d", obj.Pos.Line, obj.Pos.Column)
 	var fields []string
 	var cmds []string
@@ -3088,6 +3207,9 @@ func (g *Generator) genObjectLiteralKeys(obj *ast.ObjectLit) (string, error) {
 }
 
 func (g *Generator) genObjectLiteralValues(obj *ast.ObjectLit) (string, error) {
+	if values, ok := staticObjectLiteralValues(obj); ok {
+		return shellQuote(strings.Join(values, "\n")), nil
+	}
 	tmp := fmt.Sprintf("_objlit_%d_%d", obj.Pos.Line, obj.Pos.Column)
 	cmds, err := g.genObjectLiteralTempCommands(tmp, obj)
 	if err != nil {
@@ -3098,6 +3220,9 @@ func (g *Generator) genObjectLiteralValues(obj *ast.ObjectLit) (string, error) {
 }
 
 func (g *Generator) genObjectLiteralEntries(obj *ast.ObjectLit) (string, error) {
+	if entries, ok := staticObjectLiteralEntries(obj); ok {
+		return shellQuote(strings.Join(entries, "\n")), nil
+	}
 	tmp := fmt.Sprintf("_objlit_%d_%d", obj.Pos.Line, obj.Pos.Column)
 	cmds, err := g.genObjectLiteralTempCommands(tmp, obj)
 	if err != nil {
