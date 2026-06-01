@@ -106,7 +106,7 @@ Files use the `.bsh` extension.
 - Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
 - Static string literals, variables bound to static string literals, and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths keep the POSIX `wc` path.
 - `for (... of [...])` and loops over variables bound to static scalar list literals compile to compact shell `for` loops when values do not contain newlines; dynamic lists keep the newline-safe read loop.
-- Static scalar list indexes with known in-range integer indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed` path.
+- Static scalar list indexes with known in-range integer indexes and static nested-list indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row path.
 - Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
 - Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles compile to constants; dynamic searches keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()` and static-key `Object.hasOwn()` calls also fold from compiler-managed key metadata.
@@ -126,7 +126,7 @@ Files use the `.bsh` extension.
 - Simple `type Name = ExistingType` aliases can be used in annotations, including `string[]` and `Set<string>`.
 - Type assertions such as `[] as string[]` are parsed and erased at compile time.
 - `new Set<T>()` supports `.add(value)` and `.has(value)` with no runtime type checking.
-- Nested lists such as `string[][]` preserve row structure for `.map()`, nested indexing, and row `.length`.
+- Nested lists such as `string[][]` preserve row structure for `.map()`, nested indexing, and row `.length`; static nested indexes with known row and column fold to constants.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
 - Semicolons are optional (only required inside `for` headers).
 - `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.of(...)` creates a list from the given values; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
@@ -708,7 +708,7 @@ let cell: string = matrix[row][col]
 let width: number = matrix[0].length
 ```
 
-Static scalar list indexes with known in-range integer indexes compile to constants. Dynamic, unknown, and out-of-range indexes compile to a `sed -n` line extraction (POSIX sh compatible). Index assignment uses `awk` to replace the Nth line.
+Static scalar list indexes with known in-range integer indexes and static nested-list indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes compile to `sed`/packed-row extraction (POSIX sh compatible). Index assignment uses `awk` to replace the Nth line.
 
 ### Error handling
 

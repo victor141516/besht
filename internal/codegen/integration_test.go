@@ -556,6 +556,31 @@ console.log("left:right".split(":")[0])
 	}
 }
 
+func TestIntegration_StaticNestedListIndexRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `console.log(Object.entries({ name: "Ada", active: true })[0][0])
+console.log(Object.entries({ name: "Ada", active: true })[0][1])
+let entries = Object.entries({ name: "Ada", active: true })
+console.log(entries[1][0])
+console.log(entries[1][1])
+console.log([["a", "b"], ["c", "d"]][1][0])
+`)
+	out := compileFile(t, path)
+	assertNotContains(t, out, `tr '\037' '\n'`)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
+	}
+	if string(output) != "name\nAda\nactive\ntrue\nc\n" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestIntegration_SetValuesWithSpacesAndNestedListLiterals(t *testing.T) {
 	out := runCompiledShell(t, `const seen = new Set<string>()
 seen.add("a b")
