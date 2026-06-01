@@ -87,18 +87,17 @@ func RenderWithOptions(compiled string, width int, opts RenderOptions) (string, 
 	out.WriteString(paneDivider(colorGutter))
 	out.WriteString(paneBorder(rightLabelWidth, rightTextWidth, colorGutter))
 	out.WriteString("\n")
-	for _, group := range groups {
+	for idx, group := range groups {
+		nextSource := nextGroupSource(groups, idx)
+		sourceOnly, overlay := gapSourceLines(group.source, nextSource, len(group.shell))
 		rowCount := max(1, len(group.shell))
 		for i := 0; i < rowCount; i++ {
-			leftLabel := ""
-			leftText := ""
-			if i == 0 && group.source != nil {
-				leftLabel = sourceLabel(*group.source, multipleSources)
-				text, err := cache.lineText(*group.source)
-				if err != nil {
-					return "", err
+			if i == 1 {
+				for _, ref := range sourceOnly {
+					if err := writePaneRow(&out, &cache, &ref, "", "", multipleSources, leftLabelWidth, leftTextWidth, rightLabelWidth, rightTextWidth, colorGutter); err != nil {
+						return "", err
+					}
 				}
-				leftText = text
 			}
 
 			rightLabel := ""
@@ -108,13 +107,76 @@ func RenderWithOptions(compiled string, width int, opts RenderOptions) (string, 
 				rightText = shellLines[group.shell[i].number-1]
 			}
 
-			out.WriteString(paneLine(leftLabel, leftText, leftLabelWidth, leftTextWidth, colorGutter))
-			out.WriteString(paneDivider(colorGutter))
-			out.WriteString(paneLine(rightLabel, rightText, rightLabelWidth, rightTextWidth, colorGutter))
-			out.WriteString("\n")
+			rowSource := sourceForGroupRow(group.source, overlay, i)
+			if err := writePaneRow(&out, &cache, rowSource, rightLabel, rightText, multipleSources, leftLabelWidth, leftTextWidth, rightLabelWidth, rightTextWidth, colorGutter); err != nil {
+				return "", err
+			}
+		}
+		if rowCount == 1 {
+			for _, ref := range sourceOnly {
+				if err := writePaneRow(&out, &cache, &ref, "", "", multipleSources, leftLabelWidth, leftTextWidth, rightLabelWidth, rightTextWidth, colorGutter); err != nil {
+					return "", err
+				}
+			}
 		}
 	}
 	return out.String(), nil
+}
+
+func writePaneRow(out *strings.Builder, cache *sourceCache, ref *sourceRef, rightLabel, rightText string, multipleSources bool, leftLabelWidth, leftTextWidth, rightLabelWidth, rightTextWidth int, colorGutter bool) error {
+	leftLabel := ""
+	leftText := ""
+	if ref != nil {
+		leftLabel = sourceLabel(*ref, multipleSources)
+		text, err := cache.lineText(*ref)
+		if err != nil {
+			return err
+		}
+		leftText = text
+	}
+	out.WriteString(paneLine(leftLabel, leftText, leftLabelWidth, leftTextWidth, colorGutter))
+	out.WriteString(paneDivider(colorGutter))
+	out.WriteString(paneLine(rightLabel, rightText, rightLabelWidth, rightTextWidth, colorGutter))
+	out.WriteString("\n")
+	return nil
+}
+
+func sourceForGroupRow(current *sourceRef, overlay map[int]sourceRef, row int) *sourceRef {
+	if row == 0 {
+		return current
+	}
+	if ref, ok := overlay[row]; ok {
+		return &ref
+	}
+	return nil
+}
+
+func nextGroupSource(groups []group, idx int) *sourceRef {
+	for i := idx + 1; i < len(groups); i++ {
+		if groups[i].source != nil {
+			return groups[i].source
+		}
+	}
+	return nil
+}
+
+func gapSourceLines(current, next *sourceRef, shellLineCount int) ([]sourceRef, map[int]sourceRef) {
+	overlay := make(map[int]sourceRef)
+	if current == nil || next == nil || current.file != next.file || next.line <= current.line+1 {
+		return nil, overlay
+	}
+	var refs []sourceRef
+	for line := current.line + 1; line < next.line; line++ {
+		refs = append(refs, sourceRef{file: current.file, line: line})
+	}
+	extraShellRows := max(0, shellLineCount-1)
+	overlayCount := min(extraShellRows, len(refs))
+	sourceOnlyCount := len(refs) - overlayCount
+	for i, ref := range refs[sourceOnlyCount:] {
+		row := 1 + extraShellRows - overlayCount + i
+		overlay[row] = ref
+	}
+	return refs[:sourceOnlyCount], overlay
 }
 
 func NewBatHighlighter() (HighlightFunc, bool) {

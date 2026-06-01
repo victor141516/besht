@@ -128,6 +128,52 @@ func TestRenderWithHighlighterColorsBothPanes(t *testing.T) {
 	}
 }
 
+func TestRenderFillsUnmappedSourceCodeAndBlankLines(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "main.bsh")
+	source := strings.Join([]string{
+		"function f(): string {",
+		"    return \"ok\"",
+		"}",
+		"",
+		"console.log(f())",
+	}, "\n") + "\n"
+	if err := os.WriteFile(srcPath, []byte(source), 0644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	compiled := strings.Join([]string{
+		"#!/bin/sh",
+		"# besht:" + srcPath + ":1:1",
+		"f() {",
+		"# besht:" + srcPath + ":2:5",
+		"    printf '%s' 'ok'",
+		"    return 0",
+		"}",
+		"",
+		"# besht:" + srcPath + ":5:1",
+		"printf '%s\\n' \"$(f)\"",
+	}, "\n") + "\n"
+
+	out, err := Render(compiled, 100)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if lineIndexWithPrefix(lines, "3   │ }") < 0 {
+		t.Fatalf("rendered output should include unmapped closing brace source line:\n%s", out)
+	}
+	if lineIndexWithPrefix(lines, "4   │") < 0 {
+		t.Fatalf("rendered output should include unmapped blank source line 4:\n%s", out)
+	}
+	if lineIndexWithPrefix(lines, "3   │ }") >= lineIndexWithPrefix(lines, "4   │") {
+		t.Fatalf("source lines should stay in order:\n%s", out)
+	}
+	if lineIndexWithPrefix(lines, "4   │") >= lineIndexWithPrefix(lines, "5   │ console.log(f())") {
+		t.Fatalf("blank source line should appear before following code line:\n%s", out)
+	}
+}
+
 func TestANSIWidthHelpersIgnoreEscapeSequences(t *testing.T) {
 	colored := "\x1b[31mabcdef\x1b[0m"
 	if got := visibleLen(colored); got != 6 {
@@ -176,4 +222,13 @@ func countLinesContaining(lines []string, needle string) int {
 		}
 	}
 	return count
+}
+
+func lineIndexWithPrefix(lines []string, prefix string) int {
+	for i, line := range lines {
+		if strings.HasPrefix(line, prefix) {
+			return i
+		}
+	}
+	return -1
 }
