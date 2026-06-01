@@ -31,6 +31,7 @@ type Generator struct {
 	staticObjectMap  map[string][]string
 	staticNullishMap map[string]bool
 	stringConstMap   map[string]string
+	boolConstMap     map[string]bool
 	staticListMap    map[string][]string
 	staticSetMap     map[string][]string
 	controlAssigned  map[string]bool
@@ -138,6 +139,7 @@ func New() *Generator {
 		staticObjectMap:  make(map[string][]string),
 		staticNullishMap: make(map[string]bool),
 		stringConstMap:   make(map[string]string),
+		boolConstMap:     make(map[string]bool),
 		staticListMap:    make(map[string][]string),
 		staticSetMap:     make(map[string][]string),
 		controlAssigned:  make(map[string]bool),
@@ -1442,6 +1444,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		delete(g.stringConstMap, varName)
 	}
 	g.updateStaticNullishBinding(varName, s.Value)
+	g.updateStaticBoolBinding(varName, s.Value)
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
@@ -1901,6 +1904,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 		delete(g.stringConstMap, varName)
 	}
 	g.updateStaticNullishBinding(varName, s.Value)
+	g.updateStaticBoolBinding(varName, s.Value)
 	g.updateStaticListBinding(varName, s.Value)
 	g.updateStaticSetBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
@@ -1973,6 +1977,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
+	prevBoolConstMap := g.boolConstMap
 	g.currentFn = s.Name
 	g.inFunction = true
 	g.paramMap = make(map[string]string)
@@ -1984,6 +1989,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
+	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
 
 	for i, param := range s.Params {
 		varName := fnParamVar(s.Name, param.Name)
@@ -2017,6 +2023,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
+	g.boolConstMap = prevBoolConstMap
 	g.pop()
 	g.line("}")
 	g.line("")
@@ -2121,6 +2128,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
+	prevBoolConstMap := g.boolConstMap
 	prevClass := g.currentClass
 	prevThis := g.currentThisVar
 	g.currentFn = fnName
@@ -2134,6 +2142,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
+	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
 	g.currentClass = c.Name
 	g.currentThisVar = ""
 	argOffset := 1
@@ -2176,6 +2185,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
+	g.boolConstMap = prevBoolConstMap
 	g.currentClass = prevClass
 	g.currentThisVar = prevThis
 	g.pop()
@@ -2828,6 +2838,17 @@ func (g *Generator) staticSetHasValue(e *ast.MethodCallExpr) (bool, bool) {
 		}
 	}
 	return false, true
+}
+
+func (g *Generator) updateStaticBoolBinding(varName string, expr ast.Expression) {
+	if g.boolConstMap == nil {
+		g.boolConstMap = make(map[string]bool)
+	}
+	if value, ok := g.staticBooleanValue(expr); ok {
+		g.boolConstMap[varName] = value
+		return
+	}
+	delete(g.boolConstMap, varName)
 }
 
 func staticListLiteralValue(list *ast.ListLit) (string, bool) {
@@ -5122,6 +5143,13 @@ func (g *Generator) genFnCallCapture(e *ast.FnCallExpr) (string, error) {
 }
 
 func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
+	if value, ok := g.staticBooleanValue(expr); ok {
+		if value {
+			return "1", nil
+		}
+		return "0", nil
+	}
+
 	switch e := expr.(type) {
 	case *ast.AsExpr:
 		return g.genBooleanCapture(e.Expr)
@@ -5297,6 +5325,12 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 		return g.staticBooleanValue(e.Expr)
 	case *ast.BoolLit:
 		return e.Value, true
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return false, false
+		}
+		value, ok := g.boolConstMap[g.resolveVarName(e.Name)]
+		return value, ok
 	case *ast.UnaryExpr:
 		if e.Op == "!" {
 			value, ok := g.staticTruthyValue(e.Expr)
@@ -5318,15 +5352,22 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 		}
-		left, leftOK := g.staticBooleanValue(e.Left)
-		right, rightOK := g.staticBooleanValue(e.Right)
-		if !leftOK || !rightOK {
-			return false, false
-		}
 		switch e.Op {
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
+			return staticComparisonResult(e)
 		case "&&":
+			left, leftOK := g.staticBooleanValue(e.Left)
+			right, rightOK := g.staticBooleanValue(e.Right)
+			if !leftOK || !rightOK {
+				return false, false
+			}
 			return left && right, true
 		case "||":
+			left, leftOK := g.staticBooleanValue(e.Left)
+			right, rightOK := g.staticBooleanValue(e.Right)
+			if !leftOK || !rightOK {
+				return false, false
+			}
 			return left || right, true
 		}
 	case *ast.BuiltinCallExpr:
@@ -5382,6 +5423,17 @@ func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
 		return g.staticTruthyValue(e.Expr)
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return false, false
+		}
+		varName := g.resolveVarName(e.Name)
+		if value, ok := g.boolConstMap[varName]; ok {
+			return value, true
+		}
+		if value, ok := g.stringConstMap[varName]; ok {
+			return value != "", true
+		}
 	case *ast.BoolLit:
 		return e.Value, true
 	case *ast.UndefinedLit, *ast.NullLit:
@@ -8863,6 +8915,12 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 	case *ast.BuiltinCallExpr:
 		return g.genBuiltinCondition(e)
 	case *ast.IdentExpr:
+		if value, ok := g.staticBooleanValue(e); ok {
+			if value {
+				return "true", nil
+			}
+			return "false", nil
+		}
 		varName := g.resolveVarName(e.Name)
 		if t := g.inferReceiverType(e); t != nil && t.Kind == ast.TypeBoolean {
 			return fmt.Sprintf("[ \"$%s\" = 1 ]", varName), nil
@@ -9361,7 +9419,11 @@ func (g *Generator) genTemplateLiteral(e *ast.TemplateLit) (string, error) {
 			} else if ok {
 				out.WriteString(escapeForDoubleQuote(staticValue))
 			} else if g.isBooleanExpr(e.Exprs[i]) {
-				out.WriteString(fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)))
+				if staticValue, ok := g.genStaticBooleanArg(e.Exprs[i]); ok {
+					out.WriteString(staticValue)
+				} else {
+					out.WriteString(fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)))
+				}
 			} else {
 				out.WriteString(strInner(val))
 			}
