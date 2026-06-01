@@ -296,6 +296,8 @@ Static `??` expressions compile to the selected side when the left operand is pr
 
 Static numeric API receivers of `.toString()`, such as `Math.round(2.7).toString()` and `Number.parseInt("42").toString()`, compile to quoted constants; dynamic receivers keep runtime formatting.
 
+Static ASCII string literal indexes and indexes into variables bound to static ASCII strings compile to constants when the index is a known non-negative integer; dynamic indexes, non-ASCII strings, and control-flow assigned string variables keep the AWK substring path.
+
 Static value-position `||` and `&&` expressions compile to the selected side when the left operand's truthiness is known. Preserve JavaScript value semantics: static string/number results stay strings/numbers, while selected boolean results still render as `true`/`false` for console output.
 
 Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, simple static `!`/`&&`/`||` expressions, static comparisons, and variables bound to static boolean expressions render directly as `true`/`false`; static boolean `if` and ternary conditions use the same generator-aware constant path. `Besht.fs.*` and `Besht.strings.*` predicates are boolean expressions too: in single-argument console calls, emit a direct shell `if` that prints `true`/`false`; in value position, keep boolean storage as `1`/`0`. Dynamic boolean console arguments should reuse `genCondition()` directly: single-argument console calls emit `if <condition>; then printf '%s\n' true; else printf '%s\n' false; fi`, while multi-argument console calls use one `$(if <condition>; then printf true; else printf false; fi)` argument. Do not compute a `1`/`0` boolean capture and then wrap it in a second formatter when the condition is available.
@@ -581,6 +583,7 @@ for (f in files) {
 let first: string = files[0] // static scalar list indexes fold to constants when known
 let item: string = files[i]
 let cell: string = matrix[row][col] // static nested list indexes fold to constants when known
+let letter: string = "abc"[1] // static ASCII string indexes fold to constants when known
 let maybeName: string = user?.name ?? "anonymous"
 let maybeItem: string = items?.[i] ?? "fallback"
 let maybeCell: string = matrix?.[row]?.[col] ?? "missing"

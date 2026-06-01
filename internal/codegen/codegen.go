@@ -9541,6 +9541,11 @@ func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
 			return value, nil
 		}
 	}
+	if recvType != nil && recvType.Kind == ast.TypeString {
+		if value, ok := g.staticStringIndexValue(e); ok {
+			return value, nil
+		}
+	}
 	listStr, err := g.genExprValue(e.Expr)
 	if err != nil {
 		return "", err
@@ -9648,6 +9653,21 @@ func (g *Generator) staticListIndexValue(e *ast.IndexExpr) (string, bool) {
 		return "", false
 	}
 	return words[index], true
+}
+
+func (g *Generator) staticStringIndexValue(e *ast.IndexExpr) (string, bool) {
+	index, ok := staticIntLiteral(e.Index)
+	if !ok || index < 0 {
+		return "", false
+	}
+	value, ok := g.staticASCIIStringExprValue(e.Expr)
+	if !ok {
+		return "", false
+	}
+	if index >= len(value) {
+		return shellQuote(""), true
+	}
+	return shellQuote(value[index : index+1]), true
 }
 
 func (g *Generator) genNullishIndexExpr(e *ast.IndexExpr) (string, error) {

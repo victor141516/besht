@@ -96,7 +96,7 @@ Files use the `.bsh` extension.
 - Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, and parseable `Number.parseInt()`/`Number.parseFloat()` calls. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static boolean `if` conditions and ternary expressions, including variables bound to static boolean expressions, fold to the selected branch or value; dynamic and control-flow-assigned conditions keep normal shell tests.
-- Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
+- Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold `[index]`, `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments to constants; dynamic and non-ASCII string indexes/searches keep the helper/`awk` path.
 - Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
 - Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants; dynamic and control-flow-assigned arithmetic keeps shell arithmetic or POSIX `awk`.
@@ -459,13 +459,14 @@ s.slice(2, 7); // "Hello"
 s.substring(2, 7); // "Hello"
 s.at(2); // "H"
 s.charAt(2); // "H"
+s[1]; // " "
 s.padStart(20, "-"); // "-----  Hello, World!  "
 s.padEnd(20, "."); // "  Hello, World!  ..."
 s.concat(" More text"); // "  Hello, World!   More text"
 s.length; // int (character count)
 ```
 
-One-argument string `includes()`, `startsWith()`, and `endsWith()` use tiny POSIX helper functions that are emitted only when the generated shell calls them. Two-argument string search methods use inline `awk` instead. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold searches and `charAt()` calls with static arguments to constants.
+One-argument string `includes()`, `startsWith()`, and `endsWith()` use tiny POSIX helper functions that are emitted only when the generated shell calls them. Two-argument string search methods use inline `awk` instead. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold indexes, searches, and `charAt()` calls with static arguments to constants.
 
 Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold transforms with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools such as `sed`, `tr`, and `awk`; dynamic string `slice()`, `at()`, and indexing use AWK substring extraction.
 
