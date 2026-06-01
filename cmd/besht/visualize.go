@@ -12,12 +12,74 @@ import (
 )
 
 func terminalWidth() int {
-	if columns := os.Getenv("COLUMNS"); columns != "" {
-		if width, err := strconv.Atoi(columns); err == nil && width > 0 {
-			return width
-		}
+	if width, ok := liveTerminalWidth(); ok {
+		return width
+	}
+	if width, ok := envColumnsWidth(); ok {
+		return width
 	}
 	return 120
+}
+
+func liveTerminalWidth() (int, bool) {
+	if width, ok := sttyWidthFromTTY(); ok {
+		return width, true
+	}
+	if !isTerminal(os.Stdin) {
+		return 0, false
+	}
+	out, err := runSttySize(os.Stdin)
+	if err != nil {
+		return 0, false
+	}
+	return parseSttyWidth(string(out))
+}
+
+func sttyWidthFromTTY() (int, bool) {
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		return 0, false
+	}
+	defer tty.Close()
+	out, err := runSttySize(tty)
+	if err != nil {
+		return 0, false
+	}
+	return parseSttyWidth(string(out))
+}
+
+func runSttySize(stdin *os.File) ([]byte, error) {
+	cmd := exec.Command("stty", "size")
+	cmd.Stdin = stdin
+	return cmd.Output()
+}
+
+func parseSttyWidth(out string) (int, bool) {
+	fields := strings.Fields(out)
+	if len(fields) != 2 {
+		return 0, false
+	}
+	rows, err := strconv.Atoi(fields[0])
+	if err != nil || rows <= 0 {
+		return 0, false
+	}
+	width, err := strconv.Atoi(fields[1])
+	if err != nil || width <= 0 {
+		return 0, false
+	}
+	return width, true
+}
+
+func envColumnsWidth() (int, bool) {
+	columns := os.Getenv("COLUMNS")
+	if columns == "" {
+		return 0, false
+	}
+	width, err := strconv.Atoi(columns)
+	if err != nil || width <= 0 {
+		return 0, false
+	}
+	return width, true
 }
 
 func showInTerminal(content string) error {

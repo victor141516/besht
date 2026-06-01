@@ -40,7 +40,7 @@ Flags:
   -h, --help   Show this message
 
 Visualize:
-  Uses bat for TypeScript and shell syntax highlighting when bat is installed and output is a terminal.
+  Sizes the side-by-side view to the current terminal width and uses bat for TypeScript and shell syntax highlighting when available.
 `
 
 const version = "0.1.0"

@@ -164,10 +164,34 @@ func TestUsageDocumentsCompileAndVisualizeModes(t *testing.T) {
 		"besht compile --check <file.bsh>",
 		"besht visualize <file.bsh>",
 		"Alias for besht compile",
-		"Uses bat for TypeScript and shell syntax highlighting",
+		"Sizes the side-by-side view to the current terminal width",
 	} {
 		if !strings.Contains(usage, want) {
 			t.Fatalf("usage missing %q", want)
 		}
+	}
+}
+
+func TestParseSttyWidth(t *testing.T) {
+	width, ok := parseSttyWidth("48 192\n")
+	if !ok || width != 192 {
+		t.Fatalf("parseSttyWidth: got width=%d ok=%v, want 192 true", width, ok)
+	}
+	for _, bad := range []string{"", "48", "x 120", "48 0", "48 -1"} {
+		if width, ok := parseSttyWidth(bad); ok {
+			t.Fatalf("parseSttyWidth(%q): got width=%d ok=true, want false", bad, width)
+		}
+	}
+}
+
+func TestEnvColumnsWidth(t *testing.T) {
+	t.Setenv("COLUMNS", "180")
+	width, ok := envColumnsWidth()
+	if !ok || width != 180 {
+		t.Fatalf("envColumnsWidth: got width=%d ok=%v, want 180 true", width, ok)
+	}
+	t.Setenv("COLUMNS", "not-a-number")
+	if width, ok := envColumnsWidth(); ok {
+		t.Fatalf("envColumnsWidth invalid: got width=%d ok=true, want false", width)
 	}
 }
