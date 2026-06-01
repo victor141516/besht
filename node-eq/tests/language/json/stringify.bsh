@@ -1,0 +1,6 @@
+// besht-compile-flags: --opt-use-jq
+let user = { id: 7, name: "Ada", active: true }
+console.log(JSON.stringify(user))
+console.log(JSON.stringify(["a", "b"]))
+console.log(JSON.stringify([1, 2]))
+console.log(JSON.stringify(false))

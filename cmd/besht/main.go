@@ -28,6 +28,7 @@ Flags:
   --opt-no-source-map            Omit # besht:file:line:col source comments from compiled output
   --opt-resolve-ts-imports       Resolve extensionless imports to .ts when .bsh is absent
   --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
+  --opt-use-jq                  Allow generated JSON code to depend on jq
   --check      Validate imports, command usage, and unsupported fetch APIs; do not generate output
   --version    Show version and exit
   -h, --help   Show this message
@@ -60,6 +61,7 @@ func main() {
 	noSourceMap := false
 	resolveTSImports := false
 	allowExternalShellImports := false
+	useJQ := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -75,6 +77,8 @@ func main() {
 			resolveTSImports = true
 		case "--opt-allow-external-shell-imports":
 			allowExternalShellImports = true
+		case "--opt-use-jq":
+			useJQ = true
 		case "-o":
 			i++
 			if i >= len(args) {
@@ -100,7 +104,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: input file %q does not have .bsh extension\n", inputFile)
 	}
 
-	opts := codegen.Options{NoCheck: noCheck, NoSourceMap: noSourceMap, ResolveTsImports: resolveTSImports, AllowExternalShellImports: allowExternalShellImports}
+	opts := codegen.Options{NoCheck: noCheck, NoSourceMap: noSourceMap, ResolveTsImports: resolveTSImports, AllowExternalShellImports: allowExternalShellImports, UseJQ: useJQ}
 
 	if checkOnly {
 		runCheck(inputFile, opts)

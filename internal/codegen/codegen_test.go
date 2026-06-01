@@ -145,99 +145,100 @@ let r: string = shout("hello")`)
 }
 
 func TestCodegen_IfSimple(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n > 0) {
     $("echo", "pos").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -gt 0 ]; then`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `echo pos`)
 	assertContains(t, out, `fi`)
 }
 
 func TestCodegen_IfElse(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n > 0) {
     $("echo", "pos").run()
 } else {
     $("echo", "neg").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -gt 0 ]; then`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `fi`)
 }
 
 func TestCodegen_IfElseIf(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n > 10) {
     $("echo", "big").run()
 } else if (n > 0) {
     $("echo", "small").run()
 } else {
     $("echo", "zero").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -gt 10 ]; then`)
-	assertContains(t, out, `elif [ "$n" -gt 0 ]; then`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=10`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=10`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `fi`)
 }
 
 func TestCodegen_IfBoolCondition(t *testing.T) {
-	out := compile(t, `let flag: boolean = true
+	out := compile(t, `function show(flag: boolean) {
 if (flag) {
     $("echo", "yes").run()
+}
 }`)
-	assertContains(t, out, `[ "$flag" = 1 ]`)
+	assertContains(t, out, `[ "$_show_flag" = 1 ]`)
 }
 
 func TestCodegen_IfNegation(t *testing.T) {
-	out := compile(t, `let b: boolean = true
+	out := compile(t, `function show(b: boolean) {
 if (!b) {
     $("echo", "no").run()
+}
 }`)
 	assertContains(t, out, `! [`)
 }
 
 func TestCodegen_IfAndCondition(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 2
+	out := compile(t, `function check(a: number, b: number) {
 if (a > 0 && b > 0) {
     $("echo", "both").run()
+}
 }`)
 	assertContains(t, out, `&&`)
 }
 
 func TestCodegen_IfOrCondition(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 2
+	out := compile(t, `function check(a: number, b: number) {
 if (a > 0 || b > 0) {
     $("echo", "either").run()
+}
 }`)
 	assertContains(t, out, `||`)
 }
 
 func TestCodegen_IfStringEquality(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-let t: string = "world"
+	out := compile(t, `function check(s: string, t: string) {
 if (s == t) {
     $("echo", "same").run()
+}
 }`)
-	assertContains(t, out, `_bst_left="$s"`)
-	assertContains(t, out, `_bst_right="$t"`)
+	assertContains(t, out, `_bst_left="$_check_s"`)
+	assertContains(t, out, `_bst_right="$_check_t"`)
 	assertContains(t, out, `[ "$_bst_left" = "$_bst_right" ]`)
 }
 
 func TestCodegen_IfIntEquality(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 1
+	out := compile(t, `function check(a: number, b: number) {
 if (a == b) {
     $("echo", "equal").run()
+}
 }`)
-	assertContains(t, out, `_bst_left="$a"`)
-	assertContains(t, out, `_bst_right="$b"`)
+	assertContains(t, out, `_bst_left="$_check_a"`)
+	assertContains(t, out, `_bst_right="$_check_b"`)
 	assertContains(t, out, `[ "$_bst_left" = "$_bst_right" ]`)
 }
 
@@ -259,10 +260,35 @@ if ("a" === "a") {
 	assertNotContains(t, out, `awk -v _a=2 -v _b=3`)
 }
 
+func TestCodegen_StaticStringVariableComparisons(t *testing.T) {
+	out := compile(t, `let mode = "prod"
+let same = mode == "prod"
+let diff = mode !== "test"
+let msg = mode == "prod" ? "live" : "dev"
+if (mode == "prod") {
+    console.log(msg)
+}
+console.log(mode !== "test")`)
+	assertContains(t, out, `same=1`)
+	assertContains(t, out, `diff=1`)
+	assertContains(t, out, `msg='live'`)
+	assertContains(t, out, `printf '%s\n' "$msg"`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `_bst_left="$mode"`)
+	assertNotContains(t, out, `_bst_right='prod'`)
+	assertNotContains(t, out, `$(if { _bst_left`)
+}
+
 func TestCodegen_StaticComparisonsKeepDynamicFallback(t *testing.T) {
 	out := compile(t, `let a = "a"
+if (false) {
+    a = "b"
+}
 let same = a === "a"
 let n = 2
+if (false) {
+    n = 4
+}
 let less = n < 3`)
 	assertContains(t, out, `_bst_left="$a"`)
 	assertContains(t, out, `_bst_right='a'`)
@@ -270,13 +296,23 @@ let less = n < 3`)
 	assertNotContains(t, out, `awk -v _a=$n -v _b=3`)
 }
 
+func TestCodegen_StaticStringComparisonsFallbackForFunctionInputs(t *testing.T) {
+	out := compile(t, `function compare(a: string, n: number) {
+    let same = a === "a"
+    let less = n < 3
+}`)
+	assertContains(t, out, `_bst_left="$_compare_a"`)
+	assertContains(t, out, `_bst_right='a'`)
+	assertContains(t, out, `awk -v _a=$_compare_n -v _b=3`)
+}
+
 func TestCodegen_WhileLoop(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 while (n > 0) {
     $("echo", "${n}").run()
+}
 }`)
-	assertContains(t, out, `while [ "$n" -gt 0 ]; do`)
-	assertNotContains(t, out, `while awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `while awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `done`)
 }
 
@@ -363,7 +399,7 @@ for (let f of files) {
 func TestCodegen_CompoundAssignment(t *testing.T) {
 	out := compile(t, `let count: number = 1
 count += 2`)
-	assertContains(t, out, `count=$(( $count + 2 ))`)
+	assertContains(t, out, `count=3`)
 }
 
 func TestCodegen_StaticArithmetic(t *testing.T) {
@@ -385,12 +421,71 @@ let negated = -3`)
 	assertNotContains(t, out, `awk -v _a=5 -v _b=2`)
 }
 
+func TestCodegen_StaticFoldedComparisons(t *testing.T) {
+	out := compile(t, `console.log(Math.min(4, 2) === 2)
+console.log((2 + 3) === 5)
+console.log(Number.parseInt("42") === 42)
+console.log(Number.parseFloat("3.5") > 3)
+console.log("hello".charAt(99) === "")
+console.log("hi".toUpperCase() === "HI")
+console.log("  hi  ".trim() === "hi")
+console.log(Math.max(4, 2) < 4)
+console.log("hi".toUpperCase() !== "HI")`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' false`)
+	assertNotContains(t, out, `_bst_left=2; _bst_right=2`)
+	assertNotContains(t, out, `if [ 1 = 1 ]; then printf true`)
+	assertNotContains(t, out, `if [ 0 = 1 ]; then printf true`)
+}
+
+func TestCodegen_StaticFoldedComparisonsKeepDynamicFallback(t *testing.T) {
+	out := compile(t, `function pick(): string {
+    return "hi"
+}
+let value = pick()
+console.log(value === "hi")`)
+	assertContains(t, out, `_bst_left="$value"`)
+	assertContains(t, out, `_bst_right='hi'`)
+}
+
 func TestCodegen_StaticArithmeticKeepsDynamicFallback(t *testing.T) {
-	out := compile(t, `let a = 2
+	out := compile(t, `function calc(a: number) {
 let sum = a + 3
+}
 let divZero = 1 / 0`)
-	assertContains(t, out, `sum=$(( $a + 3 ))`)
+	assertContains(t, out, `sum=$(( $_calc_a + 3 ))`)
 	assertContains(t, out, `divZero=$(awk -v _a=1 -v _b=0`)
+}
+
+func TestCodegen_StaticNumberBindings(t *testing.T) {
+	out := compile(t, `let start = 2
+let step = 3
+let total = start + step * 4
+let fixed = total.toFixed(1)
+let max = Math.max(total, 10)
+if (total > 10) {
+    $("echo", "big").run()
+}`)
+	assertContains(t, out, `start=2`)
+	assertContains(t, out, `step=3`)
+	assertContains(t, out, `total=14`)
+	assertContains(t, out, `fixed='14.0'`)
+	assertContains(t, out, `max=14`)
+	assertContains(t, out, `echo big`)
+	assertNotContains(t, out, `$(( $start +`)
+	assertNotContains(t, out, `awk -v _a=$total -v _b=10`)
+	assertNotContains(t, out, `if true; then`)
+}
+
+func TestCodegen_StaticNumberBindingsKeepControlFlowFallback(t *testing.T) {
+	out := compile(t, `let start = 2
+if (false) {
+    start = 9
+}
+let total = start + 3
+let bigger = total > 10`)
+	assertContains(t, out, `total=$(( $start + 3 ))`)
+	assertContains(t, out, `bigger=$(if [ "$total" -gt 10 ]; then printf 1; else printf 0; fi)`)
 }
 
 func TestCodegen_TemplateLiteralExpression(t *testing.T) {
@@ -402,14 +497,14 @@ func TestCodegen_TernaryNumber(t *testing.T) {
 	out := compile(t, `let x: number = 10
 let y: number = 3
 let bigger: number = x > y ? x : y`)
-	assertContains(t, out, `bigger=$(if [ "$x" -gt "$y" ]; then printf '%s' "$x"; else printf '%s' "$y"; fi)`)
+	assertContains(t, out, `bigger="$x"`)
 	assertNotContains(t, out, `awk -v _a=$x -v _b=$y`)
 }
 
 func TestCodegen_TernaryString(t *testing.T) {
 	out := compile(t, `let x: number = 10
 let label: string = x > 5 ? "big" : "small"`)
-	assertContains(t, out, `label=$(if [ "$x" -gt 5 ]; then printf '%s' 'big'; else printf '%s' 'small'; fi)`)
+	assertContains(t, out, `label='big'`)
 	assertNotContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
 }
 
@@ -445,9 +540,10 @@ if (false) {
 }
 
 func TestCodegen_NumberToString(t *testing.T) {
-	out := compile(t, `let n: number = 42
-let s: string = n.toString()`)
-	assertContains(t, out, `printf '%s' "$n"`)
+	out := compile(t, `function show(n: number) {
+let s: string = n.toString()
+}`)
+	assertContains(t, out, `printf '%s' "$_show_n"`)
 }
 
 func TestCodegen_PrimitiveToString(t *testing.T) {
@@ -462,16 +558,17 @@ try {
 } catch (code: status) {
     let cs: string = code.toString()
 }`)
-	assertContains(t, out, `ss=$(printf '%s' "$s")`)
+	assertContains(t, out, `ss='x'`)
 	assertContains(t, out, `ts=$(if [ $t = 1 ]; then printf true; else printf false; fi)`)
 	assertContains(t, out, `fs=$(if [ $f = 1 ]; then printf true; else printf false; fi)`)
 	assertContains(t, out, `cs=$(printf '%s' "$code")`)
 }
 
 func TestCodegen_NumberToFixed(t *testing.T) {
-	out := compile(t, `let pi: number = 3.14159
-let s: string = pi.toFixed(2)`)
-	assertContains(t, out, `awk -v _x="$pi" -v _n=2 'BEGIN{OFMT="%.17g";printf "%.*f", _n, _x}'`)
+	out := compile(t, `function show(pi: number) {
+let s: string = pi.toFixed(2)
+}`)
+	assertContains(t, out, `awk -v _x="$_show_pi" -v _n=2 'BEGIN{OFMT="%.17g";printf "%.*f", _n, _x}'`)
 }
 
 func TestCodegen_StaticNumberMethods(t *testing.T) {
@@ -482,6 +579,46 @@ let whole: string = (3.9).toFixed()`)
 	assertContains(t, out, `fixed='3.14'`)
 	assertContains(t, out, `whole='4'`)
 	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticPrimitiveToStringBindings(t *testing.T) {
+	out := compile(t, `let a = true.toString()
+let b = false.toString()
+let c = ("x" === "x").toString()
+let d = Boolean("").toString()
+let e = (2 + 3).toString()`)
+	assertContains(t, out, `a='true'`)
+	assertContains(t, out, `b='false'`)
+	assertContains(t, out, `c='true'`)
+	assertContains(t, out, `d='false'`)
+	assertContains(t, out, `e='5'`)
+	assertNotContains(t, out, `if [ 1 = 1 ]; then printf true`)
+	assertNotContains(t, out, `printf '%s' 5`)
+}
+
+func TestCodegen_StaticNumericToStringReceivers(t *testing.T) {
+	out := compile(t, `let rounded = Math.round(2.7).toString()
+let parsed = Number.parseInt("42").toString()
+let hex = Number.parseInt("ff", 16).toString()
+let maxed = Math.max(4, 2).toString()
+let arithmetic = (2 + 3).toString()`)
+	assertContains(t, out, `rounded='3'`)
+	assertContains(t, out, `parsed='42'`)
+	assertContains(t, out, `hex='255'`)
+	assertContains(t, out, `maxed='4'`)
+	assertContains(t, out, `arithmetic='5'`)
+	assertNotContains(t, out, `printf '%s' 3`)
+	assertNotContains(t, out, `printf '%s' 42`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticNumericToStringReceiversKeepDynamicFallback(t *testing.T) {
+	out := compile(t, `function show(raw: string, n: number) {
+    let parsed = Number.parseInt(raw).toString()
+    let rounded = Math.round(n).toString()
+}`)
+	assertContains(t, out, `_show_parsed=$(printf '%s' $(awk -v _s="$_show_raw"`)
+	assertContains(t, out, `_show_rounded=$(printf '%s' $(awk -v _x=$_show_n`)
 }
 
 func TestCodegen_StaticToStringConcatFragments(t *testing.T) {
@@ -689,7 +826,8 @@ func TestCodegen_BuiltinContainsCondition(t *testing.T) {
 if (files.includes("a")) {
     $("echo", "found").run()
 }`)
-	assertContains(t, out, `grep -qxF`)
+	assertContains(t, out, `echo found`)
+	assertNotContains(t, out, `grep -qxF`)
 }
 
 func TestCodegen_ExitZero(t *testing.T) {
@@ -705,38 +843,38 @@ process.exit(code)`)
 }
 
 func TestCodegen_ArithmeticAdd(t *testing.T) {
-	out := compile(t, `let a: number = 3
-let b: number = 4
-let c: number = a + b`)
-	assertContains(t, out, `$(( $a + $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a + b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a + $_calc_b ))`)
 }
 
 func TestCodegen_ArithmeticSub(t *testing.T) {
-	out := compile(t, `let a: number = 10
-let b: number = 3
-let c: number = a - b`)
-	assertContains(t, out, `$(( $a - $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a - b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a - $_calc_b ))`)
 }
 
 func TestCodegen_ArithmeticMul(t *testing.T) {
-	out := compile(t, `let a: number = 3
-let b: number = 4
-let c: number = a * b`)
-	assertContains(t, out, `$(( $a * $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a * b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a * $_calc_b ))`)
 }
 
 func TestCodegen_ArithmeticDiv(t *testing.T) {
-	out := compile(t, `let a: number = 10
-let b: number = 2
-let c: number = a / b`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a / b
+}`)
 	assertContains(t, out, `awk -v _a=`)
 }
 
 func TestCodegen_ArithmeticMod(t *testing.T) {
-	out := compile(t, `let a: number = 10
-let b: number = 3
-let c: number = a % b`)
-	assertContains(t, out, `$(( $a % $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a % b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a % $_calc_b ))`)
 }
 
 func TestCodegen_PipeMethod(t *testing.T) {
@@ -777,30 +915,30 @@ func TestCodegen_FnReturnStringViaPrintf(t *testing.T) {
 }
 
 func TestCodegen_ComparisonLt(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n < 10) {
     $("echo", "small").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -lt 10 ]; then`)
-	assertNotContains(t, out, `exit !(_a < _b)`)
+	assertContains(t, out, `exit !(_a < _b)`)
 }
 
 func TestCodegen_ComparisonGte(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n >= 5) {
     $("echo", "ok").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -ge 5 ]; then`)
-	assertNotContains(t, out, `exit !(_a >= _b)`)
+	assertContains(t, out, `exit !(_a >= _b)`)
 }
 
 func TestCodegen_ComparisonLte(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n <= 10) {
     $("echo", "ok").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -le 10 ]; then`)
-	assertNotContains(t, out, `exit !(_a <= _b)`)
+	assertContains(t, out, `exit !(_a <= _b)`)
 }
 
 func TestCodegen_ComparisonFloatFallback(t *testing.T) {
@@ -808,8 +946,8 @@ func TestCodegen_ComparisonFloatFallback(t *testing.T) {
 if (n < 3) {
     $("echo", "small").run()
 }`)
-	assertContains(t, out, `awk -v _a=$n -v _b=3`)
-	assertContains(t, out, `exit !(_a < _b)`)
+	assertContains(t, out, `echo small`)
+	assertNotContains(t, out, `awk -v _a=$n -v _b=3`)
 }
 
 func TestCodegen_ComparisonIntegerBindingInvalidatedByFloatAssignment(t *testing.T) {
@@ -823,13 +961,13 @@ if (n < 3) {
 }
 
 func TestCodegen_ComparisonNeqInt(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 2
+	out := compile(t, `function check(a: number, b: number) {
 if (a != b) {
     $("echo", "diff").run()
+}
 }`)
-	assertContains(t, out, `_bst_left="$a"`)
-	assertContains(t, out, `_bst_right="$b"`)
+	assertContains(t, out, `_bst_left="$_check_a"`)
+	assertContains(t, out, `_bst_right="$_check_b"`)
 	assertContains(t, out, `[ "$_bst_left" != "$_bst_right" ]`)
 }
 
@@ -841,21 +979,22 @@ $("ls", path).run()`)
 }
 
 func TestCodegen_IntLiteralInShellArith(t *testing.T) {
-	out := compile(t, `let n: number = 5
-let m: number = n + 1`)
-	assertContains(t, out, `$(( $n + 1 ))`)
+	out := compile(t, `function calc(n: number) {
+let m: number = n + 1
+}`)
+	assertContains(t, out, `m=$(( $_calc_n + 1 ))`)
 }
 
 func TestCodegen_StringConcatMethod(t *testing.T) {
 	out := compile(t, `let a: string = "hello"
 let b: string = " world"
 let c: string = a + b`)
-	assertContains(t, out, `"${a}${b}"`)
+	assertContains(t, out, `c="hello world"`)
 }
 
 func TestCodegen_TemplateLitConcatWithVar(t *testing.T) {
 	out := compile(t, "let name: string = \"Alice\"\nlet greeting: string = `Hello, ` + name")
-	assertContains(t, out, `"Hello, ${name}"`)
+	assertContains(t, out, `greeting="Hello, Alice"`)
 }
 
 func TestCodegen_BreakInLoop(t *testing.T) {
@@ -945,7 +1084,7 @@ console.log(nope ?? true)`)
 	assertContains(t, out, `printf '%s\n' 'direct'`)
 	assertContains(t, out, `printf '%s\n' "$empty"`)
 	assertContains(t, out, `printf '%s\n' "$zero"`)
-	assertContains(t, out, `if (_bst_cond="$nope"; [ -n "$_bst_cond" ] && [ "$_bst_cond" != 0 ]); then printf '%s\n' true; else printf '%s\n' false; fi`)
+	assertContains(t, out, `printf '%s\n' false`)
 	assertNotContains(t, out, `_BESHT_NULLISH_SENTINEL=`)
 	assertNotContains(t, out, `_bst_l=`)
 }
@@ -1028,15 +1167,16 @@ console.error(true && false)`)
 }
 
 func TestCodegen_DynamicBooleanConsoleArgsUseConditions(t *testing.T) {
-	out := compile(t, `let n = 3
+	out := compile(t, `function show(n: number) {
 console.log(n > 0)
 console.error(n == 3)
-console.log("positive?", n > 0)`)
-	assertContains(t, out, `if [ "$n" -gt 0 ]; then printf '%s\n' true; else printf '%s\n' false; fi`)
-	assertContains(t, out, `if { _bst_left="$n"; _bst_right=3;`)
+console.log("positive?", n > 0)
+}`)
+	assertContains(t, out, `if awk -v _a=$_show_n -v _b=0`)
+	assertContains(t, out, `if { _bst_left="$_show_n"; _bst_right=3;`)
 	assertContains(t, out, `then printf '%s\n' true >&2; else printf '%s\n' false >&2; fi`)
-	assertContains(t, out, `printf '%s\n' 'positive?' "$(if [ "$n" -gt 0 ]; then printf true; else printf false; fi)"`)
-	assertNotContains(t, out, `if [ $(if [ "$n" -gt 0 ]; then printf 1; else printf 0; fi) = 1 ]`)
+	assertContains(t, out, `printf '%s\n' 'positive?' "$(if awk -v _a=$_show_n -v _b=0`)
+	assertNotContains(t, out, `if [ $(if awk`)
 }
 
 func TestCodegen_StaticBooleanBranchesAndTernaries(t *testing.T) {
@@ -1101,6 +1241,78 @@ else console.log("never")`)
 	assertNotContains(t, out, `printf '%s\n' 'never'`)
 }
 
+func TestCodegen_StaticBooleanBindings(t *testing.T) {
+	out := compile(t, `let ready = true
+let same = "a" === "a"
+let label = same ? "yes" : "no"
+console.log(ready)
+console.log(same)
+console.log(`+"`same=${same}`"+`)
+if (same) console.log("same")`)
+	assertContains(t, out, `ready=1`)
+	assertContains(t, out, `same=1`)
+	assertContains(t, out, `label='yes'`)
+	if count := strings.Count(out, `printf '%s\n' true`); count < 2 {
+		t.Fatalf("expected direct true prints, got %d\n\n%s", count, out)
+	}
+	assertContains(t, out, `printf '%s\n' "same=true"`)
+	assertContains(t, out, `printf '%s\n' 'same'`)
+	assertNotContains(t, out, `$(if [ $ready = 1 ]; then printf true; else printf false; fi)`)
+	assertNotContains(t, out, `$(if [ $same = 1 ]; then printf true; else printf false; fi)`)
+	assertNotContains(t, out, `if [ "$same" = 1 ]; then`)
+}
+
+func TestCodegen_StaticBooleanBindingsKeepControlFlowFallback(t *testing.T) {
+	out := compile(t, `let ready = true
+if (false) {
+    ready = false
+}
+console.log(ready)
+if (ready) console.log("ready")`)
+	assertContains(t, out, `ready=1`)
+	assertContains(t, out, `if [ "$ready" = 1 ]; then printf '%s\n' true; else printf '%s\n' false; fi`)
+	assertContains(t, out, `if [ "$ready" = 1 ]; then`)
+}
+
+func TestCodegen_StaticLogicalValueExpressions(t *testing.T) {
+	out := compile(t, `console.log("left" || "fallback")
+console.log("" || "fallback")
+console.log("left" && "right")
+console.log("" && "right")
+console.log(0 || 42)
+console.log(7 && 42)
+console.log(false || true)
+console.log(false && true)
+console.log("" || true)
+console.log("left" || false)
+console.log(true && "value")
+console.log("left" && false)`)
+	for _, want := range []string{
+		`printf '%s\n' 'left'`,
+		`printf '%s\n' 'fallback'`,
+		`printf '%s\n' 'right'`,
+		`printf '%s\n' ''`,
+		`printf '%s\n' 42`,
+		`printf '%s\n' true`,
+		`printf '%s\n' false`,
+		`printf '%s\n' 'value'`,
+	} {
+		assertContains(t, out, want)
+	}
+	assertNotContains(t, out, `if [ $( _l=`)
+	assertNotContains(t, out, `_l='left'`)
+}
+
+func TestCodegen_DynamicLogicalValueExpressionIsNotBooleanWrapped(t *testing.T) {
+	out := compile(t, `function pick(): string {
+    return "value"
+}
+console.log(pick() || "fallback")`)
+	assertContains(t, out, `printf '%s\n' "$( _l=$(pick);`)
+	assertNotContains(t, out, `if [ $( _l=$(pick)`)
+	assertNotContains(t, out, `then printf true; else printf false`)
+}
+
 func TestCodegen_IndexExpr(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
 let first: string = files[0]`)
@@ -1126,9 +1338,61 @@ let fromSplit: string = "a,b".split(",")[1]`)
 	assertNotContains(t, out, `sed -n "$(( 1 + 1 ))p"`)
 }
 
+func TestCodegen_StaticNestedListIndexExpr(t *testing.T) {
+	out := compile(t, `let key: string = Object.entries({ name: "Ada", active: true })[0][0]
+let value: string = Object.entries({ name: "Ada", active: true })[0][1]
+let entries = Object.entries({ name: "Ada", active: true })
+let namedKey: string = entries[1][0]
+let namedValue: string = entries[1][1]
+let cell: string = [["a", "b"], ["c", "d"]][1][0]`)
+	assertContains(t, out, `key='name'`)
+	assertContains(t, out, `value='Ada'`)
+	assertContains(t, out, `namedKey='active'`)
+	assertContains(t, out, `namedValue='true'`)
+	assertContains(t, out, `cell='c'`)
+	assertNotContains(t, out, `tr '\037' '\n'`)
+	assertNotContains(t, out, `sed -n "$(( 1 + 1 ))p"`)
+}
+
+func TestCodegen_StaticNestedListIndexSkipsControlFlowAssignedVars(t *testing.T) {
+	out := compile(t, `let entries = Object.entries({ name: "Ada" })
+while (true) {
+    entries = Object.entries({ name: "Grace" })
+    break
+}
+let value: string = entries[0][1]`)
+	assertContains(t, out, `tr '\037' '\n'`)
+	assertNotContains(t, out, `value='Ada'`)
+}
+
 func TestCodegen_StaticListOutOfRangeIndexKeepsRuntimePath(t *testing.T) {
 	out := compile(t, `let missing: string = ["a", "b"][3]`)
 	assertContains(t, out, `sed -n "$(( 3 + 1 ))p"`)
+}
+
+func TestCodegen_StaticStringIndexExpr(t *testing.T) {
+	out := compile(t, `let second: string = "abc"[1]
+let s = "abc"
+let third: string = s[2]
+let missing: string = s[99]`)
+	assertContains(t, out, `second='b'`)
+	assertContains(t, out, `third='c'`)
+	assertContains(t, out, `missing=''`)
+	assertNotContains(t, out, `cut -c$(( 1 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 2 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 99 + 1 ))`)
+}
+
+func TestCodegen_StaticStringIndexSkipsControlFlowAssignedVars(t *testing.T) {
+	out := compile(t, `let s = "abc"
+while (true) {
+    s = "xyz"
+    break
+}
+let ch: string = s[1]`)
+	assertContains(t, out, `awk -v _s="$s" -v _idx=1`)
+	assertContains(t, out, `substr(_s,_i+1,1)`)
+	assertNotContains(t, out, `ch='b'`)
 }
 
 func TestCodegen_StaticListIndexSkipsControlFlowAssignedVars(t *testing.T) {
@@ -1140,6 +1404,41 @@ while (true) {
 }`)
 	assertContains(t, out, `row=$(printf '%s\n' "$currentPos" | sed -n "$(( 0 + 1 ))p")`)
 	assertNotContains(t, out, `row='0'`)
+}
+
+func TestCodegen_StaticListLiteralDestructure(t *testing.T) {
+	out := compile(t, `const [name, age, missing] = ["Ada", 37]
+let len: number = name.length`)
+	assertContains(t, out, `name='Ada'`)
+	assertContains(t, out, `age='37'`)
+	assertContains(t, out, `missing=''`)
+	assertContains(t, out, `len=3`)
+	assertNotContains(t, out, `_destructure_`)
+	assertNotContains(t, out, `sed -n '1p'`)
+	assertNotContains(t, out, `sed -n '2p'`)
+}
+
+func TestCodegen_StaticListVariableDestructure(t *testing.T) {
+	out := compile(t, `let pair = ["Ada", "Lovelace"]
+const [first, last] = pair`)
+	assertContains(t, out, `first='Ada'`)
+	assertContains(t, out, `last='Lovelace'`)
+	assertNotContains(t, out, `_destructure_`)
+	assertNotContains(t, out, `sed -n '1p'`)
+}
+
+func TestCodegen_StaticListDestructureFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let pair = ["Ada", "Lovelace"]
+while (true) {
+    pair = ["Grace", "Hopper"]
+    break
+}
+const [first, last] = pair`)
+	assertContains(t, out, `_destructure_`)
+	assertContains(t, out, `sed -n '1p'`)
+	assertContains(t, out, `sed -n '2p'`)
+	assertNotContains(t, out, `first='Ada'`)
+	assertNotContains(t, out, `last='Lovelace'`)
 }
 
 func TestCodegen_ConstDecl(t *testing.T) {
@@ -1250,14 +1549,16 @@ func TestCodegen_StringToLowerCase(t *testing.T) {
 }
 
 func TestCodegen_StringSplit(t *testing.T) {
-	out := compile(t, `let s: string = "a,b,c"
-let parts: list<string> = s.split(",")`)
+	out := compile(t, `function splitIt(s: string) {
+    let parts: list<string> = s.split(",")
+}`)
 	assertContains(t, out, `tr ',' '\n'`)
 }
 
 func TestCodegen_StringSplitEmptySeparator(t *testing.T) {
-	out := compile(t, `let s: string = "abc"
-let parts: list<string> = s.split("")`)
+	out := compile(t, `function splitChars(s: string) {
+    let parts: list<string> = s.split("")
+}`)
 	assertContains(t, out, `for(i=1;i<=length($0);i++) print substr($0,i,1)`)
 }
 
@@ -1278,6 +1579,40 @@ func TestCodegen_StaticStringSplitForLoop(t *testing.T) {
 }`)
 	assertContains(t, out, `for part in 'a' 'b' 'c'; do`)
 	assertNotContains(t, out, `tr ',' '\n'`)
+}
+
+func TestCodegen_StaticStringVariableSplit(t *testing.T) {
+	out := compile(t, `let csv: string = "a,b,c"
+let sep: string = ","
+let parts: list<string> = csv.split(sep)
+let count: number = csv.split(sep).length`)
+	assertContains(t, out, "parts='a\nb\nc'")
+	assertContains(t, out, `count=3`)
+	assertNotContains(t, out, `tr '$sep' '\n'`)
+	assertNotContains(t, out, `tr ',' '\n'`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticStringVariableSplitForLoop(t *testing.T) {
+	out := compile(t, `let csv: string = "a,b,c"
+let sep: string = ","
+for (part of csv.split(sep)) {
+    console.log(part)
+}`)
+	assertContains(t, out, `for part in 'a' 'b' 'c'; do`)
+	assertNotContains(t, out, `tr '$sep' '\n'`)
+	assertNotContains(t, out, `while IFS= read`)
+}
+
+func TestCodegen_StaticStringVariableSplitFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let csv: string = "a,b,c"
+while (true) {
+    csv = "x,y"
+    break
+}
+let parts: list<string> = csv.split(",")`)
+	assertContains(t, out, `tr ',' '\n'`)
+	assertNotContains(t, out, "parts='a\nb\nc'")
 }
 
 func TestCodegen_SetHasAdd(t *testing.T) {
@@ -1350,15 +1685,17 @@ func TestCodegen_StringEndsWithCondition(t *testing.T) {
 }
 
 func TestCodegen_StringReplace(t *testing.T) {
-	out := compile(t, `let s: string = "hello world"
-let r: string = s.replace("world", "besht")`)
+	out := compile(t, `function replaceIt(s: string) {
+    let r: string = s.replace("world", "besht")
+}`)
 	assertContains(t, out, `sed "s/world/besht/"`)
 
 }
 
 func TestCodegen_StringReplaceAll(t *testing.T) {
-	out := compile(t, `let s: string = "aaa"
-let r: string = s.replaceAll("a", "b")`)
+	out := compile(t, `function replaceAllIt(s: string) {
+    let r: string = s.replaceAll("a", "b")
+}`)
 	assertContains(t, out, `sed "s/a/b/g"`)
 
 }
@@ -1371,7 +1708,11 @@ let sliced: string = "hello".slice(1, 4)
 let sub: string = "hello".substring(4, 1)
 let repeated: string = "ha".repeat(3)
 let padded: string = "hi".padStart(5, "0")
-let ended: string = "hi".padEnd(5, ".")`)
+let ended: string = "hi".padEnd(5, ".")
+let replaced: string = "hello world".replace("world", "besht")
+let replacedAll: string = "hello world".replaceAll("l", "L")
+let literalMeta: string = "a.b.c".replaceAll(".", "!")
+let joined: string = "hello".concat(" ", "besht")`)
 	assertContains(t, out, `trimmed='hi'`)
 	assertContains(t, out, `upper='HELLO'`)
 	assertContains(t, out, `lower='hello'`)
@@ -1380,7 +1721,12 @@ let ended: string = "hi".padEnd(5, ".")`)
 	assertContains(t, out, `repeated='hahaha'`)
 	assertContains(t, out, `padded='000hi'`)
 	assertContains(t, out, `ended='hi...'`)
+	assertContains(t, out, `replaced='hello besht'`)
+	assertContains(t, out, `replacedAll='heLLo worLd'`)
+	assertContains(t, out, `literalMeta='a!b!c'`)
+	assertContains(t, out, `joined='hello besht'`)
 	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `sed "s/`)
 	assertNotContains(t, out, `tr '[:lower:]'`)
 	assertNotContains(t, out, `cut -c`)
 	assertNotContains(t, out, `awk`)
@@ -1392,12 +1738,19 @@ let spaced = "  hi  "
 let fill = "."
 let upper = greeting.toUpperCase()
 let trimmed = spaced.trim()
-let padded = greeting.padStart(8, fill)`)
+let padded = greeting.padStart(8, fill)
+let replaced = greeting.replace("ell", "ipp")
+let replacedAll = greeting.replaceAll("l", "L")
+let joined = greeting.concat(fill, "txt")`)
 	assertContains(t, out, `upper='HELLO'`)
 	assertContains(t, out, `trimmed='hi'`)
 	assertContains(t, out, `padded='...hello'`)
+	assertContains(t, out, `replaced='hippo'`)
+	assertContains(t, out, `replacedAll='heLLo'`)
+	assertContains(t, out, `joined='hello.txt'`)
 	assertNotContains(t, out, `tr '[:lower:]'`)
 	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `sed "s/`)
 	assertNotContains(t, out, `printf '%8s'`)
 }
 
@@ -1430,6 +1783,72 @@ while (true) {
 let upper = greeting.toUpperCase()`)
 	assertContains(t, out, `tr '[:lower:]' '[:upper:]'`)
 	assertNotContains(t, out, `upper='HELLO'`)
+}
+
+func TestCodegen_StaticBuiltStringTransforms(t *testing.T) {
+	out := compile(t, `let upper: string = ("he" + "llo").toUpperCase()
+let trimmed: string = `+"`  ${\"hi\" + \"!\"}  `"+`.trim()
+let padded: string = ("a" + "b").padStart(5, "0" + "1")`)
+	assertContains(t, out, `upper='HELLO'`)
+	assertContains(t, out, `trimmed='hi!'`)
+	assertContains(t, out, `padded='010ab'`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticStringBindingMethods(t *testing.T) {
+	out := compile(t, `let raw = "  alpha  "
+let word = "alpha"
+let trimmed = raw.trim()
+let upper = word.toUpperCase()
+let has = word.includes("ph")
+console.log(raw.trim())
+console.log(word.includes("ph"))
+if (word.startsWith("al")) console.log(word.toUpperCase())
+console.log(`+"`char=${word.charAt(1)}`"+`)
+let pieces = word.split("p")`)
+	assertContains(t, out, `raw='  alpha  '`)
+	assertContains(t, out, `word='alpha'`)
+	assertContains(t, out, `trimmed='alpha'`)
+	assertContains(t, out, `upper='ALPHA'`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `printf '%s\n' 'alpha'`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' 'ALPHA'`)
+	assertContains(t, out, `printf '%s\n' "char=l"`)
+	assertContains(t, out, "pieces='al\nha'")
+	assertNotContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `_bst_starts_with`)
+	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `cut -c`)
+}
+
+func TestCodegen_StaticStringBindingMethodsKeepControlFlowFallback(t *testing.T) {
+	out := compile(t, `let word = "alpha"
+if (false) {
+    word = "beta"
+}
+console.log(word.trim())
+if (word.includes("ph")) console.log("has")`)
+	assertContains(t, out, `sed 's/^[[:space:]]`)
+	assertContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `printf '%s\n' 'alpha'`)
+}
+
+func TestCodegen_StaticStringReplaceConcatFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let greeting = "hello"
+while (true) {
+    greeting = "bye"
+    break
+}
+let replaced = greeting.replace("ell", "ipp")
+let joined = greeting.concat("!")`)
+	assertContains(t, out, `sed "s/ell/ipp/"`)
+	assertContains(t, out, `"${greeting}!"`)
+	assertNotContains(t, out, `replaced='hippo'`)
+	assertNotContains(t, out, `joined='hello!'`)
 }
 
 func TestCodegen_StringLength(t *testing.T) {
@@ -1545,10 +1964,68 @@ let s: string = l.toString()`)
 	assertNotContains(t, out, `[[`)
 }
 
+func TestCodegen_StaticListVariableMethods(t *testing.T) {
+	out := compile(t, `let files = ["a", "b", "c"]
+let text = files.join("|")
+let comma = files.toString()
+let has = files.includes("b")
+let first = files.indexOf("c")
+let last = files.lastIndexOf("a")
+let nums = Array.from({ length: 3 })
+let numsText = nums.join(",")
+let parts = "x:y:z".split(":")
+let partsText = parts.join("+")
+console.log(files.includes("b"))`)
+	assertContains(t, out, `text='a|b|c'`)
+	assertContains(t, out, `comma='a,b,c'`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=0`)
+	assertContains(t, out, `numsText='0,1,2'`)
+	assertContains(t, out, `partsText='x+y+z'`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `grep -qxF 'b'`)
+	assertNotContains(t, out, `awk -v _needle`)
+	assertNotContains(t, out, `awk -v s=`)
+}
+
+func TestCodegen_StaticListVariableMethodsFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let files = ["a", "b"]
+while (true) {
+    files = ["c", "d"]
+    break
+}
+let text = files.join("|")
+let has = files.includes("b")`)
+	assertContains(t, out, `awk -v s='|'`)
+	assertContains(t, out, `grep -qxF 'b'`)
+	assertNotContains(t, out, `text='a|b'`)
+	assertNotContains(t, out, `has=1`)
+}
+
 func TestCodegen_ListLength(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 let n: number = l.length`)
 	assertContains(t, out, `n=2`)
+	assertNotContains(t, out, `wc -l`)
+}
+
+func TestCodegen_ListLengthFallsBackAfterControlFlowAssignment(t *testing.T) {
+	out := compile(t, `let l: list<string> = ["a", "b"]
+while (true) {
+    l = ["a", "b", "c"]
+    break
+}
+let n: number = l.length`)
+	assertContains(t, out, `wc -l`)
+	assertNotContains(t, out, `n=2`)
+}
+
+func TestCodegen_ListLengthUpdatesAfterStaticMutation(t *testing.T) {
+	out := compile(t, `let l: list<string> = ["a", "b"]
+l.push("c")
+let n: number = l.length`)
+	assertContains(t, out, `n=3`)
 	assertNotContains(t, out, `wc -l`)
 }
 
@@ -1583,7 +2060,7 @@ let s: list<string> = l.slice(1, 3)`)
 func TestCodegen_ListIncludesCondition(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 if (l.includes("a")) { $("echo", "yes") }`)
-	assertContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `grep -qxF`)
 	assertNotContains(t, out, `_bst_includes()`)
 }
 
@@ -1613,11 +2090,12 @@ let appended: list<string> = files.push("x")
 if (files.includes("x")) { $("echo", "found").run() }
 let combined: list<string> = files.concat(other)`)
 	assertContains(t, out, `count=3`)
+	assertNotContains(t, out, `wc -l`)
 	assertContains(t, out, `first='a'`)
 	assertContains(t, out, "rest='b\nc'")
 	assertContains(t, out, "appended='a\nb\nc\nx'")
 	assertContains(t, out, "combined='a\nb\nc\nd'")
-	assertContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `grep -qxF`)
 	assertNotContains(t, out, `wc -l`)
 	assertNotContains(t, out, `tail -n +$(( 1 + 1 ))`)
 	assertNotContains(t, out, `printf '%s\n%s'`)
@@ -1714,7 +2192,7 @@ console.log({ ok: ok, text: "hi there" })`)
   active: %s,
 }
 ' 'Ada' true >&2`)
-	assertContains(t, out, `"$(if [ $ok = 1 ]; then printf true; else printf false; fi)" 'hi there'`)
+	assertContains(t, out, `false 'hi there'`)
 	assertNotContains(t, out, `cannot log object`)
 	assertNotContains(t, out, `_objkeys_`)
 }
@@ -2245,10 +2723,10 @@ func TestCodegen_StringSlice(t *testing.T) {
 }
 
 func TestCodegen_StringConcatMethodNew(t *testing.T) {
-	out := compile(t, `let a: string = "hello"
-let b: string = " world"
-let c: string = a.concat(b)`)
-	assertContains(t, out, `"${a}${b}"`)
+	out := compile(t, `function joinIt(a: string, b: string) {
+    let c: string = a.concat(b)
+}`)
+	assertContains(t, out, `"${_joinIt_a}${_joinIt_b}"`)
 }
 
 func TestCodegen_StringIndexOf(t *testing.T) {
@@ -2327,6 +2805,26 @@ let has = greeting.includes("ell")`)
 	assertNotContains(t, out, `has=1`)
 }
 
+func TestCodegen_StaticBuiltStringSearchMethods(t *testing.T) {
+	out := compile(t, `let has: boolean = ("ab" + "cd").includes("b" + "c")
+let sw: boolean = `+"`${\"he\"}llo`"+`.startsWith("h" + "e")
+let ew: boolean = ("hel" + "lo").endsWith("l" + "o")
+let first: number = ("he" + "llo").indexOf("l")
+let last: number = ("he" + "llo").lastIndexOf("l")
+console.log(("abc" + "def").includes("cd"))`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `sw=1`)
+	assertContains(t, out, `ew=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=3`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `_bst_starts_with`)
+	assertNotContains(t, out, `_bst_ends_with`)
+	assertNotContains(t, out, `if [ 1 = 1 ]; then printf true`)
+	assertNotContains(t, out, `awk`)
+}
+
 func TestCodegen_StaticStringCharAt(t *testing.T) {
 	out := compile(t, `let c: string = "hello".charAt(1)
 let missing: string = "hello".charAt(99)`)
@@ -2353,15 +2851,17 @@ func TestCodegen_StringLastIndexOfSafeAwkArgs(t *testing.T) {
 }
 
 func TestCodegen_MathTrunc(t *testing.T) {
-	out := compile(t, `let x = -3.7
-let n: number = Math.trunc(x)`)
+	out := compile(t, `function calc(x: number) {
+let n: number = Math.trunc(x)
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `int(`)
 }
 
 func TestCodegen_MathSign(t *testing.T) {
-	out := compile(t, `let x = -3
-let n: number = Math.sign(x)`)
+	out := compile(t, `function calc(x: number) {
+let n: number = Math.sign(x)
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `-1`)
 	assertContains(t, out, `1`)
@@ -2392,18 +2892,21 @@ let sqrtValue = Math.sqrt(9)`)
 }
 
 func TestCodegen_FloatTrackingClearedOnIntegerReassignment(t *testing.T) {
-	out := compile(t, `let r = Math.round(2.7)
-r = 4
-let sum = r + 2`)
-	assertContains(t, out, `sum=$(( $r + 2 ))`)
-	assertNotContains(t, out, `awk -v _a=$r -v _b=2`)
+	out := compile(t, `function calc(n: number) {
+let r = Math.round(2.7)
+r = n
+let sum = r + 2
+}`)
+	assertContains(t, out, `sum=$(( $_calc_r + 2 ))`)
+	assertNotContains(t, out, `awk -v _a=$_calc_r -v _b=2`)
 }
 
 func TestCodegen_FloatTrackingSetOnFloatReassignment(t *testing.T) {
-	out := compile(t, `let r = 1
-r = Math.sqrt(4)
-let sum = r + 2`)
-	assertContains(t, out, `sum=$(awk -v _a=$r -v _b=2`)
+	out := compile(t, `function calc(r: number) {
+r = Math.sqrt(r)
+let sum = r + 2
+}`)
+	assertContains(t, out, `sum=$(awk -v _a=$_calc_r -v _b=2`)
 }
 
 func TestCodegen_StringCharAt(t *testing.T) {
@@ -2427,6 +2930,7 @@ func TestCodegen_ListLastIndexOf(t *testing.T) {
 let i: number = l.lastIndexOf("a")`)
 	assertContains(t, out, `i=2`)
 	assertNotContains(t, out, `awk -v _needle`)
+	assertNotContains(t, out, `awk`)
 }
 
 func TestCodegen_ListUnshift(t *testing.T) {
@@ -2549,13 +3053,78 @@ let hasActive = Object.hasOwn(user, "active")`)
 	assertNotContains(t, out, `hasActive=1`)
 }
 
+func TestCodegen_StaticNamedObjectEntries(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
+let entries = Object.entries(user)
+let count = Object.entries(user).length
+for (entry of Object.entries(user)) {
+    console.log(entry[0] + "=" + entry[1])
+}
+for (entry of entries) {
+    console.log(entry[0] + "=" + entry[1])
+}`)
+	assertContains(t, out, "entries='id\0371\nname\037Ada\nactive\037true'")
+	assertContains(t, out, `count=3`)
+	assertContains(t, out, `for _forentry_`)
+	assertContains(t, out, "entry_0=${_forentry_")
+	assertContains(t, out, "%%\037*}")
+	assertContains(t, out, "entry_1=${_forentry_")
+	assertContains(t, out, "#*\037}")
+	assertContains(t, out, `printf '%s\n' "${entry_0}=${entry_1}"`)
+	assertNotContains(t, out, `eval "_bst_obj_value=`)
+	assertNotContains(t, out, `grep -q '[^A-Za-z0-9_]'`)
+	assertNotContains(t, out, `wc -l`)
+	assertNotContains(t, out, `while IFS= read -r entry`)
+}
+
+func TestCodegen_StaticNamedObjectEntriesFallbackAfterMutation(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada" }
+user.active = true
+let entries = Object.entries(user)`)
+	assertContains(t, out, `case " $_objkeys_user " in *" active "*)`)
+	assertContains(t, out, `entries=$(for _bst_obj_key in $_objkeys_user`)
+	assertContains(t, out, `eval "_bst_obj_value=`)
+	assertContains(t, out, `if [ "$_bst_obj_key" = 'active' ]`)
+	assertNotContains(t, out, "entries='id\0371\nname\037Ada\nactive\037true'")
+}
+
+func TestCodegen_StaticNamedObjectValues(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
+let values = Object.values(user)
+let count = Object.values(user).length
+let joined = Object.values(user).join(",")
+for (value of Object.values(user)) {
+    console.log(value)
+}`)
+	assertContains(t, out, "values='1\nAda\ntrue'")
+	assertContains(t, out, `count=3`)
+	assertContains(t, out, `joined='1,Ada,true'`)
+	assertContains(t, out, `for value in '1' 'Ada' 'true'; do`)
+	assertNotContains(t, out, `eval "_bst_obj_value=`)
+	assertNotContains(t, out, `grep -q '[^A-Za-z0-9_]'`)
+	assertNotContains(t, out, `wc -l`)
+	assertNotContains(t, out, `while IFS= read -r value`)
+}
+
+func TestCodegen_StaticNamedObjectValuesFallbackAfterMutation(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada" }
+user.active = true
+let joined = Object.values(user).join(",")`)
+	assertContains(t, out, `case " $_objkeys_user " in *" active "*)`)
+	assertContains(t, out, `joined=$(printf '%s`)
+	assertContains(t, out, `for _bst_obj_key in $_objkeys_user`)
+	assertContains(t, out, `eval "_bst_obj_value=`)
+	assertContains(t, out, `if [ "$_bst_obj_key" = 'active' ]`)
+	assertNotContains(t, out, `joined='1,Ada,true'`)
+}
+
 func TestCodegen_BooleanPropertyCondition(t *testing.T) {
 	out := compile(t, `let user = { name: "Ada", active: true }
 if (user.active) {
     console.log("active")
 }`)
-	assertContains(t, out, `if [ "$_obj_user_active" = 1 ]; then`)
 	assertContains(t, out, `printf '%s\n' 'active'`)
+	assertNotContains(t, out, `if [ '1' = 1 ]; then`)
 	assertNotContains(t, out, `_bst_cond="$_obj_user_active"`)
 }
 
@@ -2564,8 +3133,34 @@ func TestCodegen_StringPropertyConditionKeepsTruthyFallback(t *testing.T) {
 if (user.name) {
     console.log("named")
 }`)
-	assertContains(t, out, `if (_bst_cond="$_obj_user_name"; [ -n "$_bst_cond" ] && [ "$_bst_cond" != 0 ]); then`)
+	assertContains(t, out, `if (_bst_cond='Ada'; [ -n "$_bst_cond" ] && [ "$_bst_cond" != 0 ]); then`)
 	assertNotContains(t, out, `if [ "$_obj_user_name" = 1 ]; then`)
+}
+
+func TestCodegen_StaticObjectPropertyReads(t *testing.T) {
+	out := compile(t, `let user = { name: "Ada", city: "Paris", active: true, age: 42 }
+console.log(user.name)
+console.log(user.city)
+console.log(user.active)
+console.log(user.age)`)
+	assertContains(t, out, `printf '%s\n' 'Ada'`)
+	assertContains(t, out, `printf '%s\n' 'Paris'`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' '42'`)
+	assertNotContains(t, out, `printf '%s\n' "$_obj_user_name"`)
+	assertNotContains(t, out, `printf '%s\n' "$_obj_user_city"`)
+}
+
+func TestCodegen_StaticObjectPropertyReadsFallbackAfterMutation(t *testing.T) {
+	out := compile(t, `let user = { name: "Ada" }
+user.name = "Grace"
+console.log(user.name)
+let key = "name"
+user[key] = "Katherine"
+console.log(user.name)`)
+	assertContains(t, out, `printf '%s\n' "$_obj_user_name"`)
+	assertNotContains(t, out, `printf '%s\n' 'Ada'`)
+	assertNotContains(t, out, `printf '%s\n' 'Grace'`)
 }
 
 func TestCodegen_StaticObjectLiteralAPIs(t *testing.T) {
@@ -2681,10 +3276,11 @@ func TestCodegen_StringEndsWithInCondition(t *testing.T) {
 
 func TestCodegen_ListIncludesInCondition(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
-if (l.includes("a")) {
-    $("echo", "yes").run()
-}`)
-	assertContains(t, out, `grep -qxF`)
+	if (l.includes("a")) {
+	    $("echo", "yes").run()
+	}`)
+	assertContains(t, out, `echo yes`)
+	assertNotContains(t, out, `grep -qxF`)
 	assertNotContains(t, out, `_bst_includes()`)
 }
 
@@ -2723,7 +3319,7 @@ func TestCodegen_EscapedDollarNotTreatedAsVar(t *testing.T) {
 
 func TestCodegen_TemplateLitInterpolatesVar(t *testing.T) {
 	out := compile(t, "let name: string = \"world\"\nlet msg: string = `Hello ${name}!`")
-	assertContains(t, out, `"Hello ${name}!"`)
+	assertContains(t, out, `msg="Hello world!"`)
 }
 
 func TestCodegen_TemplateLiteralEscapesShellSpecialDollars(t *testing.T) {
@@ -2889,4 +3485,43 @@ let values = ["x"].map(x => {
 	if !strings.Contains(err.Error(), "unsupported expression statement in map callback") {
 		t.Fatalf("error: got %q", err)
 	}
+}
+
+func compileWithOptions(t *testing.T, src string, opts codegen.Options) string {
+	t.Helper()
+	prog, err := parser.Parse(src, "test.bsh")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	chk := checker.New()
+	if err := chk.Check(prog); err != nil {
+		t.Fatalf("type error: %v", err)
+	}
+	out, err := codegen.GenerateWithOptions(prog, opts)
+	if err != nil {
+		t.Fatalf("codegen error: %v", err)
+	}
+	return out
+}
+
+func TestCodegen_JSONStringifyRequiresJQOptIn(t *testing.T) {
+	err := compileError(t, `let json: string = JSON.stringify({ id: 1 })`)
+	if err == nil || !strings.Contains(err.Error(), "JSON.stringify() requires --opt-use-jq") {
+		t.Fatalf("error = %v, want --opt-use-jq requirement", err)
+	}
+}
+
+func TestCodegen_JSONStringifyWithJQ(t *testing.T) {
+	out := compileWithOptions(t, `let user = { id: 1, name: "Victor", active: true }
+let json: string = JSON.stringify(user)
+let list: string = JSON.stringify(["a", "b"])
+let ok: string = JSON.stringify(true)`, codegen.Options{UseJQ: true})
+	assertContains(t, out, `command -v jq`)
+	assertContains(t, out, `json=$(jq -cn`)
+	assertContains(t, out, `--argjson _v0 "$`)
+	assertContains(t, out, `--arg _v1 "$`)
+	assertContains(t, out, `--argjson _v2 "$(if [ $_obj_user_active = 1 ]; then printf true; else printf false; fi)"`)
+	assertContains(t, out, `list=$(_bst_json_list_`)
+	assertContains(t, out, `jq -Rsc 'split("\n")`)
+	assertContains(t, out, `ok=$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
 }

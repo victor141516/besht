@@ -7,7 +7,7 @@ description: >
   variables, constants, raw strings r"...", String.raw, $() command expressions,
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
-  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
+  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), JSON.stringify(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
   concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), Boolean(value), Number.parseInt(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
   fetch(url).text().
 ---
@@ -28,9 +28,10 @@ besht script.bsh --opt-no-add-binaries-check  # omit runtime self-check when pre
 besht script.bsh --opt-no-source-map            # omit source comments from compiled output
 besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to fall back to .ts
 besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
+besht script.bsh --opt-use-jq                  # enable jq-backed JSON.stringify() codegen
 ```
 
-Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits the runtime `printf`/`grep`/`sed` self-check only when generated output uses the compiler's `grep`/`sed` paths or the args runtime; simple direct-output scripts skip it.
+Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits runtime self-checks only when generated output needs the corresponding utilities; simple direct-output scripts skip them. When options leave the runtime preamble empty, generated entry scripts keep a single blank separator between the header and the first shell statement.
 
 ## Variable Declarations
 
@@ -212,9 +213,9 @@ let sameBlock = output === `a
 b`                                // multiline-safe string equality
 ```
 
-`||` and `&&` in value position return actual values (JS semantics): `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. In condition position (`if`/`while`), they return 1/0 as booleans. `a ?? b` returns `b` only when `a` is `null`/`undefined`; it preserves empty string, `0`, and `false`. Static `??` expressions compile to the selected side when the left side is known.
+`||` and `&&` in value position return actual values (JS semantics): `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. Static known-left `||`/`&&` expressions compile directly to the selected value. In condition position (`if`/`while`), they return 1/0 as booleans. `a ?? b` returns `b` only when `a` is `null`/`undefined`; it preserves empty string, `0`, and `false`. Static `??` expressions compile to the selected side when the left side is known.
 
-Static scalar equality comparisons and static numeric relational comparisons compile to constants. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
+Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, and parseable `Number.parseInt()`/`Number.parseFloat()` calls. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 
 ## Switch / Case
 
@@ -270,17 +271,17 @@ let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).joi
 
 `Array.from({ length })` creates `[0, 1, ... length - 1]`. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` is statement-only, takes a direct arrow callback with `(item)` or `(item, index)`, compiles static scalar receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Defer general arrow function values.
 
-Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants. Unmutated named object `Object.keys()` and static-key `Object.hasOwn()` calls also fold from compiler-managed key metadata; mutated or dynamic objects keep metadata-backed output so assignments stay visible.
+Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants. Unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold from compiler-managed static object metadata; mutated or dynamic objects keep metadata-backed output so assignments stay visible.
 
 ## String and List Search
 
-Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literals, variables bound to them, and chained static ASCII transforms fold searches and `charAt()` calls with static arguments to constants. Lists also support `items.includes(x)` for exact item membership.
+Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold `[index]`, searches, and `charAt()` calls with static arguments to constants. Lists also support `items.includes(x)` for exact item membership.
 
-Static ASCII string literals, variables bound to them, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools; dynamic string `slice()`, `at()`, and indexing support normal substring extraction.
+Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools; dynamic string `slice()`, `at()`, and indexing support normal substring extraction.
 
 Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile compactly while keeping the same Besht behavior.
 
-Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools.
+Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines; variables bound to static ASCII strings can use the same split folding. Dynamic and non-ASCII splits use POSIX tools.
 
 ## Sets and Nested Lists
 
@@ -296,7 +297,7 @@ const [row, col] = [0, 1]
 console.log(matrix?.[row]?.[col] ?? "missing")
 ```
 
-`Set<T>` has `new Set<T>()`, `.has(value)`, and mutating `.add(value)`. Type parameters are annotations only. Straight-line static scalar adds and static membership checks compile compactly; dynamic values and callback/control-flow adds keep runtime membership checks. Nested list rows are preserved through `.map()` when the callback returns a list, and `split("")` splits a string into characters. Tuple/list destructuring declarations evaluate the source once and assign each name from list indexes. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains; it short-circuits only on `null`/`undefined` and composes with `??`. General `fn?.()`, `obj.method?.()`, and optional assignment targets are not supported.
+`Set<T>` has `new Set<T>()`, `.has(value)`, and mutating `.add(value)`. Type parameters are annotations only. Straight-line static scalar adds and static membership checks compile compactly; dynamic values and callback/control-flow adds keep runtime membership checks. Nested list rows are preserved through `.map()` when the callback returns a list, and static nested indexes with known row and column fold to constants. `split("")` splits a string into characters. Tuple/list destructuring declarations evaluate the source once and assign each name from list indexes; static scalar list destructuring emits direct assignments. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains; it short-circuits only on `null`/`undefined` and composes with `??`. General `fn?.()`, `obj.method?.()`, and optional assignment targets are not supported.
 
 ## Objects
 
@@ -308,6 +309,7 @@ let keys: string[] = Object.keys(user)
 let values: string[] = Object.values(user)
 let entries: string[][] = Object.entries(user)
 let hasName: boolean = Object.hasOwn(user, "name")
+let json: string = JSON.stringify(user) // compile with --opt-use-jq
 
 // Computed property access with dynamic keys
 let key: string = "name"
@@ -327,7 +329,9 @@ function showKeys(obj: object): string[] {
 }
 ```
 
-`Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. Unmutated named object key lists and static-key `Object.hasOwn()` calls compile to constants. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. Boolean object properties used directly in conditions behave like booleans and compile to direct shell tests; non-boolean property conditions keep JavaScript-style truthiness. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current list representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. These helpers do not add a runtime helper library. `process.env` is not enumerable; read individual variables with `process.env.NAME`.
+`Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. Unmutated named object key lists, static-scalar value and entry lists, static-key `Object.hasOwn()` calls, and safe direct reads of scalar properties from static object literal bindings compile to constants. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct shell tests. Non-boolean property conditions keep JavaScript-style truthiness. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current list representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. These helpers do not add a runtime helper library. `process.env` is not enumerable; read individual variables with `process.env.NAME`.
+
+`JSON.stringify(value)` encodes strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when the program is compiled with `--opt-use-jq`. Generated JSON code invokes `jq`, and the runtime self-check verifies `jq` exists only when JSON code is emitted. `JSON.parse()` is not supported.
 
 ## Classes
 
@@ -404,9 +408,9 @@ let lines10 = Number.parseInt(raw, 10)
 let red = Number.parseInt(hexByte, 16)
 ```
 
-Static numeric arithmetic over literal numbers compiles to constants. Dynamic arithmetic keeps shell arithmetic or POSIX `awk`.
+Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants. Dynamic arithmetic and variables assigned inside control flow keep shell arithmetic or POSIX `awk`.
 
-Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` fragments inside string concatenation and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 
 ## Command Execution
 
@@ -511,7 +515,7 @@ if (count < 0) return "negative"
 else console.log("non-negative")
 ```
 
-Static boolean conditions such as `if (Boolean("x"))`, `Array.isArray(value) ? a : b`, static string/list searches, static `Object.hasOwn()`, and static comparisons compile to only the selected branch or value. Dynamic conditions keep normal POSIX shell tests.
+Static boolean conditions such as `if (Boolean("x"))`, `Array.isArray(value) ? a : b`, static string/list searches, static `Object.hasOwn()`, static comparisons, and variables bound to static boolean expressions compile to only the selected branch or value. Dynamic conditions and variables assigned inside control flow keep normal POSIX shell tests.
 
 **While:**
 
@@ -592,7 +596,7 @@ let cell: string = matrix[row][col]
 let width: number = matrix[0].length
 ````
 
-Static scalar list indexes with known in-range integer indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed` extraction path.
+Static scalar list indexes with known in-range integer indexes and static nested-list indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row extraction path.
 
 ## Error Handling
 
@@ -656,17 +660,17 @@ let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
 ```
 
-Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice. Static scalar list expression `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static.
+Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice. Static scalar list literals and variables bound to static scalar lists fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static.
 
 Static scalar list literals and list-returning method chains over static scalar lists (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the generated `printf` builder.
 
 Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder.
 
-Static string literals, variables bound to static string literals, and static scalar list expression `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
+Static string literals, variables bound to static string literals, static scalar list expressions, and variables bound to static scalar lists compile `.length` properties to numeric constants; dynamic lengths use POSIX `wc`.
 
-Static scalar list expression `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls compile to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path.
+Static scalar list literals and variables bound to static scalar lists fold `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path.
 
-Static scalar list indexes with known in-range integer indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed` path.
+Static scalar list indexes with known in-range integer indexes and static nested-list indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row path.
 
 ## Imports and Modules
 
@@ -716,7 +720,7 @@ Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Defau
 
 ## Float Literals and Math
 
-Float (decimal) literals are supported. `Math.*` methods support decimals. Literal-argument `Math.*` calls compile to constants; dynamic calls use POSIX `awk`.
+Float (decimal) literals are supported. `Math.*` methods support decimals. Literal-argument `Math.*` calls, including arguments from variables bound to static numeric expressions, compile to constants; dynamic calls use POSIX `awk`.
 
 If you reassign a variable, besht updates its float-tracking metadata from the new right-hand side: float-producing expressions keep later arithmetic on `awk`, while integer or non-float reassignment clears the float marker so later integer arithmetic can use shell integer lowering again.
 
@@ -746,6 +750,7 @@ pi.toFixed(2); // "3.14"
 let s = "hello";
 s.substring(1, 4); // "ell"
 s.charAt(1); // "e"
+s[1]; // "e"
 s.indexOf("l", 3); // 3, optional start position
 s.lastIndexOf("l"); // 3
 s.lastIndexOf("l", 2); // 2, optional backward start position
@@ -761,7 +766,7 @@ Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known lists
 ```
 
-Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`; `Besht.fs.*` and `Besht.strings.*` predicates also render as readable `true`/`false` in console output, and dynamic boolean console arguments reuse the condition once and print `true`/`false` from it. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
+Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, `!false`, static comparisons, and variables bound to static boolean expressions render directly without a shell `if`; `Besht.fs.*` and `Besht.strings.*` predicates also render as readable `true`/`false` in console output, and dynamic boolean console arguments reuse the condition once and print `true`/`false` from it. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
 
 ## Operators
 

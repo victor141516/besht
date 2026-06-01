@@ -556,6 +556,71 @@ console.log("left:right".split(":")[0])
 	}
 }
 
+func TestIntegration_StaticListDestructureRuntime(t *testing.T) {
+	out := runCompiledShell(t, `const [name, age] = ["Ada", 37]
+let pair = ["Grace", "Hopper"]
+const [first, last, missing] = pair
+console.log(name)
+console.log(age)
+console.log(first + " " + last)
+console.log(missing)
+console.log(first.length)`)
+	want := "Ada\n37\nGrace Hopper\n\n5\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticNestedListIndexRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `console.log(Object.entries({ name: "Ada", active: true })[0][0])
+console.log(Object.entries({ name: "Ada", active: true })[0][1])
+let entries = Object.entries({ name: "Ada", active: true })
+console.log(entries[1][0])
+console.log(entries[1][1])
+console.log([["a", "b"], ["c", "d"]][1][0])
+`)
+	out := compileFile(t, path)
+	assertNotContains(t, out, `tr '\037' '\n'`)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
+	}
+	if string(output) != "name\nAda\nactive\ntrue\nc\n" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestIntegration_StaticStringIndexRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `console.log("abc"[1])
+let s = "abc"
+console.log(s[2])
+console.log(s[99] === "")
+`)
+	out := compileFile(t, path)
+	assertNotContains(t, out, `cut -c$(( 1 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 2 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 99 + 1 ))`)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
+	}
+	if string(output) != "b\nc\ntrue\n" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestIntegration_SetValuesWithSpacesAndNestedListLiterals(t *testing.T) {
 	out := runCompiledShell(t, `const seen = new Set<string>()
 seen.add("a b")
@@ -607,16 +672,17 @@ let result: number = double(5)
 
 func TestIntegration_ControlFlowIfElse(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "ctrl.bsh", `let n: number = 10
+	path := writeFile(t, dir, "ctrl.bsh", `function check(n: number) {
 if (n > 5) {
     $("echo", "big").run()
 } else {
     $("echo", "small").run()
 }
+}
+check(10)
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `if [ "$n" -gt 5 ]; then`)
-	assertNotContains(t, out, `if awk -v _a=$n -v _b=5`)
+	assertContains(t, out, `if awk -v _a=$_ctrl__check_n -v _b=5`)
 	assertContains(t, out, `echo big`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `echo small`)
@@ -1156,14 +1222,15 @@ func TestIntegration_LocalVarMangledInsideFn(t *testing.T) {
 
 func TestIntegration_WhileLoop(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `let n: number = 3
+	path := writeFile(t, dir, "main.bsh", `function count(n: number) {
 while (n > 0) {
     $("echo", "${n}").run()
 }
+}
+count(3)
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `while [ "$n" -gt 0 ]; do`)
-	assertNotContains(t, out, `while awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `while awk -v _a=$_main__count_n -v _b=0`)
 	assertContains(t, out, `done`)
 }
 
@@ -1354,18 +1421,16 @@ console.log(msg)
 
 func TestIntegration_TernaryNumber(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", "let x = 10\nlet y = 3\nlet bigger = x > y ? x : y\nconsole.log(`bigger=${bigger}`)\n")
+	path := writeFile(t, dir, "main.bsh", "function show(x: number, y: number) {\nlet bigger = x > y ? x : y\nconsole.log(`bigger=${bigger}`)\n}\nshow(10, 3)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `bigger=$(if [ "$x" -gt "$y" ]; then printf '%s' "$x"; else printf '%s' "$y"; fi)`)
-	assertNotContains(t, out, `bigger=$(if awk -v _a=$x -v _b=$y`)
+	assertContains(t, out, `bigger=$(if awk -v _a=$_main__show_x -v _b=$_main__show_y`)
 }
 
 func TestIntegration_TernaryString(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", "let x = 10\nlet label = x > 5 ? \"big\" : \"small\"\nconsole.log(label)\n")
+	path := writeFile(t, dir, "main.bsh", "function show(x: number) {\nlet label = x > 5 ? \"big\" : \"small\"\nconsole.log(label)\n}\nshow(10)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `label=$(if [ "$x" -gt 5 ]; then printf '%s' 'big'; else printf '%s' 'small'; fi)`)
-	assertNotContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
+	assertContains(t, out, `label=$(if awk -v _a=$_main__show_x -v _b=5`)
 }
 
 func TestIntegration_StaticBooleanConditions(t *testing.T) {
@@ -1398,11 +1463,41 @@ console.log(-3 + 5)`)
 	}
 }
 
+func TestIntegration_StaticFoldedComparisonsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(Math.min(4, 2) === 2)
+console.log((2 + 3) === 5)
+console.log(Number.parseInt("42") === 42)
+console.log(Number.parseFloat("3.5") > 3)
+console.log("hello".charAt(99) === "")
+console.log("hi".toUpperCase() === "HI")
+console.log("  hi  ".trim() === "hi")
+console.log(Math.max(4, 2) < 4)
+console.log("hi".toUpperCase() !== "HI")`)
+	want := "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticNumberBindingsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let start = 2
+let step = 3
+let total = start + step * 4
+console.log(total)
+if (total > 10) console.log("big")
+console.log(total.toFixed(1))
+console.log(Math.max(total, 10))`)
+	want := "14\nbig\n14.0\n14\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_NumberMethods(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", "let n = 42\nlet ns = n.toString()\nlet pi = 3.14159\nlet fixed = pi.toFixed(2)\nconsole.log(ns)\nconsole.log(fixed)\n")
+	path := writeFile(t, dir, "main.bsh", "function show(n: number, pi: number) {\nlet ns = n.toString()\nlet fixed = pi.toFixed(2)\nconsole.log(ns)\nconsole.log(fixed)\n}\nshow(42, 3.14159)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `printf '%s' "$n"`)
+	assertContains(t, out, `printf '%s' "$_main__show_n"`)
 	assertContains(t, out, `printf "%.*f", _n, _x`)
 }
 
@@ -1433,6 +1528,40 @@ console.log(count)
 console.log(flag)
 console.log(same)`)
 	want := "count=5\nflag=true\nsame=true\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticPrimitiveToStringBindingsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let a = true.toString()
+let b = false.toString()
+let c = ("x" === "x").toString()
+let d = Boolean("").toString()
+let e = (2 + 3).toString()
+console.log(a)
+console.log(b)
+console.log(c)
+console.log(d)
+console.log(e)`)
+	want := "true\nfalse\ntrue\nfalse\n5\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticNumericToStringReceiversRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let rounded = Math.round(2.7).toString()
+let parsed = Number.parseInt("42").toString()
+let hex = Number.parseInt("ff", 16).toString()
+let maxed = Math.max(4, 2).toString()
+let arithmetic = (2 + 3).toString()
+console.log(rounded)
+console.log(parsed)
+console.log(hex)
+console.log(maxed)
+console.log(arithmetic)`)
+	want := "3\n42\n255\n4\n5\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -1495,6 +1624,23 @@ console.log(files.concat(other).join(","))`)
 	}
 }
 
+func TestIntegration_StaticListVariableMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let files = ["a", "b", "c"]
+console.log(files.join("|"))
+console.log(files.toString())
+console.log(files.includes("b"))
+console.log(files.indexOf("c"))
+console.log(files.lastIndexOf("a"))
+let nums = Array.from({ length: 3 })
+console.log(nums.join(","))
+let parts = "x:y:z".split(":")
+console.log(parts.join("+"))`)
+	want := "a|b|c\na,b,c\ntrue\n2\n0\n0,1,2\nx+y+z\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticLiteralLengthRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let greeting = "hello"
 console.log(greeting.length)
@@ -1502,6 +1648,18 @@ console.log("hello".length)
 console.log(["a", "b", "c"].length)
 console.log([true, false].length)`)
 	want := "5\n5\n3\n2\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticListVariableLengthRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let files = ["a", "b", "c"]
+let count = files.length
+console.log(count)
+let empty: string[] = []
+console.log(empty.length)`)
+	want := "3\n0\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -1864,6 +2022,18 @@ console.log(values[i])
 	assertNotContains(t, out, `_bst_includes()`)
 }
 
+func TestIntegration_EmptyPreambleUsesSingleBlankSeparator(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `console.log("hello")
+`)
+	out, err := codegen.CompileFile(path, codegen.Options{NoCheck: true, NoSourceMap: true})
+	if err != nil {
+		t.Fatalf("compile error: %v", err)
+	}
+	assertContains(t, out, "# Generated by besht — do not edit by hand\n\nprintf '%s\\n' 'hello'")
+	assertNotContains(t, out, "# Generated by besht — do not edit by hand\n\n\nprintf")
+}
+
 func TestIntegration_BundledRuntimeHelpersUseUnionAcrossModules(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "lib.bsh", `export function hasNeedle(s: string): boolean {
@@ -1957,7 +2127,7 @@ func TestIntegration_BraceInterpolationUnaffected(t *testing.T) {
 	// Template literal for interpolation
 	path := writeFile(t, dir, "main.bsh", "let name: string = \"Alice\"\nlet msg: string = `Hello ${name}`\nconsole.log(msg)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `"Hello ${name}"`)
+	assertContains(t, out, `msg="Hello Alice"`)
 }
 
 func TestIntegration_ClassesCompileAndRun(t *testing.T) {
@@ -2126,8 +2296,13 @@ func TestIntegration_StaticComparisonsRuntime(t *testing.T) {
 console.log("a" !== "b")
 console.log(2 < 3)
 console.log(3 >= 3)
-if ("x" == "x") console.log("same")`)
-	if out != "true\ntrue\ntrue\ntrue\nsame\n" {
+if ("x" == "x") console.log("same")
+let mode = "prod"
+console.log(mode == "prod")
+console.log(mode !== "test")
+let msg = mode == "prod" ? "live" : "dev"
+if (mode == "prod") console.log(msg)`)
+	if out != "true\ntrue\ntrue\ntrue\nsame\ntrue\ntrue\nlive\n" {
 		t.Fatalf("output: got %q", out)
 	}
 }
@@ -2140,6 +2315,24 @@ console.log("same?", n == 3)
 `)
 	if out != "true\nfalse\nsame?\ntrue\n" {
 		t.Fatalf("output: got %q", out)
+	}
+}
+
+func TestIntegration_StaticBooleanBindingsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let ready = true
+let same = "a" === "a"
+let named = "x"
+let truthy = Boolean(named)
+let label = same ? "yes" : "no"
+console.log(ready)
+console.log(same)
+console.log(truthy)
+console.log(`+"`same=${same}`"+`)
+console.log(label)
+if (same) console.log("same")`)
+	want := "true\ntrue\ntrue\nsame=true\nyes\nsame\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
 	}
 }
 
@@ -2391,8 +2584,12 @@ console.log("hello".slice(1, 4))
 console.log("hello".substring(4, 1))
 console.log("ha".repeat(3))
 console.log("hi".padStart(5, "0"))
-console.log("hi".padEnd(5, "."))`)
-	want := "hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\n"
+console.log("hi".padEnd(5, "."))
+console.log("hello world".replace("world", "besht"))
+console.log("hello world".replaceAll("l", "L"))
+console.log("a.b.c".replaceAll(".", "!"))
+console.log("hello".concat(" ", "besht"))`)
+	want := "hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -2420,8 +2617,26 @@ console.log(greeting.startsWith("he"))
 console.log(greeting.endsWith("lo"))
 console.log(greeting.indexOf("l"))
 console.log(greeting.lastIndexOf("l"))
+console.log(greeting.replace("ell", "ipp"))
+console.log(greeting.replaceAll("l", "L"))
+console.log(greeting.concat("!", needle))
 if (greeting.includes(needle)) console.log("yes")`)
-	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\nyes\n"
+	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\nhippo\nheLLo\nhello!ell\nyes\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticBuiltStringMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(("he" + "llo").toUpperCase())
+console.log(`+"`  ${\"hi\" + \"!\"}  `"+`.trim())
+console.log(("a" + "b").padStart(5, "0" + "1"))
+console.log(("ab" + "cd").includes("b" + "c"))
+console.log(`+"`${\"he\"}llo`"+`.startsWith("h" + "e"))
+console.log(("hel" + "lo").endsWith("l" + "o"))
+console.log(("he" + "llo").indexOf("l"))
+console.log(("he" + "llo").lastIndexOf("l"))`)
+	want := "HELLO\nhi!\n010ab\ntrue\ntrue\ntrue\n2\n3\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -2437,6 +2652,20 @@ for (ch of "xy".split("")) {
     console.log(ch)
 }`)
 	want := "3\na\nb\nc\nx\ny\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticStringVariableSplitRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let csv: string = "a,b,c"
+let sep: string = ","
+let parts: list<string> = csv.split(sep)
+console.log(parts.length)
+for (part of csv.split(sep)) {
+    console.log(part)
+}`)
+	want := "3\na\nb\nc\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -2603,6 +2832,20 @@ if (Boolean("")) console.log("condition false")`)
 	}
 }
 
+func TestIntegration_StaticStringBindingMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let raw = "  alpha  "
+let word = "alpha"
+console.log(raw.trim())
+console.log(word.includes("ph"))
+if (word.startsWith("al")) console.log(word.toUpperCase())
+console.log(`+"`char=${word.charAt(1)}`"+`)
+console.log(word.split("p").join("|"))`)
+	want := "alpha\ntrue\nALPHA\nchar=l\nal|ha\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_ObjectKeysRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let user = { id: 1, name: "Victor" }
 user.active = true
@@ -2698,6 +2941,18 @@ if (user.name) console.log("named")`)
 	}
 }
 
+func TestIntegration_StaticObjectPropertyReadsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { name: "Ada", city: "Paris", active: true }
+console.log(user.name)
+if (user.active) console.log(user.city)
+user.name = "Grace"
+console.log(user.name)`)
+	want := "Ada\nParis\nGrace\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticBooleanConsoleArgsRuntime(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `console.log(Boolean(""))
@@ -2771,6 +3026,33 @@ for (key of Object.keys(user)) {
     console.log(key)
 }`)
 	want := "3\nid,name,active\ntrue\nfalse\nid\nname\nactive\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticNamedObjectEntriesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { id: 1, name: "Ada", active: true }
+let entries = Object.entries(user)
+console.log(Object.entries(user).length)
+console.log(entries[1][0] + "=" + entries[1][1])
+for (entry of Object.entries(user)) {
+    console.log(entry[0] + "=" + entry[1])
+}`)
+	want := "3\nname=Ada\nid=1\nname=Ada\nactive=true\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticNamedObjectValuesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { id: 1, name: "Ada", active: true }
+console.log(Object.values(user).length)
+console.log(Object.values(user).join(","))
+for (value of Object.values(user)) {
+    console.log(value)
+}`)
+	want := "3\n1,Ada,true\n1\nAda\ntrue\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -3562,6 +3844,39 @@ console.log("" ?? "fallback")
 console.log(0 ?? 99)
 console.log(false ?? true)`)
 	want := "Ada\nfallback\ndirect\n\n0\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_JSONStringifyCheckRequiresJQOptIn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.bsh")
+	if err := os.WriteFile(path, []byte(`let json: string = JSON.stringify({ id: 1 })`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := codegen.CheckFile(path, codegen.Options{}); err == nil || !strings.Contains(err.Error(), "JSON.stringify() requires --opt-use-jq") {
+		t.Fatalf("CheckFile error = %v, want --opt-use-jq requirement", err)
+	}
+	if err := codegen.CheckFile(path, codegen.Options{UseJQ: true}); err != nil {
+		t.Fatalf("CheckFile with UseJQ: %v", err)
+	}
+}
+
+func TestIntegration_StaticLogicalValueExpressionsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log("left" || "fallback")
+console.log("" || "fallback")
+console.log("left" && "right")
+console.log("" && "right")
+console.log(0 || 42)
+console.log(7 && 42)
+console.log(false || true)
+console.log(false && true)
+console.log("" || true)
+console.log("left" || false)
+console.log(true && "value")
+console.log("left" && false)`)
+	want := "left\nfallback\nright\n\n42\n42\ntrue\nfalse\ntrue\nleft\nvalue\nfalse\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

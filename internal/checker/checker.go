@@ -485,6 +485,9 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 				return err
 			}
 		}
+		if e.Name == "JSON.stringify" {
+			return c.validateJSONStringifyArg(e.Pos, e.Args[0])
+		}
 	case *ast.MethodCallExpr:
 		if err := c.checkMethodArity(e); err != nil {
 			return err
@@ -596,7 +599,7 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 
 func isSemanticGlobalIdent(name string) bool {
 	switch name {
-	case "Besht", "process", "Math", "Number", "Object", "Array", "Boolean", "console", "Set":
+	case "Besht", "process", "Math", "Number", "Object", "Array", "Boolean", "JSON", "console", "Set":
 		return true
 	}
 	return false
@@ -631,6 +634,10 @@ func (c *Checker) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 	case "Object.hasOwn":
 		if len(e.Args) != 2 {
 			return &CheckError{Pos: e.Pos, Message: "Object.hasOwn() takes 2 arguments"}
+		}
+	case "JSON.stringify":
+		if len(e.Args) != 1 {
+			return &CheckError{Pos: e.Pos, Message: "JSON.stringify() takes 1 argument"}
 		}
 	}
 	return nil
@@ -958,6 +965,8 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 			return listStrType
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: listStrType}
+		case "JSON.stringify":
+			return strType
 		case "console.log", "console.error":
 			return voidType
 		}
@@ -1257,6 +1266,62 @@ func beshtReceiverName(expr ast.Expression) string {
 		return "Besht." + group
 	}
 	return "Besht"
+}
+
+func (c *Checker) validateJSONStringifyArg(pos ast.Pos, expr ast.Expression) error {
+	if obj, ok := unwrapJSONStringifyAs(expr).(*ast.ObjectLit); ok {
+		for _, field := range obj.Fields {
+			if unsupportedJSONStringifyObjectValue(c.semanticExprType(field.Value)) {
+				return &CheckError{Pos: pos, Message: "JSON.stringify() only supports scalar object values"}
+			}
+		}
+	}
+	typ := c.semanticExprType(expr)
+	if !isJSONStringifyType(typ) {
+		return &CheckError{Pos: pos, Message: fmt.Sprintf("JSON.stringify() cannot encode %s", typ)}
+	}
+	return nil
+}
+
+func unwrapJSONStringifyAs(expr ast.Expression) ast.Expression {
+	for {
+		as, ok := expr.(*ast.AsExpr)
+		if !ok {
+			return expr
+		}
+		expr = as.Expr
+	}
+}
+
+func isJSONStringifyType(t *ast.Type) bool {
+	if t == nil {
+		return true
+	}
+	switch t.Kind {
+	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean, ast.TypeObject:
+		return true
+	case ast.TypeList:
+		if t.Elem == nil {
+			return true
+		}
+		return isJSONStringifyScalarType(t.Elem)
+	}
+	return false
+}
+
+func unsupportedJSONStringifyObjectValue(t *ast.Type) bool {
+	return !isJSONStringifyScalarType(t)
+}
+
+func isJSONStringifyScalarType(t *ast.Type) bool {
+	if t == nil {
+		return true
+	}
+	switch t.Kind {
+	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean:
+		return true
+	}
+	return false
 }
 
 func pluralSuffix(n int) string {

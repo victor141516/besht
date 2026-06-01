@@ -45,7 +45,7 @@ Remaining future work:
 - Broader JS stdlib migration for APIs that map cleanly to POSIX sh without broad runtime metadata.
 - The larger move away from `list<T>` terminology toward `Array<T>` / `T[]` as the preferred user-facing type in docs, examples, declarations, and diagnostics.
 - Expand object APIs only after preserving the current no-runtime-metadata boundary. Near candidates are `Object.assign()` and `Object.fromEntries()`; nested `Object.values()` / `Object.entries()` support requires a broader object/list representation design.
-- Decide whether a limited `JSON.stringify()` for known compiler-managed object/list shapes is worth adding before full JSON support. Defer `JSON.parse()` unless Besht gains a parser or explicitly depends on a tool such as `jq`.
+- `JSON.stringify()` is implemented as an opt-in jq-backed slice (`--opt-use-jq`) for strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects. `JSON.parse()` remains deferred unless Besht gains a parser or a broader jq-backed JSON design.
 - General callback values and closures remain future work. Current callback lowering is method-specific and compiler-known, including statement-position `forEach()`.
 
 Implementation notes:
@@ -212,11 +212,11 @@ Recommended phases:
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
 - **Object:** `Object.keys()`, narrow scalar-value `Object.values()`, scalar-value `Object.entries()`, and `Object.hasOwn(obj, key)` are implemented over compiler-managed object key metadata. Future richer known-shape APIs should keep the same no-runtime-metadata boundary unless a broader object model is designed.
 - **Object copying:** evaluate `Object.assign()` and `Object.fromEntries()` after object alias/field metadata is reliable.
-- **JSON:** consider limited `JSON.stringify()` for known object/list shapes; defer full `JSON.parse()` unless besht gains a real parser or explicitly depends on an external tool like `jq`.
+- **JSON:** `JSON.stringify()` is implemented behind `--opt-use-jq` for scalar values, scalar lists, and scalar-valued compiler-managed objects. Future work is `JSON.parse()` or richer JSON extraction, which should remain deferred until there is a broader parser/jq design.
 
 Implementation notes:
 
-- Static namespaces such as `Boolean` and `JSON` need parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` slices are implemented.
+- Static namespaces such as `Boolean` and `JSON` use parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, `Object.hasOwn()`, and opt-in `JSON.stringify()` slices are implemented.
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
 - Callback-heavy APIs should build on the reusable arrow callback lowering already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Every added API needs checker, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.

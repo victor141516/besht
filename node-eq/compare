@@ -10,7 +10,7 @@
 
 import { spawnSync } from "node:child_process"
 import { resolve, dirname, basename } from "node:path"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 
 const RESET = "\x1b[0m"
@@ -35,10 +35,23 @@ function run(cmd: string, args: string[], env?: NodeJS.ProcessEnv): { stdout: st
   }
 }
 
+function compileFlagsFor(bshFile: string): string[] {
+  const src = readFileSync(bshFile, "utf8")
+  const flags: string[] = []
+  for (const line of src.split(/\r?\n/).slice(0, 8)) {
+    const match = line.match(/^\s*\/\/\s*besht-compile-flags:\s*(.*)$/)
+    if (!match) continue
+    for (const flag of match[1].trim().split(/\s+/)) {
+      if (flag.length > 0) flags.push(flag)
+    }
+  }
+  return flags
+}
+
 function runViaShell(bshFile: string, scriptArgs: string[]): { stdout: string; code: number } {
   const tmpDir = mkdtempSync(`${tmpdir()}/_besht_cmp_`)
   const tmp = `${tmpDir}/${basename(bshFile, ".bsh")}.sh`
-  const compile = run(compilerPath, [bshFile])
+  const compile = run(compilerPath, [bshFile, ...compileFlagsFor(bshFile)])
   if (compile.code !== 0) {
     rmSync(tmpDir, { recursive: true, force: true })
     return { stdout: `[COMPILE ERROR]\n${compile.stderr}`, code: compile.code }

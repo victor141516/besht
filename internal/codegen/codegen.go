@@ -15,44 +15,54 @@ import (
 const nullishSentinelVar = "_BESHT_NULLISH_SENTINEL"
 
 type Generator struct {
-	sb               strings.Builder
-	indent           int
-	currentFn        string
-	fnReturnMap      map[string]*ast.Type
-	varTypeMap       map[string]*ast.Type // codegen-level var → inferred type (list detection)
-	inFunction       bool
-	inLoop           bool
-	topLevel         bool
-	paramMap         map[string]string // besht param name → mangled shell var name
-	globalVarMap     map[string]string // top-level/imported besht name → shell var name
-	objAliasMap      map[string]objectRef
-	objFieldsMap     map[string][]string  // object var name → list of field names
-	objPropTypeMap   map[string]*ast.Type // "varName.propName" → property type
-	staticObjectMap  map[string][]string
-	staticNullishMap map[string]bool
-	stringConstMap   map[string]string
-	staticListMap    map[string][]string
-	staticSetMap     map[string][]string
-	controlAssigned  map[string]bool
-	fnParamTypes     map[string]*ast.Type // current fn param name → type annotation
-	fnParamNames     map[string][]string  // function name → param names (in order)
-	classMap         map[string]*ast.ClassDecl
-	varClassMap      map[string]string
-	currentClass     string
-	currentThisVar   string
-	floatVars        map[string]bool
-	intVars          map[string]bool
-	listLenMap       map[string]string
-	runtimeHelpers   map[string]bool
-	argsOptions      map[string]bool
-	argsFlags        map[string]bool
-	NoCheck          bool
-	NoSourceMap      bool
-	cmdAnalysis      *CmdAnalysis
-	cmdScope         *cmdScope
-	cmdChains        map[string]ast.Expression
-	reduceReturns    []reduceReturnContext
-	mapReturns       []mapReturnContext
+	sb                   strings.Builder
+	indent               int
+	currentFn            string
+	fnReturnMap          map[string]*ast.Type
+	varTypeMap           map[string]*ast.Type // codegen-level var -> inferred type (list detection)
+	inFunction           bool
+	inLoop               bool
+	topLevel             bool
+	paramMap             map[string]string // besht param name -> mangled shell var name
+	globalVarMap         map[string]string // top-level/imported besht name -> shell var name
+	objAliasMap          map[string]objectRef
+	objFieldsMap         map[string][]string  // object var name -> list of field names
+	objPropTypeMap       map[string]*ast.Type // "varName.propName" -> property type
+	objectConstMap       map[string]string    // "varName.propName" -> static shell value
+	objectConstUnsafe    map[string]bool
+	staticObjectMap      map[string][]string
+	staticObjectEntryMap map[string][]string
+	staticObjectValueMap map[string][]string
+	staticNullishMap     map[string]bool
+	stringConstMap       map[string]string
+	numConstMap          map[string]float64
+	boolConstMap         map[string]bool
+	staticListMap        map[string][]string
+	staticListValues     map[string][]string
+	staticEntryListMap   map[string][]string
+	staticEntryLoopMap   map[string]staticEntryLoopFields
+	staticSetMap         map[string][]string
+	controlAssigned      map[string]bool
+	fnParamTypes         map[string]*ast.Type // current fn param name -> type annotation
+	fnParamNames         map[string][]string  // function name -> param names (in order)
+	classMap             map[string]*ast.ClassDecl
+	varClassMap          map[string]string
+	currentClass         string
+	currentThisVar       string
+	floatVars            map[string]bool
+	intVars              map[string]bool
+	listLenMap           map[string]string
+	runtimeHelpers       map[string]bool
+	argsOptions          map[string]bool
+	argsFlags            map[string]bool
+	NoCheck              bool
+	NoSourceMap          bool
+	cmdAnalysis          *CmdAnalysis
+	cmdScope             *cmdScope
+	cmdChains            map[string]ast.Expression
+	reduceReturns        []reduceReturnContext
+	mapReturns           []mapReturnContext
+	UseJQ                bool
 }
 
 type reduceReturnContext struct {
@@ -63,6 +73,11 @@ type reduceReturnContext struct {
 
 type mapReturnContext struct {
 	indexVar string
+}
+
+type staticEntryLoopFields struct {
+	keyVar   string
+	valueVar string
 }
 
 type objectRef struct {
@@ -104,6 +119,14 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
+func cloneNumberMap(in map[string]float64) map[string]float64 {
+	out := make(map[string]float64, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 type callbackLoopCtx struct {
 	ParamVars   []string
 	ParamByName map[string]string
@@ -122,41 +145,59 @@ type Options struct {
 	NoSourceMap               bool
 	ResolveTsImports          bool
 	AllowExternalShellImports bool
+	UseJQ                     bool
 }
 
 func New() *Generator {
 	return &Generator{
-		fnReturnMap:      make(map[string]*ast.Type),
-		varTypeMap:       make(map[string]*ast.Type),
-		paramMap:         make(map[string]string),
-		globalVarMap:     make(map[string]string),
-		objAliasMap:      make(map[string]objectRef),
-		objFieldsMap:     make(map[string][]string),
-		objPropTypeMap:   make(map[string]*ast.Type),
-		staticObjectMap:  make(map[string][]string),
-		staticNullishMap: make(map[string]bool),
-		stringConstMap:   make(map[string]string),
-		staticListMap:    make(map[string][]string),
-		staticSetMap:     make(map[string][]string),
-		controlAssigned:  make(map[string]bool),
-		fnParamTypes:     make(map[string]*ast.Type),
-		fnParamNames:     make(map[string][]string),
-		classMap:         make(map[string]*ast.ClassDecl),
-		varClassMap:      make(map[string]string),
-		floatVars:        make(map[string]bool),
-		intVars:          make(map[string]bool),
-		listLenMap:       make(map[string]string),
-		runtimeHelpers:   make(map[string]bool),
-		argsOptions:      make(map[string]bool),
-		argsFlags:        make(map[string]bool),
-		cmdScope:         newCmdScope(nil),
-		cmdChains:        make(map[string]ast.Expression),
-		topLevel:         true,
+		fnReturnMap:          make(map[string]*ast.Type),
+		varTypeMap:           make(map[string]*ast.Type),
+		paramMap:             make(map[string]string),
+		globalVarMap:         make(map[string]string),
+		objAliasMap:          make(map[string]objectRef),
+		objFieldsMap:         make(map[string][]string),
+		objPropTypeMap:       make(map[string]*ast.Type),
+		objectConstMap:       make(map[string]string),
+		objectConstUnsafe:    make(map[string]bool),
+		staticObjectMap:      make(map[string][]string),
+		staticObjectEntryMap: make(map[string][]string),
+		staticObjectValueMap: make(map[string][]string),
+		staticNullishMap:     make(map[string]bool),
+		stringConstMap:       make(map[string]string),
+		numConstMap:          make(map[string]float64),
+		boolConstMap:         make(map[string]bool),
+		staticListMap:        make(map[string][]string),
+		staticListValues:     make(map[string][]string),
+		staticEntryListMap:   make(map[string][]string),
+		staticEntryLoopMap:   make(map[string]staticEntryLoopFields),
+		staticSetMap:         make(map[string][]string),
+		controlAssigned:      make(map[string]bool),
+		fnParamTypes:         make(map[string]*ast.Type),
+		fnParamNames:         make(map[string][]string),
+		classMap:             make(map[string]*ast.ClassDecl),
+		varClassMap:          make(map[string]string),
+		floatVars:            make(map[string]bool),
+		intVars:              make(map[string]bool),
+		listLenMap:           make(map[string]string),
+		runtimeHelpers:       make(map[string]bool),
+		argsOptions:          make(map[string]bool),
+		argsFlags:            make(map[string]bool),
+		cmdScope:             newCmdScope(nil),
+		cmdChains:            make(map[string]ast.Expression),
+		topLevel:             true,
 	}
 }
 
 func Generate(prog *ast.Program) (string, error) {
 	g := New()
+	return g.generate(prog)
+}
+
+func GenerateWithOptions(prog *ast.Program, opts Options) (string, error) {
+	g := New()
+	g.NoCheck = opts.NoCheck
+	g.NoSourceMap = opts.NoSourceMap
+	g.UseJQ = opts.UseJQ
 	return g.generate(prog)
 }
 
@@ -189,6 +230,147 @@ func (g *Generator) collectArgsSchema(stmts []ast.Statement) {
 	walkArgsStatements(stmts, g.collectArgsSchemaExpr)
 }
 
+func statementsUseJSONStringify(stmts []ast.Statement) bool {
+	for _, stmt := range stmts {
+		if stmtUsesJSONStringify(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtUsesJSONStringify(stmt ast.Statement) bool {
+	if stmt == nil {
+		return false
+	}
+	switch s := stmt.(type) {
+	case *ast.LetDecl:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.DestructureDecl:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.Assignment:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.IndexAssignStmt:
+		return exprUsesJSONStringify(s.Index) || exprUsesJSONStringify(s.Value)
+	case *ast.PropertyAssignStmt:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.ExprStmt:
+		return exprUsesJSONStringify(s.Expr)
+	case *ast.ReturnStmt:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.IfStmt:
+		if exprUsesJSONStringify(s.Condition) || blockUsesJSONStringify(s.Then) || blockUsesJSONStringify(s.Else) {
+			return true
+		}
+		for _, ei := range s.ElseIfs {
+			if exprUsesJSONStringify(ei.Condition) || blockUsesJSONStringify(ei.Body) {
+				return true
+			}
+		}
+	case *ast.WhileStmt:
+		return exprUsesJSONStringify(s.Condition) || blockUsesJSONStringify(s.Body)
+	case *ast.ForStmt:
+		return exprUsesJSONStringify(s.Iterator) || blockUsesJSONStringify(s.Body)
+	case *ast.FnDecl:
+		return blockUsesJSONStringify(s.Body)
+	case *ast.TryStmt:
+		return blockUsesJSONStringify(s.Body) || blockUsesJSONStringify(s.Catch)
+	case *ast.SwitchStmt:
+		if exprUsesJSONStringify(s.Value) {
+			return true
+		}
+		for _, c := range s.Cases {
+			if exprUsesJSONStringify(c.Value) || blockUsesJSONStringify(c.Body) {
+				return true
+			}
+		}
+		return false
+	case *ast.ClassDecl:
+		for _, m := range s.Methods {
+			if blockUsesJSONStringify(m.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func blockUsesJSONStringify(block *ast.Block) bool {
+	if block == nil {
+		return false
+	}
+	return statementsUseJSONStringify(block.Statements)
+}
+
+func exprUsesJSONStringify(expr ast.Expression) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case *ast.BuiltinCallExpr:
+		if e.Name == "JSON.stringify" {
+			return true
+		}
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.FnCallExpr:
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.MethodCallExpr:
+		if exprUsesJSONStringify(e.Receiver) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.PropertyExpr:
+		return exprUsesJSONStringify(e.Receiver)
+	case *ast.IndexExpr:
+		return exprUsesJSONStringify(e.Expr) || exprUsesJSONStringify(e.Index)
+	case *ast.BinaryExpr:
+		return exprUsesJSONStringify(e.Left) || exprUsesJSONStringify(e.Right)
+	case *ast.TernaryExpr:
+		return exprUsesJSONStringify(e.Condition) || exprUsesJSONStringify(e.Then) || exprUsesJSONStringify(e.Else)
+	case *ast.UnaryExpr:
+		return exprUsesJSONStringify(e.Expr)
+	case *ast.PipeExpr:
+		return exprUsesJSONStringify(e.Left) || exprUsesJSONStringify(e.Right)
+	case *ast.CmdExpr:
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.ListLit:
+		for _, elem := range e.Elements {
+			if exprUsesJSONStringify(elem) {
+				return true
+			}
+		}
+	case *ast.ObjectLit:
+		for _, field := range e.Fields {
+			if exprUsesJSONStringify(field.Value) {
+				return true
+			}
+		}
+	case *ast.ArrowExpr:
+		return exprUsesJSONStringify(e.Body) || blockUsesJSONStringify(e.BlockBody)
+	case *ast.SpreadExpr:
+		return exprUsesJSONStringify(e.Expr)
+	case *ast.AsExpr:
+		return exprUsesJSONStringify(e.Expr)
+	}
+	return false
+}
+
 func statementsUseArgs(stmts []ast.Statement) bool {
 	found := false
 	walkArgsStatements(stmts, func(expr ast.Expression) {
@@ -212,6 +394,7 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 	assigned := make(map[string]bool)
 	var walkStmt func(ast.Statement, bool)
 	var walkBlock func(*ast.Block, bool)
+	var walkExpr func(ast.Expression, bool)
 	walkBlock = func(block *ast.Block, inControl bool) {
 		if block == nil {
 			return
@@ -220,18 +403,106 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 			walkStmt(stmt, inControl)
 		}
 	}
+	walkExpr = func(expr ast.Expression, inControl bool) {
+		if expr == nil {
+			return
+		}
+		switch e := expr.(type) {
+		case *ast.UpdateExpr:
+			if inControl {
+				assigned[e.Name] = true
+			}
+		case *ast.TemplateLit:
+			for _, expr := range e.Exprs {
+				walkExpr(expr, inControl)
+			}
+		case *ast.MethodCallExpr:
+			walkExpr(e.Receiver, inControl)
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.BinaryExpr:
+			walkExpr(e.Left, inControl)
+			walkExpr(e.Right, inControl)
+		case *ast.PipeExpr:
+			walkExpr(e.Left, inControl)
+			walkExpr(e.Right, inControl)
+		case *ast.UnaryExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.TernaryExpr:
+			walkExpr(e.Condition, inControl)
+			walkExpr(e.Then, inControl)
+			walkExpr(e.Else, inControl)
+		case *ast.FnCallExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.BuiltinCallExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.RangeExpr:
+			walkExpr(e.Start, inControl)
+			walkExpr(e.End, inControl)
+		case *ast.CmdExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.PropagateExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.ListLit:
+			for _, elem := range e.Elements {
+				walkExpr(elem, inControl)
+			}
+		case *ast.ObjectLit:
+			for _, field := range e.Fields {
+				walkExpr(field.Value, inControl)
+			}
+		case *ast.ArrowExpr:
+			// Callback bodies may run zero or many times, so assignments inside
+			// them cannot keep top-level constant metadata.
+			walkExpr(e.Body, true)
+			walkBlock(e.BlockBody, true)
+		case *ast.IndexExpr:
+			walkExpr(e.Expr, inControl)
+			walkExpr(e.Index, inControl)
+		case *ast.PropertyExpr:
+			walkExpr(e.Receiver, inControl)
+		case *ast.AsExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.SpreadExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.NewExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		}
+	}
 	walkStmt = func(stmt ast.Statement, inControl bool) {
 		switch s := stmt.(type) {
+		case nil:
+			return
+		case *ast.LetDecl:
+			walkExpr(s.Value, inControl)
 		case *ast.Assignment:
 			if inControl {
 				assigned[s.Name] = true
 			}
+			walkExpr(s.Value, inControl)
 		case *ast.IndexAssignStmt:
 			if inControl {
 				assigned[s.Name] = true
 			}
+			walkExpr(s.Index, inControl)
+			walkExpr(s.Value, inControl)
+		case *ast.PropertyAssignStmt:
+			walkExpr(s.Value, inControl)
 		case *ast.ExprStmt:
 			markControlFlowMutations(s.Expr, inControl, assigned)
+		case *ast.ReturnStmt:
+			walkExpr(s.Value, inControl)
+		case *ast.ExitStmt:
+			walkExpr(s.Code, inControl)
 		case *ast.Block:
 			walkBlock(s, inControl)
 		case *ast.IfStmt:
@@ -432,6 +703,89 @@ func methodMutatesReceiver(method string) bool {
 	default:
 		return false
 	}
+}
+
+func collectObjectConstUnsafeRoots(stmts []ast.Statement) map[string]bool {
+	unsafe := make(map[string]bool)
+	markIdent := func(expr ast.Expression) {
+		if ident, ok := expr.(*ast.IdentExpr); ok {
+			unsafe[ident.Name] = true
+		}
+	}
+
+	walkArgsStatements(stmts, func(expr ast.Expression) {
+		call, ok := expr.(*ast.FnCallExpr)
+		if !ok {
+			return
+		}
+		for _, arg := range call.Args {
+			markIdent(arg)
+		}
+	})
+
+	var walkStmt func(ast.Statement)
+	var walkBlock func(*ast.Block)
+	walkBlock = func(block *ast.Block) {
+		if block == nil {
+			return
+		}
+		for _, stmt := range block.Statements {
+			walkStmt(stmt)
+		}
+	}
+	walkStmt = func(stmt ast.Statement) {
+		switch s := stmt.(type) {
+		case nil, *ast.ImportDecl, *ast.DeclareStmt, *ast.DeclareFnStmt, *ast.BreakStmt, *ast.ContinueStmt:
+			return
+		case *ast.LetDecl:
+			markIdent(s.Value)
+		case *ast.Assignment:
+			unsafe[s.Name] = true
+		case *ast.IndexAssignStmt:
+			unsafe[s.Name] = true
+		case *ast.PropertyAssignStmt:
+			unsafe[s.Object] = true
+		case *ast.IfStmt:
+			walkBlock(s.Then)
+			for _, elseif := range s.ElseIfs {
+				walkBlock(elseif.Body)
+			}
+			walkBlock(s.Else)
+		case *ast.WhileStmt:
+			walkBlock(s.Body)
+		case *ast.ForStmt:
+			walkBlock(s.Body)
+		case *ast.CStyleForStmt:
+			walkStmt(s.Init)
+			walkStmt(s.Update)
+			walkBlock(s.Body)
+		case *ast.TryStmt:
+			walkBlock(s.Body)
+			walkBlock(s.Catch)
+		case *ast.SwitchStmt:
+			for _, swCase := range s.Cases {
+				walkBlock(swCase.Body)
+			}
+		case *ast.FnDecl:
+			walkBlock(s.Body)
+		case *ast.ClassDecl:
+			if s.Constructor != nil {
+				walkBlock(s.Constructor.Body)
+			}
+			for _, method := range s.Methods {
+				walkBlock(method.Body)
+			}
+			for _, accessor := range s.Accessors {
+				walkBlock(accessor.Body)
+			}
+		case *ast.Block:
+			walkBlock(s)
+		}
+	}
+	for _, stmt := range stmts {
+		walkStmt(stmt)
+	}
+	return unsafe
 }
 
 func walkArgsStmt(stmt ast.Statement, visit func(ast.Expression)) {
@@ -902,6 +1256,12 @@ func runtimeHelpersSource(helpers map[string]bool) string {
 	return sb.String()
 }
 
+const beshtJQCheckBlock = `command -v jq >/dev/null 2>&1 || {
+  printf '[besht] FATAL: jq is required by generated JSON code but was not found\n' >&2
+  exit 1
+}
+`
+
 const beshtCheckBlock = `_r=$(printf 'hello:world' | grep -F 'hello' | sed 's/hello/goodbye/' 2>/dev/null) || {
   printf '[besht] FATAL: required utilities (printf/grep/sed) are not working correctly\n' >&2
   exit 1
@@ -941,8 +1301,24 @@ func shellBodyUsesCommand(body, name string) bool {
 }
 
 func writeCheckBlockIfNeeded(out *strings.Builder, noCheck bool, helpers map[string]bool, body string) {
-	if !noCheck && shouldEmitCheckBlock(body, helpers) {
+	if noCheck {
+		return
+	}
+	if shouldEmitCheckBlock(body, helpers) {
 		out.WriteString(beshtCheckBlock)
+	}
+	if helpers["jq"] {
+		out.WriteString(beshtJQCheckBlock)
+	}
+}
+
+func writeGeneratedScriptHeader(out *strings.Builder, preamble string) {
+	out.WriteString("#!/bin/sh\n")
+	out.WriteString("# Generated by besht — do not edit by hand\n")
+	out.WriteString("\n")
+	if preamble != "" {
+		out.WriteString(preamble)
+		out.WriteString("\n")
 	}
 }
 
@@ -957,6 +1333,7 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 
 	g.collectGlobalBindings(prog.Statements)
 	g.controlAssigned = collectControlFlowAssignments(prog.Statements)
+	g.objectConstUnsafe = collectObjectConstUnsafeRoots(prog.Statements)
 	for _, stmt := range prog.Statements {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
@@ -985,15 +1362,13 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 
 	body := g.sb.String()
 	var out strings.Builder
-	out.WriteString("#!/bin/sh\n")
-	out.WriteString("# Generated by besht — do not edit by hand\n")
-	out.WriteString("\n")
-	out.WriteString(runtimeHelpersSource(g.runtimeHelpers))
+	var preamble strings.Builder
+	preamble.WriteString(runtimeHelpersSource(g.runtimeHelpers))
 	if g.runtimeHelpers["args"] {
-		out.WriteString(beshtRuntimeArgsSnapshot)
+		preamble.WriteString(beshtRuntimeArgsSnapshot)
 	}
-	writeCheckBlockIfNeeded(&out, g.NoCheck, g.runtimeHelpers, body)
-	out.WriteString("\n")
+	writeCheckBlockIfNeeded(&preamble, g.NoCheck, g.runtimeHelpers, body)
+	writeGeneratedScriptHeader(&out, preamble.String())
 	out.WriteString(body)
 	return out.String(), nil
 }
@@ -1141,11 +1516,22 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 			if pt != nil {
 				g.objPropTypeMap[varName+"."+field.Key] = pt
 			}
+			g.recordObjectStaticFieldValue(varName, field.Key, field.Value)
 			g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
 		}
 		g.objFieldsMap[varName] = fields
 		g.staticObjectMap[varName] = uniqueStrings(fields)
 		g.staticNullishMap[varName] = false
+		if entries, ok := staticObjectLiteralEntries(obj); ok {
+			g.staticObjectEntryMap[varName] = entries
+		} else {
+			delete(g.staticObjectEntryMap, varName)
+		}
+		if values, ok := staticObjectLiteralValues(obj); ok {
+			g.staticObjectValueMap[varName] = values
+		} else {
+			delete(g.staticObjectValueMap, varName)
+		}
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
 		delete(g.objAliasMap, s.Name)
 		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
@@ -1271,16 +1657,22 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		delete(g.stringConstMap, varName)
 	}
 	g.updateStaticNullishBinding(varName, s.Value)
+	g.updateStaticBoolBinding(varName, s.Value)
+	g.updateStaticNumberBinding(varName, s.Value)
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
-	if emptyArrayOf(s.Value) {
-		g.listLenMap[varName] = "0"
-	} else if isArgsArgvCall(s.Value) {
+	if isArgsArgvCall(s.Value) {
 		g.listLenMap[varName] = g.argsArgcExpr()
+	} else if n, ok := staticListBindingLength(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(n)
 	} else if values, ok := g.staticObjectKeysBuiltinValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
-	} else if values, ok := staticStringSplitValues(s.Value); ok {
+	} else if entries, ok := g.staticObjectEntriesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(entries))
+	} else if values, ok := g.staticObjectValuesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if values, ok := g.staticStringSplitValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
@@ -1303,6 +1695,17 @@ func staticArrayFactoryLengthExpr(expr ast.Expression) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func staticListBindingLength(expr ast.Expression) (int, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return staticListBindingLength(e.Expr)
+	}
+	if values, ok := staticScalarListValuesWithoutNewlines(expr); ok {
+		return len(values), true
+	}
+	return staticArrayFactoryLengthExpr(expr)
 }
 
 func (g *Generator) objectRefForBinding(varName string, expr ast.Expression) (objectRef, bool) {
@@ -1354,6 +1757,21 @@ func (g *Generator) isLazyCommandBinding(expr ast.Expression) bool {
 }
 
 func (g *Generator) genDestructureDecl(s *ast.DestructureDecl) error {
+	if words, ok := g.staticDestructureWords(s.Value); ok {
+		elemType := typeString
+		if valueType := g.inferReceiverType(s.Value); valueType != nil && valueType.Kind == ast.TypeList && valueType.Elem != nil {
+			elemType = valueType.Elem
+		}
+		for i, name := range s.Names {
+			value := shellQuote("")
+			if i < len(words) {
+				value = words[i]
+			}
+			g.declareDestructureBinding(name, elemType, value)
+		}
+		return nil
+	}
+
 	tmp := fmt.Sprintf("_destructure_%d_%d", s.Pos.Line, s.Pos.Column)
 	if containsRunCall(s.Value) && g.cmdAnalysis != nil && !isImmediateRunTerminalCall(s.Value) {
 		if err := g.emitInlineRunChain(s.Value); err != nil {
@@ -1375,12 +1793,51 @@ func (g *Generator) genDestructureDecl(s *ast.DestructureDecl) error {
 		elemType = valueType.Elem
 	}
 	for i, name := range s.Names {
-		varName := g.resolveVarName(name)
-		g.paramMap[name] = varName
-		g.varTypeMap[varName] = elemType
-		g.line(fmt.Sprintf("%s=$(printf '%%s\\n' \"$%s\" | sed -n '%dp')", varName, tmp, i+1))
+		g.declareDestructureBinding(name, elemType, fmt.Sprintf("$(printf '%%s\\n' \"$%s\" | sed -n '%dp')", tmp, i+1))
 	}
 	return nil
+}
+
+func (g *Generator) declareDestructureBinding(name string, elemType *ast.Type, value string) {
+	varName := g.resolveVarName(name)
+	g.paramMap[name] = varName
+	g.varTypeMap[varName] = elemType
+	delete(g.objAliasMap, name)
+	delete(g.staticListMap, varName)
+	if g.listLenMap != nil {
+		delete(g.listLenMap, varName)
+	}
+	if raw, ok := shellQuotedValue(value); ok {
+		if g.stringConstMap == nil {
+			g.stringConstMap = make(map[string]string)
+		}
+		g.stringConstMap[varName] = raw
+	} else {
+		delete(g.stringConstMap, varName)
+	}
+	g.line(fmt.Sprintf("%s=%s", varName, value))
+}
+
+func (g *Generator) staticDestructureWords(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return nil, false
+		}
+		words, ok := g.staticListMap[g.resolveVarName(e.Name)]
+		return words, ok
+	case *ast.AsExpr:
+		return g.staticDestructureWords(e.Expr)
+	default:
+		return g.staticForListWordsExpr(expr)
+	}
+}
+
+func shellQuotedValue(value string) (string, bool) {
+	if len(value) < 2 || value[0] != '\'' || value[len(value)-1] != '\'' {
+		return "", false
+	}
+	return strings.ReplaceAll(value[1:len(value)-1], "'\"'\"'", "'"), true
 }
 
 func emptyArrayOf(expr ast.Expression) bool {
@@ -1686,8 +2143,11 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 func (g *Generator) genAssignment(s *ast.Assignment) error {
 	varName := g.resolveVarName(s.Name)
 	delete(g.staticObjectMap, varName)
+	delete(g.staticObjectEntryMap, varName)
+	delete(g.staticObjectValueMap, varName)
 	delete(g.staticNullishMap, varName)
 	delete(g.staticSetMap, varName)
+	g.deleteObjectStaticValues(varName)
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
 		return err
 	}
@@ -1699,11 +2159,15 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
-	if emptyArrayOf(s.Value) {
-		g.listLenMap[varName] = "0"
+	if n, ok := staticListBindingLength(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(n)
 	} else if values, ok := g.staticObjectKeysBuiltinValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
-	} else if values, ok := staticStringSplitValues(s.Value); ok {
+	} else if entries, ok := g.staticObjectEntriesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(entries))
+	} else if values, ok := g.staticObjectValuesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if values, ok := g.staticStringSplitValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
@@ -1730,6 +2194,8 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 		delete(g.stringConstMap, varName)
 	}
 	g.updateStaticNullishBinding(varName, s.Value)
+	g.updateStaticBoolBinding(varName, s.Value)
+	g.updateStaticNumberBinding(varName, s.Value)
 	g.updateStaticListBinding(varName, s.Value)
 	g.updateStaticSetBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
@@ -1799,9 +2265,14 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
+	prevStaticObjectEntryMap := g.staticObjectEntryMap
+	prevStaticObjectValueMap := g.staticObjectValueMap
 	prevStaticNullishMap := g.staticNullishMap
+	prevObjectConstMap := g.objectConstMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
+	prevBoolConstMap := g.boolConstMap
+	prevNumConstMap := g.numConstMap
 	g.currentFn = s.Name
 	g.inFunction = true
 	g.paramMap = make(map[string]string)
@@ -1810,9 +2281,14 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
+	g.staticObjectValueMap = cloneObjectFieldsMap(prevStaticObjectValueMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
+	g.objectConstMap = cloneStringMap(prevObjectConstMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
+	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
+	g.numConstMap = cloneNumberMap(prevNumConstMap)
 
 	for i, param := range s.Params {
 		varName := fnParamVar(s.Name, param.Name)
@@ -1843,9 +2319,14 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
+	g.staticObjectEntryMap = prevStaticObjectEntryMap
+	g.staticObjectValueMap = prevStaticObjectValueMap
 	g.staticNullishMap = prevStaticNullishMap
+	g.objectConstMap = prevObjectConstMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
+	g.boolConstMap = prevBoolConstMap
+	g.numConstMap = prevNumConstMap
 	g.pop()
 	g.line("}")
 	g.line("")
@@ -1947,9 +2428,14 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
+	prevStaticObjectEntryMap := g.staticObjectEntryMap
+	prevStaticObjectValueMap := g.staticObjectValueMap
 	prevStaticNullishMap := g.staticNullishMap
+	prevObjectConstMap := g.objectConstMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
+	prevBoolConstMap := g.boolConstMap
+	prevNumConstMap := g.numConstMap
 	prevClass := g.currentClass
 	prevThis := g.currentThisVar
 	g.currentFn = fnName
@@ -1960,9 +2446,14 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
+	g.staticObjectValueMap = cloneObjectFieldsMap(prevStaticObjectValueMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
+	g.objectConstMap = cloneStringMap(prevObjectConstMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
+	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
+	g.numConstMap = cloneNumberMap(prevNumConstMap)
 	g.currentClass = c.Name
 	g.currentThisVar = ""
 	argOffset := 1
@@ -2002,9 +2493,14 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
+	g.staticObjectEntryMap = prevStaticObjectEntryMap
+	g.staticObjectValueMap = prevStaticObjectValueMap
 	g.staticNullishMap = prevStaticNullishMap
+	g.objectConstMap = prevObjectConstMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
+	g.boolConstMap = prevBoolConstMap
+	g.numConstMap = prevNumConstMap
 	g.currentClass = prevClass
 	g.currentThisVar = prevThis
 	g.pop()
@@ -2149,10 +2645,22 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		if iter.Name == "Besht.iter.range" {
 			return g.genForRange(s, iter)
 		}
+		if entries, ok := g.staticObjectEntriesBuiltinValues(iter); ok {
+			return g.genForStaticEntryList(s, entries)
+		}
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
+		if values, ok := g.staticObjectValuesBuiltinValues(iter); ok {
+			return g.genForStaticList(s, staticWordsFromValues(values))
+		}
+		if words, ok := g.staticForListWordsExpr(iter); ok {
+			return g.genForStaticList(s, words)
+		}
 	case *ast.IdentExpr:
+		if entries, ok := g.staticEntryListMap[g.resolveVarName(iter.Name)]; ok {
+			return g.genForStaticEntryList(s, entries)
+		}
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
@@ -2170,7 +2678,7 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
-		if words, ok := staticForListWordsExpr(iter); ok {
+		if words, ok := g.staticForListWordsExpr(iter); ok {
 			return g.genForStaticList(s, words)
 		}
 		pipeline, redirect, err := g.genCmdChain(iter)
@@ -2359,6 +2867,14 @@ func staticScalarValue(expr ast.Expression) (string, bool) {
 	}
 }
 
+func staticScalarShellValue(expr ast.Expression) (string, bool) {
+	value, ok := staticScalarValue(expr)
+	if !ok {
+		return "", false
+	}
+	return shellQuote(value), true
+}
+
 func staticScalarListValues(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
 	case *ast.ListLit:
@@ -2407,7 +2923,11 @@ func (g *Generator) staticScalarListValues(expr ast.Expression) ([]string, bool)
 		if g.controlAssigned[e.Name] {
 			return nil, false
 		}
-		words, ok := g.staticListMap[g.resolveVarName(e.Name)]
+		varName := g.resolveVarName(e.Name)
+		if values, ok := g.staticListValues[varName]; ok {
+			return append([]string(nil), values...), true
+		}
+		words, ok := g.staticListMap[varName]
 		if !ok {
 			return nil, false
 		}
@@ -2421,6 +2941,12 @@ func (g *Generator) staticScalarListValues(expr ast.Expression) ([]string, bool)
 		return values, true
 	case *ast.BuiltinCallExpr:
 		if values, ok := g.staticObjectKeysBuiltinValues(e); ok {
+			return values, true
+		}
+		if entries, ok := g.staticObjectEntriesBuiltinValues(e); ok {
+			return entries, true
+		}
+		if values, ok := g.staticObjectValuesBuiltinValues(e); ok {
 			return values, true
 		}
 	case *ast.MethodCallExpr:
@@ -2534,50 +3060,71 @@ func (g *Generator) staticScalarListMethodValues(e *ast.MethodCallExpr) ([]strin
 	return nil, false
 }
 
-func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
+func staticListValuesWithoutNewlinesExpr(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
-	case *ast.ListLit:
-		return staticForListWords(e)
-	case *ast.MethodCallExpr:
-		values, ok := staticStringSplitValues(e)
-		if !ok {
-			return nil, false
-		}
-		words := make([]string, 0, len(values))
-		for _, value := range values {
-			words = append(words, shellQuote(value))
-		}
-		return words, true
-	case *ast.BuiltinCallExpr:
-		values, ok := staticScalarListValuesWithoutNewlines(e)
-		if !ok {
-			return nil, false
-		}
-		words := make([]string, 0, len(values))
-		for _, value := range values {
-			words = append(words, shellQuote(value))
-		}
-		return words, true
 	case *ast.AsExpr:
-		return staticForListWordsExpr(e.Expr)
+		return staticListValuesWithoutNewlinesExpr(e.Expr)
 	default:
-		return nil, false
+		return staticScalarListValuesWithoutNewlines(expr)
 	}
+}
+
+func (g *Generator) staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
+	if values, ok := g.staticStringSplitValues(expr); ok {
+		return staticWordsFromValues(values), true
+	}
+	if values, ok := g.staticScalarListValuesWithoutNewlines(expr); ok {
+		return staticWordsFromValues(values), true
+	}
+	if values, ok := staticListValuesWithoutNewlinesExpr(expr); ok {
+		return staticWordsFromValues(values), true
+	}
+	return nil, false
 }
 
 func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression) {
 	if g.staticListMap == nil {
 		g.staticListMap = make(map[string][]string)
 	}
-	if values, ok := g.staticScalarListValuesWithoutNewlines(expr); ok {
-		g.staticListMap[varName] = staticWordsFromValues(values)
+	if g.staticListValues == nil {
+		g.staticListValues = make(map[string][]string)
+	}
+	if g.staticEntryListMap == nil {
+		g.staticEntryListMap = make(map[string][]string)
+	}
+	if entries, ok := g.staticObjectEntriesBuiltinValues(expr); ok {
+		g.staticListMap[varName] = staticWordsFromValues(entries)
+		g.staticListValues[varName] = append([]string(nil), entries...)
+		g.staticEntryListMap[varName] = append([]string(nil), entries...)
 		return
 	}
-	if words, ok := staticForListWordsExpr(expr); ok {
-		g.staticListMap[varName] = words
+	if values, ok := g.staticObjectValuesBuiltinValues(expr); ok {
+		g.staticListMap[varName] = staticWordsFromValues(values)
+		g.staticListValues[varName] = append([]string(nil), values...)
+		delete(g.staticEntryListMap, varName)
+		return
+	}
+	if values, ok := g.staticScalarListValuesWithoutNewlines(expr); ok {
+		g.staticListMap[varName] = staticWordsFromValues(values)
+		g.staticListValues[varName] = append([]string(nil), values...)
+		delete(g.staticEntryListMap, varName)
+		return
+	}
+	if values, ok := g.staticStringSplitValues(expr); ok {
+		g.staticListMap[varName] = staticWordsFromValues(values)
+		g.staticListValues[varName] = append([]string(nil), values...)
+		delete(g.staticEntryListMap, varName)
+		return
+	}
+	if values, ok := staticListValuesWithoutNewlinesExpr(expr); ok {
+		g.staticListMap[varName] = staticWordsFromValues(values)
+		g.staticListValues[varName] = append([]string(nil), values...)
+		delete(g.staticEntryListMap, varName)
 		return
 	}
 	delete(g.staticListMap, varName)
+	delete(g.staticListValues, varName)
+	delete(g.staticEntryListMap, varName)
 }
 
 func (g *Generator) setStaticSetValues(varName string, values []string) {
@@ -2657,6 +3204,28 @@ func (g *Generator) staticSetHasValue(e *ast.MethodCallExpr) (bool, bool) {
 		}
 	}
 	return false, true
+}
+
+func (g *Generator) updateStaticBoolBinding(varName string, expr ast.Expression) {
+	if g.boolConstMap == nil {
+		g.boolConstMap = make(map[string]bool)
+	}
+	if value, ok := g.staticBooleanValue(expr); ok {
+		g.boolConstMap[varName] = value
+		return
+	}
+	delete(g.boolConstMap, varName)
+}
+
+func (g *Generator) updateStaticNumberBinding(varName string, expr ast.Expression) {
+	if g.numConstMap == nil {
+		g.numConstMap = make(map[string]float64)
+	}
+	if value, ok := g.staticArithmeticNumberValue(expr); ok {
+		g.numConstMap[varName] = value
+		return
+	}
+	delete(g.numConstMap, varName)
 }
 
 func staticListLiteralValue(list *ast.ListLit) (string, bool) {
@@ -2758,8 +3327,8 @@ func staticObjectBuiltinListValues(e *ast.BuiltinCallExpr) ([]string, bool) {
 	}
 }
 
-func staticScalarListLength(expr ast.Expression) (int, bool) {
-	if values, ok := staticStringSplitValues(expr); ok {
+func (g *Generator) staticScalarListLength(expr ast.Expression) (int, bool) {
+	if values, ok := g.staticStringSplitValues(expr); ok {
 		return len(values), true
 	}
 	values, ok := staticScalarListValues(expr)
@@ -2826,6 +3395,10 @@ func (g *Generator) staticASCIIStringExprValue(expr ast.Expression) (string, boo
 	}
 }
 
+func (g *Generator) staticASCIIStringValue(expr ast.Expression) (string, bool) {
+	return g.staticASCIIStringExprValue(expr)
+}
+
 func staticIntValue(expr ast.Expression) (int, bool) {
 	switch e := expr.(type) {
 	case *ast.IntLit:
@@ -2869,19 +3442,19 @@ func staticStringText(expr ast.Expression) (string, bool) {
 	return "", false
 }
 
-func staticStringSplitValues(expr ast.Expression) ([]string, bool) {
+func (g *Generator) staticStringSplitValues(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
-		return staticStringSplitValues(e.Expr)
+		return g.staticStringSplitValues(e.Expr)
 	case *ast.MethodCallExpr:
 		if e.Method != "split" || len(e.Args) != 1 {
 			return nil, false
 		}
-		recv, ok := staticASCIIStringValue(e.Receiver)
+		recv, ok := g.staticASCIIStringExprValue(e.Receiver)
 		if !ok {
 			return nil, false
 		}
-		sep, ok := staticASCIIStringValue(e.Args[0])
+		sep, ok := g.staticASCIIStringExprValue(e.Args[0])
 		if !ok {
 			return nil, false
 		}
@@ -3032,8 +3605,32 @@ func staticNumberValue(expr ast.Expression) (float64, bool) {
 	return 0, false
 }
 
-func staticIntNumberValue(expr ast.Expression) (int, bool) {
-	v, ok := staticNumberValue(expr)
+func (g *Generator) staticNumberValue(expr ast.Expression) (float64, bool) {
+	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return 0, false
+		}
+		value, ok := g.numConstMap[g.resolveVarName(e.Name)]
+		return value, ok
+	case *ast.IntLit, *ast.FloatLit:
+		return staticNumberValue(expr)
+	case *ast.UnaryExpr:
+		v, ok := g.staticNumberValue(e.Expr)
+		if !ok {
+			return 0, false
+		}
+		if e.Op == "-" {
+			return -v, true
+		}
+	case *ast.AsExpr:
+		return g.staticNumberValue(e.Expr)
+	}
+	return 0, false
+}
+
+func (g *Generator) staticIntNumberValue(expr ast.Expression) (int, bool) {
+	v, ok := g.staticNumberValue(expr)
 	if !ok {
 		return 0, false
 	}
@@ -3050,6 +3647,41 @@ func staticArithmeticNumberValue(expr ast.Expression) (float64, bool) {
 	}
 	left, leftOK := staticArithmeticNumberValue(e.Left)
 	right, rightOK := staticArithmeticNumberValue(e.Right)
+	if !leftOK || !rightOK {
+		return 0, false
+	}
+	switch e.Op {
+	case "+":
+		return left + right, true
+	case "-":
+		return left - right, true
+	case "*":
+		return left * right, true
+	case "/":
+		if right == 0 {
+			return 0, false
+		}
+		return left / right, true
+	case "%":
+		if right == 0 {
+			return 0, false
+		}
+		return math.Mod(left, right), true
+	default:
+		return 0, false
+	}
+}
+
+func (g *Generator) staticArithmeticNumberValue(expr ast.Expression) (float64, bool) {
+	if value, ok := g.staticNumberValue(expr); ok {
+		return value, true
+	}
+	e, ok := expr.(*ast.BinaryExpr)
+	if !ok {
+		return 0, false
+	}
+	left, leftOK := g.staticArithmeticNumberValue(e.Left)
+	right, rightOK := g.staticArithmeticNumberValue(e.Right)
 	if !leftOK || !rightOK {
 		return 0, false
 	}
@@ -3103,6 +3735,44 @@ func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	}
 	g.pop()
 	g.line("done")
+	g.undeclareLoopVar(s.VarName)
+	return nil
+}
+
+func (g *Generator) genForStaticEntryList(s *ast.ForStmt, entries []string) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	iVar := g.declareLoopVar(s.VarName)
+	rowVar := fmt.Sprintf("_forentry_%d_%d", s.Pos.Line, s.Pos.Column)
+	keyVar := iVar + "_0"
+	valueVar := iVar + "_1"
+	prevType, hadType := g.varTypeMap[iVar]
+	prevFields, hadFields := g.staticEntryLoopMap[iVar]
+	g.varTypeMap[iVar] = &ast.Type{Kind: ast.TypeList, Elem: typeString}
+	g.staticEntryLoopMap[iVar] = staticEntryLoopFields{keyVar: keyVar, valueVar: valueVar}
+	g.line(fmt.Sprintf("for %s in %s; do", rowVar, strings.Join(staticWordsFromValues(entries), " ")))
+	g.push()
+	g.line(fmt.Sprintf("%s=${%s%%%%\037*}", keyVar, rowVar))
+	g.line(fmt.Sprintf("%s=${%s#*\037}", valueVar, rowVar))
+	g.line(fmt.Sprintf("%s=$(printf '%%s\\n%%s' \"$%s\" \"$%s\")", iVar, keyVar, valueVar))
+	for _, stmt := range s.Body.Statements {
+		if err := g.genStmt(stmt); err != nil {
+			return err
+		}
+	}
+	g.pop()
+	g.line("done")
+	if hadType {
+		g.varTypeMap[iVar] = prevType
+	} else {
+		delete(g.varTypeMap, iVar)
+	}
+	if hadFields {
+		g.staticEntryLoopMap[iVar] = prevFields
+	} else {
+		delete(g.staticEntryLoopMap, iVar)
+	}
 	g.undeclareLoopVar(s.VarName)
 	return nil
 }
@@ -3962,10 +4632,43 @@ func (g *Generator) recordObjectStaticFieldType(varName, field string, value ast
 	g.objFieldsMap[varName] = appendUniqueString(g.objFieldsMap[varName], field)
 }
 
+func (g *Generator) recordObjectStaticFieldValue(varName, field string, value ast.Expression) {
+	if g.objectConstMap == nil {
+		g.objectConstMap = make(map[string]string)
+	}
+	if val, ok := staticScalarShellValue(value); ok {
+		g.objectConstMap[varName+"."+field] = val
+		return
+	}
+	delete(g.objectConstMap, varName+"."+field)
+}
+
+func (g *Generator) deleteObjectStaticFieldValue(varName, field string) {
+	delete(g.objectConstMap, varName+"."+field)
+}
+
+func (g *Generator) deleteObjectStaticValues(varName string) {
+	prefix := varName + "."
+	for key := range g.objectConstMap {
+		if strings.HasPrefix(key, prefix) {
+			delete(g.objectConstMap, key)
+		}
+	}
+}
+
+func (g *Generator) staticObjectPropertyValue(receiver string, varName string, property string) (string, bool) {
+	if g.objectConstUnsafe[receiver] || g.objectConstUnsafe[varName] {
+		return "", false
+	}
+	value, ok := g.objectConstMap[varName+"."+property]
+	return value, ok
+}
+
 func (g *Generator) recordObjectAssignmentType(ref objectRef, field string, value ast.Expression, dynamicField bool) objectRef {
 	pt := g.inferReceiverType(value)
 	if ref.StaticName != "" {
 		if dynamicField {
+			g.deleteObjectStaticValues(ref.StaticName)
 			for _, knownField := range g.objFieldsMap[ref.StaticName] {
 				if typ := g.objPropTypeMap[ref.StaticName+"."+knownField]; typ != nil && typ.Kind == ast.TypeBoolean {
 					g.objPropTypeMap[ref.StaticName+"."+knownField] = typeString
@@ -3975,6 +4678,7 @@ func (g *Generator) recordObjectAssignmentType(ref objectRef, field string, valu
 				g.objPropTypeMap[ref.StaticName+".*"] = pt
 			}
 		} else {
+			g.deleteObjectStaticFieldValue(ref.StaticName, field)
 			g.recordObjectStaticFieldType(ref.StaticName, field, value)
 			if unsupportedObjectValueType(pt) {
 				g.objPropTypeMap[ref.StaticName+".*"] = pt
@@ -4006,10 +4710,14 @@ func (g *Generator) updateObjectAliasRef(name string, ref objectRef) {
 func (g *Generator) invalidateStaticObjectRef(ref objectRef) {
 	if ref.StaticName != "" {
 		delete(g.staticObjectMap, ref.StaticName)
+		delete(g.staticObjectEntryMap, ref.StaticName)
+		delete(g.staticObjectValueMap, ref.StaticName)
 	}
 	if ref.RootName != "" {
 		if rootRef, ok := g.objAliasMap[ref.RootName]; ok && rootRef.StaticName != "" {
 			delete(g.staticObjectMap, rootRef.StaticName)
+			delete(g.staticObjectEntryMap, rootRef.StaticName)
+			delete(g.staticObjectValueMap, rootRef.StaticName)
 		}
 	}
 }
@@ -4079,12 +4787,64 @@ func (g *Generator) staticNamedObjectKeys(expr ast.Expression) ([]string, bool) 
 	return append([]string(nil), keys...), true
 }
 
+func (g *Generator) staticNamedObjectEntries(expr ast.Expression) ([]string, bool) {
+	if as, ok := expr.(*ast.AsExpr); ok {
+		return g.staticNamedObjectEntries(as.Expr)
+	}
+	if obj, ok := expr.(*ast.ObjectLit); ok {
+		return staticObjectLiteralEntries(obj)
+	}
+	ref, ok := g.resolveObjectRef(expr)
+	if !ok || ref.StaticName == "" {
+		return nil, false
+	}
+	entries, ok := g.staticObjectEntryMap[ref.StaticName]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), entries...), true
+}
+
+func (g *Generator) staticNamedObjectValues(expr ast.Expression) ([]string, bool) {
+	if as, ok := expr.(*ast.AsExpr); ok {
+		return g.staticNamedObjectValues(as.Expr)
+	}
+	if obj, ok := expr.(*ast.ObjectLit); ok {
+		return staticObjectLiteralValues(obj)
+	}
+	ref, ok := g.resolveObjectRef(expr)
+	if !ok || ref.StaticName == "" {
+		return nil, false
+	}
+	values, ok := g.staticObjectValueMap[ref.StaticName]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), values...), true
+}
+
 func (g *Generator) staticObjectKeysBuiltinValues(expr ast.Expression) ([]string, bool) {
 	builtin, ok := expr.(*ast.BuiltinCallExpr)
 	if !ok || builtin.Name != "Object.keys" || len(builtin.Args) != 1 {
 		return nil, false
 	}
 	return g.staticNamedObjectKeys(builtin.Args[0])
+}
+
+func (g *Generator) staticObjectEntriesBuiltinValues(expr ast.Expression) ([]string, bool) {
+	builtin, ok := expr.(*ast.BuiltinCallExpr)
+	if !ok || builtin.Name != "Object.entries" || len(builtin.Args) != 1 {
+		return nil, false
+	}
+	return g.staticNamedObjectEntries(builtin.Args[0])
+}
+
+func (g *Generator) staticObjectValuesBuiltinValues(expr ast.Expression) ([]string, bool) {
+	builtin, ok := expr.(*ast.BuiltinCallExpr)
+	if !ok || builtin.Name != "Object.values" || len(builtin.Args) != 1 {
+		return nil, false
+	}
+	return g.staticNamedObjectValues(builtin.Args[0])
 }
 
 func staticWordsFromValues(values []string) []string {
@@ -4112,6 +4872,216 @@ func objectHasOwnRefExpr(ref objectRef, keyExpr string) string {
 		return objectHasOwnExpr(ref.StaticName, keyExpr)
 	}
 	return objectHasOwnSlotExpr(ref.SlotExpr, keyExpr)
+}
+
+func (g *Generator) genJSONStringify(expr ast.Expression) (string, error) {
+	if !g.UseJQ {
+		return "", fmt.Errorf("JSON.stringify() requires --opt-use-jq")
+	}
+	g.requireRuntimeHelper("jq")
+	if as, ok := expr.(*ast.AsExpr); ok {
+		return g.genJSONStringify(as.Expr)
+	}
+	typ := g.inferReceiverType(expr)
+	switch e := expr.(type) {
+	case *ast.ObjectLit:
+		if err := g.validateObjectLiteralScalarValues("JSON.stringify", e); err != nil {
+			return "", err
+		}
+		return g.genJSONObjectLiteral(e)
+	case *ast.ListLit:
+		val, err := g.genListLiteral(e)
+		if err != nil {
+			return "", err
+		}
+		return g.genJSONListValue(val, typ, e.Pos), nil
+	}
+	if typ != nil {
+		switch typ.Kind {
+		case ast.TypeString:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return jqScalarString(val), nil
+		case ast.TypeNumber:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return jqScalarJSON(val), nil
+		case ast.TypeBoolean:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)), nil
+		case ast.TypeList:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return g.genJSONListValue(val, typ, jsonExprPos(expr)), nil
+		case ast.TypeObject:
+			return g.genJSONObjectRef(expr)
+		}
+	}
+	val, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	return jqScalarString(val), nil
+}
+
+func jsonExprPos(expr ast.Expression) ast.Pos {
+	switch e := expr.(type) {
+	case *ast.StringLit:
+		return e.Pos
+	case *ast.RawStringLit:
+		return e.Pos
+	case *ast.TemplateLit:
+		return e.Pos
+	case *ast.IntLit:
+		return e.Pos
+	case *ast.FloatLit:
+		return e.Pos
+	case *ast.BoolLit:
+		return e.Pos
+	case *ast.ListLit:
+		return e.Pos
+	case *ast.ObjectLit:
+		return e.Pos
+	case *ast.IdentExpr:
+		return e.Pos
+	case *ast.BuiltinCallExpr:
+		return e.Pos
+	case *ast.MethodCallExpr:
+		return e.Pos
+	case *ast.PropertyExpr:
+		return e.Pos
+	case *ast.IndexExpr:
+		return e.Pos
+	case *ast.AsExpr:
+		return e.Pos
+	}
+	return ast.Pos{}
+}
+
+func jqScalarString(val string) string {
+	return fmt.Sprintf("$(jq -cn --arg _v %s '$_v')", ensureArgSafe(val))
+}
+
+func jqScalarJSON(val string) string {
+	return fmt.Sprintf("$(jq -cn --argjson _v %s '$_v')", ensureArgSafe(val))
+}
+
+func jsonListJQProgram(elem *ast.Type) string {
+	base := `split("\n") | if .[-1] == "" then .[:-1] else . end`
+	if elem == nil {
+		return base
+	}
+	switch elem.Kind {
+	case ast.TypeNumber:
+		return base + " | map(tonumber)"
+	case ast.TypeBoolean:
+		return base + ` | map(. == "1")`
+	default:
+		return base
+	}
+}
+
+func (g *Generator) genJSONListValue(val string, typ *ast.Type, pos ast.Pos) string {
+	elem := (*ast.Type)(nil)
+	if typ != nil && typ.Kind == ast.TypeList {
+		elem = typ.Elem
+	}
+	tmp := fmt.Sprintf("_bst_json_list_%d_%d", pos.Line, pos.Column)
+	program := shellQuote(jsonListJQProgram(elem))
+	return fmt.Sprintf("$(%s=%s; if [ -n \"$%s\" ]; then printf '%%s\n' \"$%s\" | jq -Rsc %s; else printf '[]'; fi)", tmp, val, tmp, tmp, program)
+}
+
+func (g *Generator) genJSONObjectLiteral(obj *ast.ObjectLit) (string, error) {
+	var args []string
+	var pairs []string
+	for i, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return "", err
+		}
+		val, err := g.genExprValue(field.Value)
+		if err != nil {
+			return "", err
+		}
+		name := fmt.Sprintf("_v%d", i)
+		key := fmt.Sprintf("_k%d", i)
+		args = append(args, "--arg", key, shellQuote(field.Key))
+		args = append(args, jsonJQValueArg(name, val, g.inferReceiverType(field.Value))...)
+		pairs = append(pairs, fmt.Sprintf("($%s): $%s", key, name))
+	}
+	if len(pairs) == 0 {
+		return "'{}'", nil
+	}
+	program := "{" + strings.Join(pairs, ", ") + "}"
+	return fmt.Sprintf("$(jq -cn %s %s)", strings.Join(args, " "), shellQuote(program)), nil
+}
+
+func (g *Generator) genJSONObjectRef(expr ast.Expression) (string, error) {
+	ref, ok := g.resolveObjectRef(expr)
+	if ok {
+		if err := g.validateObjectRefScalarValues("JSON.stringify", ref); err != nil {
+			return "", err
+		}
+	}
+	if !ok {
+		return "", fmt.Errorf("JSON.stringify() requires an object literal or named object")
+	}
+	if ref.StaticName == "" {
+		return g.genJSONDynamicObjectRef(ref), nil
+	}
+	fields, hasStaticFields := g.objFieldsMap[ref.StaticName]
+	if !hasStaticFields {
+		return g.genJSONStaticObjectMetadata(ref.StaticName), nil
+	}
+	if len(fields) == 0 {
+		return "'{}'", nil
+	}
+	var args []string
+	var pairs []string
+	for i, field := range fields {
+		name := fmt.Sprintf("_v%d", i)
+		key := fmt.Sprintf("_k%d", i)
+		propVar := objectPropVar(ref.StaticName, field)
+		args = append(args, "--arg", key, shellQuote(field))
+		args = append(args, jsonJQValueArg(name, fmt.Sprintf("\"$%s\"", propVar), g.objPropTypeMap[ref.StaticName+"."+field])...)
+		pairs = append(pairs, fmt.Sprintf("($%s): $%s", key, name))
+	}
+	program := "{" + strings.Join(pairs, ", ") + "}"
+	return fmt.Sprintf("$(jq -cn %s %s)", strings.Join(args, " "), shellQuote(program)), nil
+}
+
+func (g *Generator) genJSONStaticObjectMetadata(varName string) string {
+	loop := fmt.Sprintf("for _bst_obj_key in $_objkeys_%s; do %s; eval \"_bst_obj_value=\\\"\\${_obj_%s_${_bst_obj_key}}\\\"\"; printf '%%s\\037%%s\\n' \"$_bst_obj_key\" \"$_bst_obj_value\"; done", varName, computedKeyValidation("_bst_obj_key"), varName)
+	program := shellQuote(`split("\n") | map(select(length > 0)) | map(split("\u001f") | {key: .[0], value: .[1]}) | from_entries`)
+	return fmt.Sprintf("$(%s | jq -Rsc %s)", loop, program)
+}
+
+func (g *Generator) genJSONDynamicObjectRef(ref objectRef) string {
+	tmp := "_bst_json_obj_slot"
+	loop := fmt.Sprintf("%s=%s; for _bst_obj_key in $(eval \"printf '%%s' \\\"\\${_objkeys_${%s}}\\\"\"); do %s; eval \"_bst_obj_value=\\\"\\${_obj_${%s}_${_bst_obj_key}}\\\"\"; printf '%%s\\037%%s\n' \"$_bst_obj_key\" \"$_bst_obj_value\"; done", tmp, ref.SlotExpr, tmp, computedKeyValidation("_bst_obj_key"), tmp)
+	program := shellQuote(`split("\n") | map(select(length > 0)) | map(split("\u001f") | {key: .[0], value: .[1]}) | from_entries`)
+	return fmt.Sprintf("$(%s | jq -Rsc %s)", loop, program)
+}
+
+func jsonJQValueArg(name, val string, typ *ast.Type) []string {
+	if typ != nil {
+		switch typ.Kind {
+		case ast.TypeNumber:
+			return []string{"--argjson", name, ensureArgSafe(val)}
+		case ast.TypeBoolean:
+			boolVal := fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val))
+			return []string{"--argjson", name, ensureArgSafe(boolVal)}
+		}
+	}
+	return []string{"--arg", name, ensureArgSafe(val)}
 }
 
 func (g *Generator) genObjectKeys(expr ast.Expression) (string, error) {
@@ -4148,6 +5118,9 @@ func (g *Generator) genObjectValues(expr ast.Expression) (string, error) {
 		}
 		return g.genObjectLiteralValues(obj)
 	}
+	if values, ok := g.staticNamedObjectValues(expr); ok {
+		return shellQuote(strings.Join(values, "\n")), nil
+	}
 	if ref, ok := g.resolveObjectRef(expr); ok {
 		if err := g.validateObjectRefScalarValues("Object.values", ref); err != nil {
 			return "", err
@@ -4174,6 +5147,9 @@ func (g *Generator) genObjectEntries(expr ast.Expression) (string, error) {
 			return "", err
 		}
 		return g.genObjectLiteralEntries(obj)
+	}
+	if entries, ok := g.staticNamedObjectEntries(expr); ok {
+		return shellQuote(strings.Join(entries, "\n")), nil
 	}
 	if ref, ok := g.resolveObjectRef(expr); ok {
 		if err := g.validateObjectRefScalarValues("Object.entries", ref); err != nil {
@@ -4565,12 +5541,16 @@ func (g *Generator) staticNullishState(expr ast.Expression) staticNullishState {
 			case staticNonNullishValue:
 				return staticNonNullishValue
 			}
+		case "&&", "||":
+			if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+				return g.staticNullishState(selected)
+			}
 		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
 			if _, ok := g.staticBooleanValue(e); ok {
 				return staticNonNullishValue
 			}
 		}
-		if _, ok := staticArithmeticNumberValue(e); ok {
+		if _, ok := g.staticArithmeticNumberValue(e); ok {
 			return staticNonNullishValue
 		}
 	case *ast.UnaryExpr:
@@ -4741,6 +5721,13 @@ func (g *Generator) genFnCallCapture(e *ast.FnCallExpr) (string, error) {
 }
 
 func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
+	if value, ok := g.staticBooleanValue(expr); ok {
+		if value {
+			return "1", nil
+		}
+		return "0", nil
+	}
+
 	switch e := expr.(type) {
 	case *ast.AsExpr:
 		return g.genBooleanCapture(e.Expr)
@@ -4849,9 +5836,24 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 	case *ast.RawStringLit:
 		return e.Value, true, nil
 	case *ast.TemplateLit:
-		if len(e.Exprs) == 0 {
-			return strings.Join(e.Parts, ""), true, nil
+		var b strings.Builder
+		for i, part := range e.Parts {
+			b.WriteString(part)
+			if i < len(e.Exprs) {
+				value, ok, err := g.staticStringFragment(e.Exprs[i])
+				if err != nil || !ok {
+					return "", ok, err
+				}
+				b.WriteString(value)
+			}
 		}
+		return b.String(), true, nil
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return "", false, nil
+		}
+		value, ok := g.stringConstMap[g.resolveVarName(e.Name)]
+		return value, ok, nil
 	case *ast.IntLit:
 		return strconv.FormatInt(e.Value, 10), true, nil
 	case *ast.FloatLit:
@@ -4870,14 +5872,19 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 				return "false", true, nil
 			}
 		}
-		if value, ok := staticArithmeticNumberValue(e); ok {
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
 	case *ast.BinaryExpr:
-		if value, ok := staticArithmeticNumberValue(e); ok {
+		if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+			return g.staticStringFragment(selected)
+		}
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
-		if value, ok := staticComparisonResult(e); ok {
+		if value, ok, err := g.staticComparisonResult(e); err != nil {
+			return "", true, err
+		} else if ok {
 			if value {
 				return "true", true, nil
 			}
@@ -4888,6 +5895,19 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 				return "true", true, nil
 			}
 			return "false", true, nil
+		}
+		if e.Op == "+" {
+			left, leftOK, err := g.staticStringFragment(e.Left)
+			if err != nil {
+				return "", true, err
+			}
+			right, rightOK, err := g.staticStringFragment(e.Right)
+			if err != nil {
+				return "", true, err
+			}
+			if leftOK && rightOK {
+				return left + right, true, nil
+			}
 		}
 	case *ast.BuiltinCallExpr:
 		if value, ok := g.staticBooleanValue(e); ok {
@@ -4897,17 +5917,38 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 			return "false", true, nil
 		}
 	case *ast.MethodCallExpr:
-		if e.Method != "toString" {
-			return "", false, nil
-		}
-		if len(e.Args) != 0 {
-			return "", true, fmt.Errorf("toString() takes no arguments")
-		}
-		if value, ok, err := g.staticStringFragment(e.Receiver); ok || err != nil {
+		if value, ok, err := g.staticASCIIStringTransformValue(e); ok || err != nil {
 			return value, ok, err
+		}
+		if value, ok := g.staticBooleanValue(e); ok {
+			if value {
+				return "true", true, nil
+			}
+			return "false", true, nil
+		}
+		if e.Method == "toString" {
+			if len(e.Args) != 0 {
+				return "", true, fmt.Errorf("toString() takes no arguments")
+			}
+			if value, ok, err := g.staticStringFragment(e.Receiver); ok || err != nil {
+				return value, ok, err
+			}
 		}
 	}
 	return "", false, nil
+}
+
+func (g *Generator) staticASCIIStringFragment(expr ast.Expression) (string, bool, error) {
+	value, ok, err := g.staticStringFragment(expr)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			return "", false, nil
+		}
+	}
+	return value, true, nil
 }
 
 func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
@@ -4916,6 +5957,12 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 		return g.staticBooleanValue(e.Expr)
 	case *ast.BoolLit:
 		return e.Value, true
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return false, false
+		}
+		value, ok := g.boolConstMap[g.resolveVarName(e.Name)]
+		return value, ok
 	case *ast.UnaryExpr:
 		if e.Op == "!" {
 			value, ok := g.staticTruthyValue(e.Expr)
@@ -4924,8 +5971,11 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 		}
 	case *ast.BinaryExpr:
-		if result, ok := staticComparisonResult(e); ok {
-			return result, true
+		if value, ok, err := g.staticComparisonResult(e); err == nil && ok {
+			return value, true
+		}
+		if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+			return g.staticBooleanValue(selected)
 		}
 		if e.Op == "??" {
 			switch g.staticNullishState(e.Left) {
@@ -4937,15 +5987,26 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 		}
-		left, leftOK := g.staticBooleanValue(e.Left)
-		right, rightOK := g.staticBooleanValue(e.Right)
-		if !leftOK || !rightOK {
-			return false, false
-		}
 		switch e.Op {
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
+			value, ok, err := g.staticComparisonResult(e)
+			if err != nil || !ok {
+				return false, false
+			}
+			return value, true
 		case "&&":
+			left, leftOK := g.staticBooleanValue(e.Left)
+			right, rightOK := g.staticBooleanValue(e.Right)
+			if !leftOK || !rightOK {
+				return false, false
+			}
 			return left && right, true
 		case "||":
+			left, leftOK := g.staticBooleanValue(e.Left)
+			right, rightOK := g.staticBooleanValue(e.Right)
+			if !leftOK || !rightOK {
+				return false, false
+			}
 			return left || right, true
 		}
 	case *ast.BuiltinCallExpr:
@@ -4985,6 +6046,12 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 		if value, ok := g.staticSetHasValue(e); ok {
 			return value, true
 		}
+		if e.Method == "includes" {
+			value, ok, err := g.genStaticListSearchMethod(e)
+			if err == nil && ok {
+				return value == "1", true
+			}
+		}
 		switch e.Method {
 		case "includes", "startsWith", "endsWith":
 			value, ok, err := g.genStaticStringMethod(e)
@@ -4993,14 +6060,65 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 			return value == "1", true
 		}
+	case *ast.PropertyExpr:
+		if e.Optional {
+			return false, false
+		}
+		ident, ok := e.Receiver.(*ast.IdentExpr)
+		if !ok {
+			return false, false
+		}
+		t := g.inferReceiverType(e)
+		if t == nil || t.Kind != ast.TypeBoolean {
+			return false, false
+		}
+		val, ok := g.staticObjectPropertyValue(ident.Name, g.resolveVarName(ident.Name), e.Property)
+		if !ok {
+			return false, false
+		}
+		return val == "1" || val == "'1'", true
 	}
 	return false, false
+}
+
+func (g *Generator) staticLogicalSelectedExpr(e *ast.BinaryExpr) (ast.Expression, bool) {
+	if e.Op != "&&" && e.Op != "||" {
+		return nil, false
+	}
+	leftTruthy, ok := g.staticTruthyValue(e.Left)
+	if !ok {
+		return nil, false
+	}
+	if e.Op == "||" {
+		if leftTruthy {
+			return e.Left, true
+		}
+		return e.Right, true
+	}
+	if leftTruthy {
+		return e.Right, true
+	}
+	return e.Left, true
 }
 
 func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
 		return g.staticTruthyValue(e.Expr)
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return false, false
+		}
+		varName := g.resolveVarName(e.Name)
+		if value, ok := g.boolConstMap[varName]; ok {
+			return value, true
+		}
+		if value, ok := g.stringConstMap[varName]; ok {
+			return value != "", true
+		}
+		if value, ok := g.numConstMap[varName]; ok {
+			return value != 0, true
+		}
 	case *ast.BoolLit:
 		return e.Value, true
 	case *ast.UndefinedLit, *ast.NullLit:
@@ -5023,6 +6141,19 @@ func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 		return f != 0, true
 	case *ast.ListLit, *ast.ObjectLit, *ast.NewExpr:
 		return true, true
+	case *ast.BinaryExpr:
+		if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+			return g.staticTruthyValue(selected)
+		}
+		if value, ok, err := g.staticComparisonResult(e); err == nil && ok {
+			return value, true
+		}
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
+			return value != 0, true
+		}
+		if value, ok := g.staticBooleanValue(e); ok {
+			return value, true
+		}
 	case *ast.BuiltinCallExpr:
 		return g.staticBooleanValue(e)
 	}
@@ -5042,11 +6173,13 @@ func (g *Generator) genFnArgs(args []ast.Expression) ([]string, error) {
 }
 
 func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (string, error) {
-	if value, ok := staticArithmeticNumberValue(e); ok {
+	if value, ok := g.staticArithmeticNumberValue(e); ok {
 		return formatStaticArithmeticNumber(value), nil
 	}
 
-	if result, ok := staticComparisonResult(e); ok {
+	if result, ok, err := g.staticComparisonResult(e); err != nil {
+		return "", err
+	} else if ok {
 		if result {
 			return "1", nil
 		}
@@ -5058,6 +6191,11 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 			return value, err
 		}
 		if value, ok, err := g.genStaticNullishCoalesce(e, targetType); ok || err != nil {
+			return value, err
+		}
+	}
+	if e.Op == "&&" || e.Op == "||" {
+		if value, ok, err := g.genStaticLogicalValue(e, targetType); ok || err != nil {
 			return value, err
 		}
 	}
@@ -5249,6 +6387,18 @@ func (g *Generator) genStaticNullishCoalesce(e *ast.BinaryExpr, targetType *ast.
 	}
 }
 
+func (g *Generator) genStaticLogicalValue(e *ast.BinaryExpr, targetType *ast.Type) (string, bool, error) {
+	selected, ok := g.staticLogicalSelectedExpr(e)
+	if !ok {
+		return "", false, nil
+	}
+	value, err := g.genExprRHS(selected, targetType)
+	if err != nil {
+		return "", true, err
+	}
+	return value, true, nil
+}
+
 func (g *Generator) genUpdateRHS(e *ast.UpdateExpr) string {
 	varName := g.resolveVarName(e.Name)
 	return fmt.Sprintf("$(( %s = %s %s 1 ))", varName, varName, e.Op)
@@ -5256,7 +6406,7 @@ func (g *Generator) genUpdateRHS(e *ast.UpdateExpr) string {
 
 func (g *Generator) genUnaryRHS(e *ast.UnaryExpr) (string, error) {
 	if e.Op == "-" {
-		if value, ok := staticNumberValue(e); ok {
+		if value, ok := g.staticNumberValue(e); ok {
 			return formatStaticArithmeticNumber(value), nil
 		}
 	}
@@ -5536,6 +6686,9 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Object.hasOwn":
 		return g.genObjectHasOwn(e.Args[0], e.Args[1])
 
+	case "JSON.stringify":
+		return g.genJSONStringify(e.Args[0])
+
 	case "Number.isInteger":
 		argStr, err := g.genExprValue(e.Args[0])
 		if err != nil {
@@ -5592,6 +6745,9 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 				return "", fmt.Errorf("property %q has a setter but no getter", e.Property)
 			}
 		}
+		if val, ok := g.staticObjectPropertyValue(ident.Name, varName, e.Property); ok {
+			return val, nil
+		}
 		if ref, ok := g.objAliasMap[ident.Name]; ok {
 			return g.genObjectRefProperty(ref, e.Property, e.Pos), nil
 		}
@@ -5616,10 +6772,16 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 		if values, ok := g.staticObjectKeysBuiltinValues(e.Receiver); ok {
 			return strconv.Itoa(len(values)), nil
 		}
+		if entries, ok := g.staticObjectEntriesBuiltinValues(e.Receiver); ok {
+			return strconv.Itoa(len(entries)), nil
+		}
+		if values, ok := g.staticObjectValuesBuiltinValues(e.Receiver); ok {
+			return strconv.Itoa(len(values)), nil
+		}
 		if values, ok := g.staticScalarListValues(e.Receiver); ok {
 			return strconv.Itoa(len(values)), nil
 		}
-		if n, ok := staticScalarListLength(e.Receiver); ok {
+		if n, ok := g.staticScalarListLength(e.Receiver); ok {
 			return strconv.Itoa(n), nil
 		}
 		if n, ok := staticStringByteLength(e.Receiver); ok {
@@ -5927,6 +7089,8 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeFetchResponse}
 		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
 			return &ast.Type{Kind: ast.TypeBoolean}
+		case "JSON.stringify":
+			return typeString
 		case "Object.keys", "Object.values":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "Object.entries":
@@ -6030,7 +7194,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 				return lt
 			}
 			return g.inferReceiverType(e.Right)
-		case "==", "!=", "===", "!==", ">", "<", ">=", "<=", "&&", "||":
+		case "&&", "||":
+			return g.inferLogicalReceiverType(e)
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
 			return &ast.Type{Kind: ast.TypeBoolean}
 		}
 		if e.Op == "+" {
@@ -6133,6 +7299,24 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 	return nil
 }
 
+func (g *Generator) inferLogicalReceiverType(e *ast.BinaryExpr) *ast.Type {
+	if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+		return g.inferReceiverType(selected)
+	}
+	leftType := g.inferReceiverType(e.Left)
+	rightType := g.inferReceiverType(e.Right)
+	if leftType != nil && rightType != nil && leftType.Kind == rightType.Kind {
+		return leftType
+	}
+	if leftType == nil && rightType != nil && rightType.Kind != ast.TypeBoolean {
+		return rightType
+	}
+	if rightType == nil && leftType != nil && leftType.Kind != ast.TypeBoolean {
+		return leftType
+	}
+	return nil
+}
+
 func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 	switch e := expr.(type) {
 	case *ast.BoolLit:
@@ -6149,7 +7333,12 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 			if t := g.inferReceiverType(e); t != nil {
 				return t.Kind == ast.TypeBoolean
 			}
-		case "==", "!=", "===", "!==", ">", "<", ">=", "<=", "&&", "||":
+		case "&&", "||":
+			if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+				return g.isBooleanExpr(selected)
+			}
+			return g.isBooleanExpr(e.Left) && g.isBooleanExpr(e.Right)
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
 			return true
 		}
 	case *ast.PropertyExpr:
@@ -6286,6 +7475,12 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 		return val, err
 	}
 	if val, ok, err := g.genStaticNumberMethod(e); ok || err != nil {
+		return val, err
+	}
+	if val, ok, err := g.genStaticToStringMethod(e); ok || err != nil {
+		return val, err
+	}
+	if val, ok, err := g.genStaticNumericToStringMethod(e); ok || err != nil {
 		return val, err
 	}
 	if val, ok, err := g.genStaticStringSplitMethod(e); ok || err != nil {
@@ -6442,7 +7637,7 @@ func (g *Generator) genFetchResponseMethod(e *ast.MethodCallExpr) (string, error
 }
 
 func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	value, ok := staticNumberValue(e.Receiver)
+	value, ok := g.staticNumberValue(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -6459,7 +7654,7 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 		}
 		if len(e.Args) == 1 {
 			var ok bool
-			digits, ok = staticIntNumberValue(e.Args[0])
+			digits, ok = g.staticIntNumberValue(e.Args[0])
 			if !ok || digits < 0 {
 				return "", false, nil
 			}
@@ -6468,6 +7663,64 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 	default:
 		return "", false, nil
 	}
+}
+
+func (g *Generator) genStaticToStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	if e.Method != "toString" {
+		return "", false, nil
+	}
+	value, ok, err := g.staticStringFragment(e)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return shellQuote(value), true, nil
+}
+
+func (g *Generator) genStaticNumericToStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	if e.Method != "toString" {
+		return "", false, nil
+	}
+	if len(e.Args) != 0 {
+		return "", true, fmt.Errorf("toString() takes no arguments")
+	}
+	value, ok, err := g.staticNumericStringValue(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return shellQuote(value), true, nil
+}
+
+func (g *Generator) staticNumericStringValue(expr ast.Expression) (string, bool, error) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticNumericStringValue(e.Expr)
+	case *ast.BuiltinCallExpr:
+		if e.Name != "Number.parseInt" || len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", false, nil
+		}
+		value, ok := staticStringText(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		var radixArg *int
+		if len(e.Args) == 2 {
+			radix, ok := staticIntLiteral(e.Args[1])
+			if !ok {
+				return "", false, nil
+			}
+			radixArg = &radix
+		}
+		parsed, ok := staticParseIntValue(value, radixArg)
+		return parsed, ok, nil
+	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+			return g.genStaticMathMethod(e)
+		}
+	}
+	if value, ok := g.staticArithmeticNumberValue(expr); ok {
+		return formatStaticNumber(value), true, nil
+	}
+	return "", false, nil
 }
 
 func (g *Generator) genFetchCall(e *ast.BuiltinCallExpr) (string, error) {
@@ -6568,6 +7821,9 @@ func (g *Generator) argsArgcExpr() string {
 
 func (g *Generator) listLengthExpr(expr ast.Expression) string {
 	if ident, ok := expr.(*ast.IdentExpr); ok {
+		if g.controlAssigned[ident.Name] {
+			return ""
+		}
 		if known, ok := g.listLenMap[g.resolveVarName(ident.Name)]; ok {
 			return known
 		}
@@ -6806,7 +8062,21 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool, error) {
 	values, ok := g.staticScalarListValuesWithoutNewlines(e.Receiver)
 	if !ok {
-		return "", false, nil
+		values, ok = g.staticListValuesWithoutNewlines(e.Receiver)
+	}
+	if !ok {
+		if objectKeys, objectKeysOK := g.staticObjectKeysBuiltinValues(e.Receiver); objectKeysOK {
+			values = objectKeys
+			ok = true
+		} else if objectEntries, objectEntriesOK := g.staticObjectEntriesBuiltinValues(e.Receiver); objectEntriesOK {
+			values = objectEntries
+			ok = true
+		} else if objectValues, objectValuesOK := g.staticObjectValuesBuiltinValues(e.Receiver); objectValuesOK {
+			values = objectValues
+			ok = true
+		} else {
+			return "", false, nil
+		}
 	}
 
 	switch e.Method {
@@ -6850,6 +8120,9 @@ func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bo
 	}
 	values, ok := g.staticScalarListValues(e.Receiver)
 	if !ok {
+		values, ok = g.staticListValuesForSearch(e.Receiver)
+	}
+	if !ok {
 		return "", false, nil
 	}
 	if len(e.Args) != 1 {
@@ -6883,6 +8156,43 @@ func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bo
 		return "0", true, nil
 	}
 	return strconv.Itoa(index), true, nil
+}
+
+func (g *Generator) staticListValuesWithoutNewlines(expr ast.Expression) ([]string, bool) {
+	if values, ok := staticListValuesWithoutNewlinesExpr(expr); ok {
+		return values, true
+	}
+	if ident, ok := expr.(*ast.IdentExpr); ok {
+		if g.controlAssigned[ident.Name] {
+			return nil, false
+		}
+		values, ok := g.staticListValues[g.resolveVarName(ident.Name)]
+		return values, ok
+	}
+	if e, ok := expr.(*ast.AsExpr); ok {
+		return g.staticListValuesWithoutNewlines(e.Expr)
+	}
+	return nil, false
+}
+
+func (g *Generator) staticListValuesForSearch(expr ast.Expression) ([]string, bool) {
+	if values, ok := staticScalarListValues(expr); ok {
+		return values, true
+	}
+	if values, ok := g.staticStringSplitValues(expr); ok {
+		return values, true
+	}
+	if ident, ok := expr.(*ast.IdentExpr); ok {
+		if g.controlAssigned[ident.Name] {
+			return nil, false
+		}
+		values, ok := g.staticListValues[g.resolveVarName(ident.Name)]
+		return values, ok
+	}
+	if e, ok := expr.(*ast.AsExpr); ok {
+		return g.staticListValuesForSearch(e.Expr)
+	}
+	return nil, false
 }
 
 func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {
@@ -7469,7 +8779,7 @@ func (g *Generator) genStaticMathMethod(e *ast.MethodCallExpr) (string, bool, er
 		if i >= len(e.Args) {
 			return 0, false, fmt.Errorf("Math.%s requires at least %d argument(s)", e.Method, i+1)
 		}
-		v, ok := staticNumberValue(e.Args[i])
+		v, ok := g.staticNumberValue(e.Args[i])
 		return v, ok, nil
 	}
 	switch e.Method {
@@ -7867,17 +9177,16 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 }
 
 func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := g.staticASCIIStringExprValue(e.Receiver)
-	if !ok {
-		return "", false, nil
+	recv, ok, err := g.staticASCIIStringFragment(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
 	}
 
 	stringArg := func() (string, bool, error) {
 		if len(e.Args) == 0 {
 			return "", false, fmt.Errorf("%s() requires an argument", e.Method)
 		}
-		value, ok := g.staticASCIIStringExprValue(e.Args[0])
-		return value, ok, nil
+		return g.staticASCIIStringFragment(e.Args[0])
 	}
 	intArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -7993,15 +9302,15 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 }
 
 func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := g.staticASCIIStringExprValue(e.Receiver)
-	if !ok {
-		return "", false, nil
+	recv, ok, err := g.staticASCIIStringFragment(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
 	}
-	staticArg := func(idx int) (string, bool) {
+	staticArg := func(idx int) (string, bool, error) {
 		if len(e.Args) <= idx {
-			return "", false
+			return "", false, nil
 		}
-		return g.staticASCIIStringExprValue(e.Args[idx])
+		return g.staticASCIIStringFragment(e.Args[idx])
 	}
 	staticIntArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -8090,6 +9399,22 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 			return "", false, nil
 		}
 		return strings.Repeat(recv, count), true, nil
+	case "replace", "replaceAll":
+		if len(e.Args) != 2 {
+			return "", true, fmt.Errorf("%s() requires two arguments", e.Method)
+		}
+		search, ok, err := staticArg(0)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		replacement, ok, err := staticArg(1)
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		if e.Method == "replace" {
+			return strings.Replace(recv, search, replacement, 1), true, nil
+		}
+		return strings.ReplaceAll(recv, search, replacement), true, nil
 	case "padStart", "padEnd":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", true, fmt.Errorf("%s() takes one or two arguments", e.Method)
@@ -8100,10 +9425,10 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 		}
 		fill := " "
 		if len(e.Args) == 2 {
-			var ok bool
-			fill, ok = staticArg(1)
-			if !ok {
-				return "", false, nil
+			var err error
+			fill, ok, err = staticArg(1)
+			if err != nil || !ok {
+				return "", ok, err
 			}
 		}
 		if targetLen <= len(recv) || fill == "" {
@@ -8116,6 +9441,29 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 			return padding + recv, true, nil
 		}
 		return recv + padding, true, nil
+	case "charAt":
+		if len(e.Args) != 1 {
+			return "", true, fmt.Errorf("%s() requires an argument", e.Method)
+		}
+		idx, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		if idx < 0 || idx >= len(recv) {
+			return "", true, nil
+		}
+		return recv[idx : idx+1], true, nil
+	case "concat":
+		var b strings.Builder
+		b.WriteString(recv)
+		for _, arg := range e.Args {
+			value, ok, err := g.staticASCIIStringFragment(arg)
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			b.WriteString(value)
+		}
+		return b.String(), true, nil
 	default:
 		return "", false, nil
 	}
@@ -8133,7 +9481,7 @@ func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, b
 	if e.Method != "split" {
 		return "", false, nil
 	}
-	values, ok := staticStringSplitValues(e)
+	values, ok := g.staticStringSplitValues(e)
 	if !ok {
 		return "", false, nil
 	}
@@ -8141,6 +9489,18 @@ func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, b
 }
 
 func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
+	if ident, ok := e.Expr.(*ast.IdentExpr); ok {
+		if fields, ok := g.staticEntryLoopMap[g.resolveVarName(ident.Name)]; ok {
+			if index, indexOK := staticIntLiteral(e.Index); indexOK {
+				switch index {
+				case 0:
+					return fmt.Sprintf("\"$%s\"", fields.keyVar), nil
+				case 1:
+					return fmt.Sprintf("\"$%s\"", fields.valueVar), nil
+				}
+			}
+		}
+	}
 	if prop, ok := e.Expr.(*ast.PropertyExpr); ok {
 		if ident, ok := prop.Receiver.(*ast.IdentExpr); ok {
 			if classDecl := g.classMap[g.resolveClassName(ident.Name)]; classDecl != nil {
@@ -8166,8 +9526,16 @@ func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
 	if recvType != nil && recvType.Kind == ast.TypeObject {
 		return g.genComputedPropertyAccess(e)
 	}
+	if value, ok := g.staticNestedListIndexValue(e); ok {
+		return value, nil
+	}
 	if recvType == nil || recvType.Kind != ast.TypeList || recvType.Elem == nil || recvType.Elem.Kind != ast.TypeList {
 		if value, ok := g.staticListIndexValue(e); ok {
+			return value, nil
+		}
+	}
+	if recvType != nil && recvType.Kind == ast.TypeString {
+		if value, ok := g.staticStringIndexValue(e); ok {
 			return value, nil
 		}
 	}
@@ -8190,6 +9558,77 @@ func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
 	return fmt.Sprintf("$(printf '%%s\\n' %s | sed -n \"$(( %s + 1 ))p\")", listArg, indexClean), nil
 }
 
+func (g *Generator) staticNestedListIndexValue(e *ast.IndexExpr) (string, bool) {
+	col, ok := staticIntLiteral(e.Index)
+	if !ok || col < 0 {
+		return "", false
+	}
+	rowIndex, ok := e.Expr.(*ast.IndexExpr)
+	if !ok {
+		return "", false
+	}
+	row, ok := staticIntLiteral(rowIndex.Index)
+	if !ok || row < 0 {
+		return "", false
+	}
+	containerType := g.inferReceiverType(rowIndex.Expr)
+	if containerType == nil || containerType.Kind != ast.TypeList || containerType.Elem == nil || containerType.Elem.Kind != ast.TypeList {
+		return "", false
+	}
+	rows, ok := g.staticNestedListRows(rowIndex.Expr)
+	if !ok || row >= len(rows) {
+		return "", false
+	}
+	cols := strings.Split(rows[row], "\037")
+	if col >= len(cols) {
+		return "", false
+	}
+	return shellQuote(cols[col]), true
+}
+
+func (g *Generator) staticNestedListRows(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticNestedListRows(e.Expr)
+	case *ast.ListLit:
+		rows := make([]string, 0, len(e.Elements))
+		for _, elem := range e.Elements {
+			values, ok := staticScalarListValues(elem)
+			if !ok {
+				return nil, false
+			}
+			for _, value := range values {
+				if strings.ContainsAny(value, "\n\037") {
+					return nil, false
+				}
+			}
+			rows = append(rows, strings.Join(values, "\037"))
+		}
+		return rows, true
+	case *ast.BuiltinCallExpr:
+		if e.Name == "Object.entries" {
+			return staticObjectBuiltinListValues(e)
+		}
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return nil, false
+		}
+		words, ok := g.staticListMap[g.resolveVarName(e.Name)]
+		if !ok {
+			return nil, false
+		}
+		rows := make([]string, 0, len(words))
+		for _, word := range words {
+			if !strings.HasPrefix(strings.TrimSpace(word), "'") {
+				return nil, false
+			}
+			rows = append(rows, singleQuotedToRaw(word))
+		}
+		return rows, true
+	}
+	return nil, false
+}
+
 func (g *Generator) staticListIndexValue(e *ast.IndexExpr) (string, bool) {
 	index, ok := staticIntLiteral(e.Index)
 	if !ok || index < 0 {
@@ -8198,7 +9637,7 @@ func (g *Generator) staticListIndexValue(e *ast.IndexExpr) (string, bool) {
 	var words []string
 	if values, ok := g.staticScalarListValuesWithoutNewlines(e.Expr); ok {
 		words = staticWordsFromValues(values)
-	} else if values, ok := staticForListWordsExpr(e.Expr); ok {
+	} else if values, ok := g.staticForListWordsExpr(e.Expr); ok {
 		words = values
 	} else {
 		return "", false
@@ -8207,6 +9646,21 @@ func (g *Generator) staticListIndexValue(e *ast.IndexExpr) (string, bool) {
 		return "", false
 	}
 	return words[index], true
+}
+
+func (g *Generator) staticStringIndexValue(e *ast.IndexExpr) (string, bool) {
+	index, ok := staticIntLiteral(e.Index)
+	if !ok || index < 0 {
+		return "", false
+	}
+	value, ok := g.staticASCIIStringExprValue(e.Expr)
+	if !ok {
+		return "", false
+	}
+	if index >= len(value) {
+		return shellQuote(""), true
+	}
+	return shellQuote(value[index : index+1]), true
 }
 
 func (g *Generator) genNullishIndexExpr(e *ast.IndexExpr) (string, error) {
@@ -8292,6 +9746,7 @@ func (g *Generator) genIndexAssign(s *ast.IndexAssignStmt) error {
 		return err
 	}
 	delete(g.staticListMap, listVar)
+	delete(g.staticListValues, listVar)
 	g.line(fmt.Sprintf("%s=$(printf '%%s\\n' \"$%s\" | awk -v n=$(( %s + 1 )) -v v=%s '{if (NR==n) print v; else print}')", listVar, listVar, stripQuotes(indexStr), val))
 	return nil
 }
@@ -8459,7 +9914,9 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 			}
 			return truthyCondition(val), nil
 		}
-		if result, ok := staticComparisonResult(e); ok {
+		if result, ok, err := g.staticComparisonResult(e); err != nil {
+			return "", err
+		} else if ok {
 			if result {
 				return "true", nil
 			}
@@ -8477,6 +9934,12 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 	case *ast.BuiltinCallExpr:
 		return g.genBuiltinCondition(e)
 	case *ast.IdentExpr:
+		if value, ok := g.staticBooleanValue(e); ok {
+			if value {
+				return "true", nil
+			}
+			return "false", nil
+		}
 		varName := g.resolveVarName(e.Name)
 		if t := g.inferReceiverType(e); t != nil && t.Kind == ast.TypeBoolean {
 			return fmt.Sprintf("[ \"$%s\" = 1 ]", varName), nil
@@ -8780,37 +10243,232 @@ func binaryStringTest(left, op, right string) string {
 	return fmt.Sprintf("{ _bst_left=%s; _bst_right=%s; [ -n \"${%s+x}\" ] && [ \"$_bst_left\" = \"$%s\" ] && _bst_left=; [ -n \"${%s+x}\" ] && [ \"$_bst_right\" = \"$%s\" ] && _bst_right=; [ \"$_bst_left\" %s \"$_bst_right\" ]; }", left, right, nullishSentinelVar, nullishSentinelVar, nullishSentinelVar, nullishSentinelVar, op)
 }
 
-func staticComparisonResult(e *ast.BinaryExpr) (bool, bool) {
+func (g *Generator) staticComparisonResult(e *ast.BinaryExpr) (bool, bool, error) {
 	switch e.Op {
 	case "==", "===", "!=", "!==":
-		left, leftOK := staticScalarComparisonValue(e.Left)
-		right, rightOK := staticScalarComparisonValue(e.Right)
+		left, leftOK, err := g.staticScalarComparisonValue(e.Left)
+		if err != nil {
+			return false, true, err
+		}
+		right, rightOK, err := g.staticScalarComparisonValue(e.Right)
+		if err != nil {
+			return false, true, err
+		}
 		if !leftOK || !rightOK {
-			return false, false
+			return false, false, nil
 		}
 		equal := left == right
 		if e.Op == "!=" || e.Op == "!==" {
-			return !equal, true
+			return !equal, true, nil
 		}
-		return equal, true
+		return equal, true, nil
 	case ">", "<", ">=", "<=":
-		left, leftOK := staticArithmeticNumberValue(e.Left)
-		right, rightOK := staticArithmeticNumberValue(e.Right)
+		left, leftOK, err := g.staticNumericComparisonValue(e.Left)
+		if err != nil {
+			return false, true, err
+		}
+		right, rightOK, err := g.staticNumericComparisonValue(e.Right)
+		if err != nil {
+			return false, true, err
+		}
 		if !leftOK || !rightOK {
-			return false, false
+			return false, false, nil
 		}
 		switch e.Op {
 		case ">":
-			return left > right, true
+			return left > right, true, nil
 		case "<":
-			return left < right, true
+			return left < right, true, nil
 		case ">=":
-			return left >= right, true
+			return left >= right, true, nil
 		case "<=":
-			return left <= right, true
+			return left <= right, true, nil
 		}
 	}
-	return false, false
+	return false, false, nil
+}
+
+func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bool, error) {
+	if value, ok := staticScalarComparisonValue(expr); ok {
+		return value, true, nil
+	}
+	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return "", false, nil
+		}
+		varName := g.resolveVarName(e.Name)
+		if value, ok := g.stringConstMap[varName]; ok {
+			return value, true, nil
+		}
+		if value, ok := g.numConstMap[varName]; ok {
+			return formatStaticNumber(value), true, nil
+		}
+	case *ast.AsExpr:
+		return g.staticScalarComparisonValue(e.Expr)
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			if value, ok := g.staticBooleanValue(e); ok {
+				return staticBoolComparisonValue(value), true, nil
+			}
+		}
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
+			return formatStaticNumber(value), true, nil
+		}
+	case *ast.BinaryExpr:
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
+			return formatStaticNumber(value), true, nil
+		}
+		if value, ok, err := g.staticComparisonResult(e); err != nil {
+			return "", true, err
+		} else if ok {
+			return staticBoolComparisonValue(value), true, nil
+		}
+	case *ast.BuiltinCallExpr:
+		if value, ok := g.staticBooleanValue(e); ok {
+			return staticBoolComparisonValue(value), true, nil
+		}
+		switch e.Name {
+		case "Number.parseInt":
+			value, ok, err := staticParseIntBuiltinValue(e)
+			return value, ok, err
+		case "Number.parseFloat":
+			value, ok := staticParseFloatBuiltinValue(e)
+			return value, ok, nil
+		}
+	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+			value, ok, err := g.genStaticMathMethod(e)
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return value, true, nil
+		}
+		if value, ok, err := g.genStaticStringMethod(e); err != nil || ok {
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return staticGeneratedScalarValue(value)
+		}
+		if value, ok, err := g.genStaticStringTransform(e); err != nil || ok {
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return staticGeneratedScalarValue(value)
+		}
+		if value, ok, err := g.genStaticNumberMethod(e); err != nil || ok {
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return staticGeneratedScalarValue(value)
+		}
+	}
+	return "", false, nil
+}
+
+func (g *Generator) staticNumericComparisonValue(expr ast.Expression) (float64, bool, error) {
+	if value, ok := g.staticArithmeticNumberValue(expr); ok {
+		return value, true, nil
+	}
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticNumericComparisonValue(e.Expr)
+	case *ast.BuiltinCallExpr:
+		switch e.Name {
+		case "Number.parseInt":
+			value, ok, err := staticParseIntBuiltinValue(e)
+			if err != nil || !ok {
+				return 0, ok, err
+			}
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, false, nil
+			}
+			return parsed, true, nil
+		case "Number.parseFloat":
+			value, ok := staticParseFloatBuiltinValue(e)
+			if !ok {
+				return 0, false, nil
+			}
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, false, nil
+			}
+			return parsed, true, nil
+		}
+	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+			value, ok, err := g.genStaticMathMethod(e)
+			if err != nil || !ok {
+				return 0, ok, err
+			}
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, false, nil
+			}
+			return parsed, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+func staticParseIntBuiltinValue(e *ast.BuiltinCallExpr) (string, bool, error) {
+	if len(e.Args) < 1 || len(e.Args) > 2 {
+		return "", true, fmt.Errorf("Number.parseInt() takes one or two arguments")
+	}
+	value, ok := staticStringText(e.Args[0])
+	if !ok {
+		return "", false, nil
+	}
+	var radixArg *int
+	if len(e.Args) == 2 {
+		radix, ok := staticIntLiteral(e.Args[1])
+		if !ok {
+			return "", false, nil
+		}
+		radixArg = &radix
+	}
+	parsed, ok := staticParseIntValue(value, radixArg)
+	return parsed, ok, nil
+}
+
+func staticParseFloatBuiltinValue(e *ast.BuiltinCallExpr) (string, bool) {
+	if len(e.Args) != 1 {
+		return "", false
+	}
+	value, ok := staticStringText(e.Args[0])
+	if !ok {
+		return "", false
+	}
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		return "", false
+	}
+	return formatStaticNumber(parsed), true
+}
+
+func staticBoolComparisonValue(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
+}
+
+func staticGeneratedScalarValue(value string) (string, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(value, "$") {
+		return "", false, nil
+	}
+	if strings.HasPrefix(value, "'") {
+		return singleQuotedToRaw(value), true, nil
+	}
+	if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") && len(value) >= 2 {
+		return value[1 : len(value)-1], true, nil
+	}
+	if strings.ContainsAny(value, " \t\n;&|<>`") {
+		return "", false, nil
+	}
+	return value, true, nil
 }
 
 func staticScalarComparisonValue(expr ast.Expression) (string, bool) {
@@ -8975,7 +10633,11 @@ func (g *Generator) genTemplateLiteral(e *ast.TemplateLit) (string, error) {
 			} else if ok {
 				out.WriteString(escapeForDoubleQuote(staticValue))
 			} else if g.isBooleanExpr(e.Exprs[i]) {
-				out.WriteString(fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)))
+				if staticValue, ok := g.genStaticBooleanArg(e.Exprs[i]); ok {
+					out.WriteString(staticValue)
+				} else {
+					out.WriteString(fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)))
+				}
 			} else {
 				out.WriteString(strInner(val))
 			}
