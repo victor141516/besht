@@ -49,10 +49,13 @@ func TestRenderHidesSourceCommentsAndLeavesGapForExpandedSourceLine(t *testing.T
 	if countLinesContaining(lines, "if (ready) console.log") != 1 {
 		t.Fatalf("duplicate same-line source comments should collapse into one source row:\n%s", out)
 	}
-	if !strings.Contains(out, "1 | if (ready) console.log") || !strings.Contains(out, "2 | console.log(\"done\")") {
+	if !strings.Contains(out, "┬") || !strings.Contains(out, "║") {
+		t.Fatalf("rendered output should use bat-like pane rules:\n%s", out)
+	}
+	if !strings.Contains(out, "1   │ if (ready) console.log") || !strings.Contains(out, "2   │ console.log(\"done\")") {
 		t.Fatalf("rendered output should include source line numbers:\n%s", out)
 	}
-	if !strings.Contains(out, "2 | if [ \"$ready\" = 1 ]; then") || !strings.Contains(out, "7 | printf '%s\\n' 'done'") {
+	if !strings.Contains(out, "2   │ if [ \"$ready\" = 1 ]; then") || !strings.Contains(out, "7   │ printf '%s\\n' 'done'") {
 		t.Fatalf("rendered output should include visible shell line numbers:\n%s", out)
 	}
 }
@@ -71,7 +74,7 @@ func TestBuildUsesSourceMapsInternallyButDoesNotDisplayThem(t *testing.T) {
 	if strings.Contains(out, "# besht:") {
 		t.Fatalf("visualization should not display source comments:\n%s", out)
 	}
-	if !strings.Contains(out, "1 | let name = \"Ada\"") || !strings.Contains(out, "2 | console.log(name)") {
+	if !strings.Contains(out, "1   │ let name = \"Ada\"") || !strings.Contains(out, "2   │ console.log(name)") {
 		t.Fatalf("visualization should map source lines even when NoSourceMap is passed:\n%s", out)
 	}
 	if !strings.Contains(out, "name='Ada'") || !strings.Contains(out, "printf '%s\\n' \"$name\"") {
@@ -120,7 +123,7 @@ func TestRenderWithHighlighterColorsBothPanes(t *testing.T) {
 	if strings.Contains(plain, "# besht:") {
 		t.Fatalf("rendered output should hide source comments:\n%s", plain)
 	}
-	if !strings.Contains(plain, "1 | let name = \"Ada\"") || !strings.Contains(plain, "3 | printf '%s\\n' \"$name\"") {
+	if !strings.Contains(plain, "1   │ let name = \"Ada\"") || !strings.Contains(plain, "3   │ printf '%s\\n' \"$name\"") {
 		t.Fatalf("rendered output should preserve side-by-side content after stripping ANSI:\n%s", plain)
 	}
 }

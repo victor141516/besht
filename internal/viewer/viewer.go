@@ -81,7 +81,12 @@ func RenderWithOptions(compiled string, width int, opts RenderOptions) (string, 
 
 	leftTextWidth, rightTextWidth := paneWidths(width, leftLabelWidth, rightLabelWidth)
 	shellLines := highlightedShellLines(groups, maxShellLine, opts.Highlight)
+	colorGutter := opts.Highlight != nil
 	var out strings.Builder
+	out.WriteString(paneBorder(leftLabelWidth, leftTextWidth, colorGutter))
+	out.WriteString(paneDivider(colorGutter))
+	out.WriteString(paneBorder(rightLabelWidth, rightTextWidth, colorGutter))
+	out.WriteString("\n")
 	for _, group := range groups {
 		rowCount := max(1, len(group.shell))
 		for i := 0; i < rowCount; i++ {
@@ -103,14 +108,10 @@ func RenderWithOptions(compiled string, width int, opts RenderOptions) (string, 
 				rightText = shellLines[group.shell[i].number-1]
 			}
 
-			fmt.Fprintf(&out, "%*s | %s || %*s | %s\n",
-				leftLabelWidth,
-				leftLabel,
-				padRight(truncate(leftText, leftTextWidth), leftTextWidth),
-				rightLabelWidth,
-				rightLabel,
-				truncate(rightText, rightTextWidth),
-			)
+			out.WriteString(paneLine(leftLabel, leftText, leftLabelWidth, leftTextWidth, colorGutter))
+			out.WriteString(paneDivider(colorGutter))
+			out.WriteString(paneLine(rightLabel, rightText, rightLabelWidth, rightTextWidth, colorGutter))
+			out.WriteString("\n")
 		}
 	}
 	return out.String(), nil
@@ -291,7 +292,7 @@ func paneWidths(width, leftLabelWidth, rightLabelWidth int) (int, int) {
 	if width <= 0 {
 		width = 120
 	}
-	fixed := leftLabelWidth + len(" | ") + len(" || ") + rightLabelWidth + len(" | ")
+	fixed := paneFixedWidth(leftLabelWidth) + visibleLen(paneDivider(false)) + paneFixedWidth(rightLabelWidth)
 	available := width - fixed
 	if available < 20 {
 		available = 20
@@ -305,6 +306,31 @@ func paneWidths(width, leftLabelWidth, rightLabelWidth int) (int, int) {
 		right = 10
 	}
 	return left, right
+}
+
+func paneLine(label, text string, labelWidth, textWidth int, colorGutter bool) string {
+	gutter := fmt.Sprintf("%*s   │ ", labelWidth, label)
+	gutter = dim(gutter, colorGutter)
+	return gutter + padRight(truncate(text, textWidth), textWidth)
+}
+
+func paneBorder(labelWidth, textWidth int, colorGutter bool) string {
+	return dim(strings.Repeat("─", labelWidth+3)+"┬"+strings.Repeat("─", textWidth+1), colorGutter)
+}
+
+func paneDivider(colorGutter bool) string {
+	return dim(" ║ ", colorGutter)
+}
+
+func paneFixedWidth(labelWidth int) int {
+	return labelWidth + 5
+}
+
+func dim(s string, enabled bool) string {
+	if !enabled || s == "" {
+		return s
+	}
+	return "\x1b[38;5;246m" + s + "\x1b[0m"
 }
 
 func truncate(s string, width int) string {
