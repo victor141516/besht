@@ -3219,6 +3219,13 @@ func (g *Generator) isListArg(expr ast.Expression) bool {
 }
 
 func (g *Generator) genConsoleList(expr ast.Expression, dest string) (string, error) {
+	if values, ok := g.staticScalarListValuesWithoutNewlines(expr); ok {
+		out := fmt.Sprintf("[ %s ]", strings.Join(values, ", "))
+		if dest == "stderr" {
+			return fmt.Sprintf("printf '%%s\\n' %s >&2", shellQuote(out)), nil
+		}
+		return fmt.Sprintf("printf '%%s\\n' %s", shellQuote(out)), nil
+	}
 	val, err := g.genExprValue(expr)
 	if err != nil {
 		return "", err
