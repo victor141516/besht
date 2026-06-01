@@ -74,6 +74,13 @@ func TestBuildUsesSourceMapsInternallyButDoesNotDisplayThem(t *testing.T) {
 	if strings.Contains(out, "# besht:") {
 		t.Fatalf("visualization should not display source comments:\n%s", out)
 	}
+	firstLine := strings.Split(strings.TrimSuffix(stripANSI(out), "\n"), "\n")[0]
+	if !strings.Contains(firstLine, "main.bsh") || !strings.Contains(firstLine, "main.sh") {
+		t.Fatalf("visualization should show source and shell file name headers, got first line %q", firstLine)
+	}
+	if strings.Contains(firstLine, dir) {
+		t.Fatalf("visualization headers should use file names, not full paths, got first line %q", firstLine)
+	}
 	if !strings.Contains(out, "1   │ let name = \"Ada\"") || !strings.Contains(out, "2   │ console.log(name)") {
 		t.Fatalf("visualization should map source lines even when NoSourceMap is passed:\n%s", out)
 	}
@@ -232,10 +239,37 @@ func TestRenderWrapsColoredLongLines(t *testing.T) {
 	}
 }
 
+func TestRenderFitsRequestedWidthAndExpandsTabs(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "long_name.bsh")
+	if err := os.WriteFile(srcPath, []byte("let\tvalue = \"abcdefghijklmnopqrstuvwxyz0123456789\"\n"), 0644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	compiled := strings.Join([]string{
+		"# besht:" + srcPath + ":1:1",
+		"value=\t'abcdefghijklmnopqrstuvwxyz0123456789'",
+	}, "\n") + "\n"
+
+	out, err := Render(compiled, 52)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(out, "\t") {
+		t.Fatalf("rendered output should expand tabs before paging:\n%s", out)
+	}
+	assertRowsFitWidth(t, out, 52)
+}
+
 func TestANSIWidthHelpersIgnoreEscapeSequences(t *testing.T) {
 	colored := "\x1b[31mabcdef\x1b[0m"
 	if got := visibleLen(colored); got != 6 {
 		t.Fatalf("visibleLen: got %d, want 6", got)
+	}
+	if got := visibleLen("a\tb"); got != 5 {
+		t.Fatalf("visibleLen with tabs: got %d, want 5", got)
+	}
+	if got := expandTabs("a\tb", tabWidth); got != "a   b" {
+		t.Fatalf("expandTabs: got %q, want %q", got, "a   b")
 	}
 	if got := stripANSI(padRight("\x1b[31mabc\x1b[0m", 5)); got != "abc  " {
 		t.Fatalf("padRight with ANSI: got %q, want %q", got, "abc  ")
@@ -302,4 +336,13 @@ func lineIndexWithPrefix(lines []string, prefix string) int {
 		}
 	}
 	return -1
+}
+
+func assertRowsFitWidth(t *testing.T, out string, width int) {
+	t.Helper()
+	for i, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		if got := visibleLen(line); got > width {
+			t.Fatalf("rendered row %d is %d columns wide, want <= %d:\n%q\n\n%s", i+1, got, width, line, out)
+		}
+	}
 }

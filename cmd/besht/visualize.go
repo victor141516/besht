@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -93,6 +94,11 @@ func showInTerminal(content string) error {
 		_, err := fmt.Print(content)
 		return err
 	}
+	cleanup, err := configurePagerForVisualization(&pager)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	cmd := exec.Command(pager[0], pager[1:]...)
 	cmd.Stdin = strings.NewReader(content)
@@ -130,16 +136,93 @@ func pagerCommand() []string {
 		if len(parts) == 0 {
 			return nil
 		}
-		if filepath.Base(parts[0]) == "less" {
-			parts = append(parts, "-RS")
+		if isLessCommand(parts[0]) {
+			parts = lessPagerCommand(parts)
 		}
 		return parts
 	}
 	if less, err := exec.LookPath("less"); err == nil {
-		return []string{less, "-RS"}
+		return lessPagerCommand([]string{less})
 	}
 	if more, err := exec.LookPath("more"); err == nil {
 		return []string{more}
 	}
 	return nil
+}
+
+func lessPagerCommand(parts []string) []string {
+	sanitized := make([]string, 0, len(parts)+2)
+	for _, part := range parts {
+		if cleaned, ok := withoutLessChopOption(part); ok {
+			sanitized = append(sanitized, cleaned)
+		}
+	}
+	return append(sanitized, "-R", "-+S")
+}
+
+func withoutLessChopOption(arg string) (string, bool) {
+	if arg == "-S" || arg == "--chop-long-lines" {
+		return "", false
+	}
+	if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && !strings.HasPrefix(arg, "-+") && strings.Contains(arg, "S") {
+		cleaned := "-" + strings.ReplaceAll(arg[1:], "S", "")
+		if cleaned == "-" {
+			return "", false
+		}
+		return cleaned, true
+	}
+	return arg, true
+}
+
+const lessNoHorizontalKeySource = `#command
+\kr noaction
+\kl noaction
+\kR noaction
+\kL noaction
+\e) noaction
+\e( noaction
+\e} noaction
+\e{ noaction
+`
+
+func configurePagerForVisualization(pager *[]string) (func(), error) {
+	if len(*pager) == 0 || !isLessCommand((*pager)[0]) || !lessSupportsLesskeySource((*pager)[0]) {
+		return func() {}, nil
+	}
+	path, cleanup, err := writeLessNoHorizontalKeySource()
+	if err != nil {
+		return nil, err
+	}
+	*pager = append(*pager, "--lesskey-src="+path)
+	return cleanup, nil
+}
+
+func isLessCommand(command string) bool {
+	return filepath.Base(command) == "less"
+}
+
+func lessSupportsLesskeySource(command string) bool {
+	out, err := exec.Command(command, "--help").Output()
+	return err == nil && bytes.Contains(out, []byte("--lesskey-src"))
+}
+
+func writeLessNoHorizontalKeySource() (string, func(), error) {
+	file, err := os.CreateTemp("", "besht-lesskey-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create less key config: %w", err)
+	}
+	path := file.Name()
+	cleanup := func() {
+		_ = os.Remove(path)
+	}
+	if _, err := file.WriteString(lessNoHorizontalKeySource); err != nil {
+		_ = file.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("write less key config: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close less key config: %w", err)
+	}
+	return path, cleanup, nil
 }

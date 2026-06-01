@@ -34,7 +34,7 @@ besht compile script.bsh --opt-use-jq                  # enable jq-backed JSON.s
 
 Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits runtime self-checks only when generated output needs the corresponding utilities; simple direct-output scripts skip them. When options leave the runtime preamble empty, generated entry scripts keep a single blank separator between the header and the first shell statement.
 
-`besht visualize <file.bsh>` does not write a compiled file. It opens a terminal-width viewer with Besht source on the left, including blank and unmapped source lines, and compiled shell on the right using bat-style line-number gutters; the displayed shell omits source-map comments. Long lines wrap inside each pane with a `↳` continuation marker, so hidden horizontal content stays visible. When `bat` is installed and output is a terminal, the view uses TypeScript and shell syntax highlighting; otherwise it falls back to plain text.
+`besht visualize <file.bsh>` does not write a compiled file. It opens a terminal-width viewer with Besht source on the left, including blank and unmapped source lines, and compiled shell on the right using bat-style line-number gutters; each pane is headed by the input file name and its `.sh` output name. The displayed shell omits source-map comments. Long lines wrap inside each pane with a `↳` continuation marker, and the pager disables horizontal scrolling so hidden horizontal content stays visible. When `bat` is installed and output is a terminal, the view uses TypeScript and shell syntax highlighting; otherwise it falls back to plain text.
 
 ## Variable Declarations
 

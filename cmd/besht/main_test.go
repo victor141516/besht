@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -165,6 +166,8 @@ func TestUsageDocumentsCompileAndVisualizeModes(t *testing.T) {
 		"besht visualize <file.bsh>",
 		"Alias for besht compile",
 		"Sizes the side-by-side view to the current terminal width",
+		"shows file-name headers",
+		"disables horizontal scrolling",
 		"wraps long lines with continuation markers",
 	} {
 		if !strings.Contains(usage, want) {
@@ -195,4 +198,69 @@ func TestEnvColumnsWidth(t *testing.T) {
 	if width, ok := envColumnsWidth(); ok {
 		t.Fatalf("envColumnsWidth invalid: got width=%d ok=true, want false", width)
 	}
+}
+
+func TestLessPagerCommandDisablesHorizontalScrolling(t *testing.T) {
+	got := lessPagerCommand([]string{"less", "-RS", "--chop-long-lines", "-F"})
+	joined := strings.Join(got, " ")
+	if strings.Contains(joined, " -S") || strings.Contains(joined, "--chop-long-lines") || strings.Contains(joined, "-RS") {
+		t.Fatalf("less pager should remove chop-long-lines options, got %q", joined)
+	}
+	if !containsArg(got, "-R") || !containsArg(got, "-+S") {
+		t.Fatalf("less pager should preserve ANSI and explicitly disable chopping, got %#v", got)
+	}
+}
+
+func TestPagerCommandSanitizesLessFromPagerEnv(t *testing.T) {
+	t.Setenv("PAGER", "less -S")
+	got := pagerCommand()
+	if strings.Join(got, " ") != "less -R -+S" {
+		t.Fatalf("pagerCommand: got %#v, want less -R -+S", got)
+	}
+}
+
+func TestConfigurePagerForVisualizationDisablesLessHorizontalKeys(t *testing.T) {
+	less, err := exec.LookPath("less")
+	if err != nil {
+		t.Skip("less is not installed")
+	}
+	if !lessSupportsLesskeySource(less) {
+		t.Skip("less does not support --lesskey-src")
+	}
+
+	pager := []string{less, "-R", "-+S"}
+	cleanup, err := configurePagerForVisualization(&pager)
+	if err != nil {
+		t.Fatalf("configurePagerForVisualization: %v", err)
+	}
+	defer cleanup()
+
+	var lesskeyPath string
+	for _, arg := range pager {
+		if strings.HasPrefix(arg, "--lesskey-src=") {
+			lesskeyPath = strings.TrimPrefix(arg, "--lesskey-src=")
+			break
+		}
+	}
+	if lesskeyPath == "" {
+		t.Fatalf("pager missing --lesskey-src: %#v", pager)
+	}
+	content, err := os.ReadFile(lesskeyPath)
+	if err != nil {
+		t.Fatalf("read lesskey source: %v", err)
+	}
+	for _, want := range []string{`\kr noaction`, `\kl noaction`, `\e} noaction`, `\e{ noaction`} {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("lesskey source missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }

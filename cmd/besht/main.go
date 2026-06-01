@@ -40,7 +40,7 @@ Flags:
   -h, --help   Show this message
 
 Visualize:
-  Sizes the side-by-side view to the current terminal width, wraps long lines with continuation markers, and uses bat for TypeScript and shell syntax highlighting when available.
+  Sizes the side-by-side view to the current terminal width, shows file-name headers, disables horizontal scrolling, wraps long lines with continuation markers, and uses bat for TypeScript and shell syntax highlighting when available.
 `
 
 const version = "0.1.0"

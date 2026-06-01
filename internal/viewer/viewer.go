@@ -40,8 +40,12 @@ type sourceFile struct {
 type HighlightFunc func(code, language string) ([]string, error)
 
 type RenderOptions struct {
-	Highlight HighlightFunc
+	Highlight     HighlightFunc
+	SourceTitle   string
+	CompiledTitle string
 }
+
+const tabWidth = 4
 
 // Build compiles entryPath and returns a side-by-side source/shell view.
 // Source comments are enabled internally for mapping, but never appear in the
@@ -56,6 +60,7 @@ func BuildWithOptions(entryPath string, opts codegen.Options, width int, renderO
 	if err != nil {
 		return "", err
 	}
+	renderOpts = renderOpts.withEntryPath(entryPath)
 	return RenderWithOptions(compiled, width, renderOpts)
 }
 
@@ -81,8 +86,13 @@ func RenderWithOptions(compiled string, width int, opts RenderOptions) (string, 
 
 	leftTextWidth, rightTextWidth := paneWidths(width, leftLabelWidth, rightLabelWidth)
 	shellLines := highlightedShellLines(groups, maxShellLine, opts.Highlight)
+	sourceTitle, compiledTitle := renderTitles(groups, opts)
 	colorGutter := opts.Highlight != nil
 	var out strings.Builder
+	for _, row := range paneTitleRows(sourceTitle, compiledTitle, paneWidth(leftLabelWidth, leftTextWidth), paneWidth(rightLabelWidth, rightTextWidth), colorGutter) {
+		out.WriteString(row)
+		out.WriteString("\n")
+	}
 	out.WriteString(paneBorder(leftLabelWidth, leftTextWidth, colorGutter))
 	out.WriteString(paneDivider(colorGutter))
 	out.WriteString(paneBorder(rightLabelWidth, rightTextWidth, colorGutter))
@@ -121,6 +131,47 @@ func RenderWithOptions(compiled string, width int, opts RenderOptions) (string, 
 		}
 	}
 	return out.String(), nil
+}
+
+func (opts RenderOptions) withEntryPath(entryPath string) RenderOptions {
+	if opts.SourceTitle == "" {
+		opts.SourceTitle = filepath.Base(entryPath)
+	}
+	if opts.CompiledTitle == "" {
+		opts.CompiledTitle = shellTitleForSource(opts.SourceTitle)
+	}
+	return opts
+}
+
+func renderTitles(groups []group, opts RenderOptions) (string, string) {
+	sourceTitle := opts.SourceTitle
+	if sourceTitle == "" {
+		if ref := firstSource(groups); ref != nil {
+			sourceTitle = filepath.Base(ref.file)
+		}
+	}
+	compiledTitle := opts.CompiledTitle
+	if compiledTitle == "" && sourceTitle != "" {
+		compiledTitle = shellTitleForSource(sourceTitle)
+	}
+	return sourceTitle, compiledTitle
+}
+
+func firstSource(groups []group) *sourceRef {
+	for _, group := range groups {
+		if group.source != nil {
+			return group.source
+		}
+	}
+	return nil
+}
+
+func shellTitleForSource(sourceTitle string) string {
+	ext := filepath.Ext(sourceTitle)
+	if ext == "" {
+		return sourceTitle + ".sh"
+	}
+	return strings.TrimSuffix(sourceTitle, ext) + ".sh"
 }
 
 func writePaneRow(out *strings.Builder, cache *sourceCache, ref *sourceRef, rightLabel, rightText string, multipleSources bool, leftLabelWidth, leftTextWidth, rightLabelWidth, rightTextWidth int, colorGutter bool) error {
@@ -356,18 +407,34 @@ func paneWidths(width, leftLabelWidth, rightLabelWidth int) (int, int) {
 	}
 	fixed := paneFixedWidth(leftLabelWidth) + visibleLen(paneDivider(false)) + paneFixedWidth(rightLabelWidth)
 	available := width - fixed
-	if available < 20 {
-		available = 20
+	if available <= 0 {
+		return 0, 0
 	}
 	left := available / 2
 	right := available - left
-	if left < 10 {
-		left = 10
-	}
-	if right < 10 {
-		right = 10
-	}
 	return left, right
+}
+
+func paneTitleRows(leftTitle, rightTitle string, leftWidth, rightWidth int, colorGutter bool) []string {
+	if leftTitle == "" && rightTitle == "" {
+		return nil
+	}
+	leftRows := wrapVisible(expandTabs(leftTitle, tabWidth), leftWidth)
+	rightRows := wrapVisible(expandTabs(rightTitle, tabWidth), rightWidth)
+	rowCount := max(len(leftRows), len(rightRows))
+	rows := make([]string, 0, rowCount)
+	for i := 0; i < rowCount; i++ {
+		left := ""
+		if i < len(leftRows) {
+			left = leftRows[i]
+		}
+		right := ""
+		if i < len(rightRows) {
+			right = rightRows[i]
+		}
+		rows = append(rows, padRight(left, leftWidth)+paneDivider(colorGutter)+padRight(right, rightWidth))
+	}
+	return rows
 }
 
 func paneLine(label, text string, labelWidth, textWidth int, colorGutter bool) string {
@@ -396,7 +463,7 @@ func paneRows(leftLabel, leftText, rightLabel, rightText string, leftLabelWidth,
 }
 
 func paneWrappedLines(label, text string, labelWidth, textWidth int, colorGutter bool) []string {
-	parts := wrapVisible(text, textWidth)
+	parts := wrapVisible(expandTabs(text, tabWidth), textWidth)
 	rows := make([]string, 0, len(parts))
 	for i, part := range parts {
 		rowLabel := label
@@ -424,6 +491,10 @@ func paneBorder(labelWidth, textWidth int, colorGutter bool) string {
 
 func paneDivider(colorGutter bool) string {
 	return dim(" ║ ", colorGutter)
+}
+
+func paneWidth(labelWidth, textWidth int) int {
+	return paneFixedWidth(labelWidth) + textWidth
 }
 
 func paneFixedWidth(labelWidth int) int {
@@ -525,6 +596,33 @@ func wrapVisible(s string, width int) []string {
 	return rows
 }
 
+func expandTabs(s string, width int) string {
+	if width <= 0 || !strings.ContainsRune(s, '\t') {
+		return s
+	}
+	var out strings.Builder
+	visible := 0
+	for i := 0; i < len(s); {
+		if end, ok := ansiSequenceEnd(s, i); ok {
+			out.WriteString(s[i:end])
+			i = end
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == '\t' {
+			spaces := width - (visible % width)
+			out.WriteString(strings.Repeat(" ", spaces))
+			visible += spaces
+			i += size
+			continue
+		}
+		out.WriteRune(r)
+		visible++
+		i += size
+	}
+	return out.String()
+}
+
 func padRight(s string, width int) string {
 	padding := width - visibleLen(s)
 	if padding <= 0 {
@@ -545,8 +643,12 @@ func visibleLen(s string) int {
 				i = end
 				continue
 			}
-			_, size := utf8.DecodeRuneInString(s[i:])
-			count++
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if r == '\t' {
+				count += tabWidth - (count % tabWidth)
+			} else {
+				count++
+			}
 			i += size
 		}
 		return count
