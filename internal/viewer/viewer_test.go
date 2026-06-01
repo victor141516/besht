@@ -174,6 +174,64 @@ func TestRenderFillsUnmappedSourceCodeAndBlankLines(t *testing.T) {
 	}
 }
 
+func TestRenderWrapsLongLinesWithContinuationMarkers(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "main.bsh")
+	if err := os.WriteFile(srcPath, []byte("let value = \"abcdefghijklmnopqrstuvwxyz0123456789\"\n"), 0644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	compiled := strings.Join([]string{
+		"#!/bin/sh",
+		"# besht:" + srcPath + ":1:1",
+		"value='abcdefghijklmnopqrstuvwxyz0123456789'",
+	}, "\n") + "\n"
+
+	out, err := Render(compiled, 48)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(out, ">") {
+		t.Fatalf("wrapped output should not use truncation marker:\n%s", out)
+	}
+	if strings.Count(out, "↳   │") < 2 {
+		t.Fatalf("wrapped source and shell lines should show continuation markers:\n%s", out)
+	}
+	for _, want := range []string{"let value = \"abc", "defghijklmnopqrs", "tuvwxyz012345678", "123456789'"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("wrapped output should keep %q visible:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderWrapsColoredLongLines(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "main.bsh")
+	if err := os.WriteFile(srcPath, []byte("let value = \"abcdefghijklmnopqrstuvwxyz0123456789\"\n"), 0644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	compiled := "# besht:" + srcPath + ":1:1\nvalue='abcdefghijklmnopqrstuvwxyz0123456789'\n"
+	highlight := func(code, language string) ([]string, error) {
+		lines := splitLines(code)
+		for i, line := range lines {
+			lines[i] = "\x1b[31m" + line + "\x1b[0m"
+		}
+		return lines, nil
+	}
+
+	out, err := RenderWithOptions(compiled, 48, RenderOptions{Highlight: highlight})
+	if err != nil {
+		t.Fatalf("RenderWithOptions: %v", err)
+	}
+	plain := stripANSI(out)
+	if strings.Count(plain, "↳   │") < 2 {
+		t.Fatalf("colored wrapped output should show continuation markers:\n%s", plain)
+	}
+	if !strings.Contains(plain, "123456789'") {
+		t.Fatalf("wrapped output should keep the full long content visible:\n%s", out)
+	}
+}
+
 func TestANSIWidthHelpersIgnoreEscapeSequences(t *testing.T) {
 	colored := "\x1b[31mabcdef\x1b[0m"
 	if got := visibleLen(colored); got != 6 {
@@ -184,6 +242,19 @@ func TestANSIWidthHelpersIgnoreEscapeSequences(t *testing.T) {
 	}
 	if got := stripANSI(truncate(colored, 4)); got != "abc>" {
 		t.Fatalf("truncate with ANSI: got %q, want %q", got, "abc>")
+	}
+	wrapped := wrapVisible(colored, 3)
+	if len(wrapped) != 2 {
+		t.Fatalf("wrapVisible produced %d rows, want 2: %#v", len(wrapped), wrapped)
+	}
+	if got := stripANSI(wrapped[0]); got != "abc" {
+		t.Fatalf("first wrapped row: got %q, want %q", got, "abc")
+	}
+	if got := stripANSI(wrapped[1]); got != "def" {
+		t.Fatalf("second wrapped row: got %q, want %q", got, "def")
+	}
+	if !strings.HasPrefix(wrapped[1], "\x1b[31m") {
+		t.Fatalf("wrapped continuation should preserve active ANSI color, got %q", wrapped[1])
 	}
 }
 

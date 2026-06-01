@@ -134,10 +134,10 @@ func writePaneRow(out *strings.Builder, cache *sourceCache, ref *sourceRef, righ
 		}
 		leftText = text
 	}
-	out.WriteString(paneLine(leftLabel, leftText, leftLabelWidth, leftTextWidth, colorGutter))
-	out.WriteString(paneDivider(colorGutter))
-	out.WriteString(paneLine(rightLabel, rightText, rightLabelWidth, rightTextWidth, colorGutter))
-	out.WriteString("\n")
+	for _, row := range paneRows(leftLabel, leftText, rightLabel, rightText, leftLabelWidth, leftTextWidth, rightLabelWidth, rightTextWidth, colorGutter) {
+		out.WriteString(row)
+		out.WriteString("\n")
+	}
 	return nil
 }
 
@@ -376,6 +376,48 @@ func paneLine(label, text string, labelWidth, textWidth int, colorGutter bool) s
 	return gutter + padRight(truncate(text, textWidth), textWidth)
 }
 
+func paneRows(leftLabel, leftText, rightLabel, rightText string, leftLabelWidth, leftTextWidth, rightLabelWidth, rightTextWidth int, colorGutter bool) []string {
+	leftRows := paneWrappedLines(leftLabel, leftText, leftLabelWidth, leftTextWidth, colorGutter)
+	rightRows := paneWrappedLines(rightLabel, rightText, rightLabelWidth, rightTextWidth, colorGutter)
+	rowCount := max(len(leftRows), len(rightRows))
+	rows := make([]string, 0, rowCount)
+	for i := 0; i < rowCount; i++ {
+		left := blankPaneLine(leftLabelWidth, leftTextWidth, colorGutter)
+		if i < len(leftRows) {
+			left = leftRows[i]
+		}
+		right := blankPaneLine(rightLabelWidth, rightTextWidth, colorGutter)
+		if i < len(rightRows) {
+			right = rightRows[i]
+		}
+		rows = append(rows, left+paneDivider(colorGutter)+right)
+	}
+	return rows
+}
+
+func paneWrappedLines(label, text string, labelWidth, textWidth int, colorGutter bool) []string {
+	parts := wrapVisible(text, textWidth)
+	rows := make([]string, 0, len(parts))
+	for i, part := range parts {
+		rowLabel := label
+		if i > 0 {
+			rowLabel = "↳"
+		}
+		rows = append(rows, paneSingleLine(rowLabel, part, labelWidth, textWidth, colorGutter))
+	}
+	return rows
+}
+
+func blankPaneLine(labelWidth, textWidth int, colorGutter bool) string {
+	return paneSingleLine("", "", labelWidth, textWidth, colorGutter)
+}
+
+func paneSingleLine(label, text string, labelWidth, textWidth int, colorGutter bool) string {
+	gutter := fmt.Sprintf("%*s   │ ", labelWidth, label)
+	gutter = dim(gutter, colorGutter)
+	return gutter + padRight(text, textWidth)
+}
+
 func paneBorder(labelWidth, textWidth int, colorGutter bool) string {
 	return dim(strings.Repeat("─", labelWidth+3)+"┬"+strings.Repeat("─", textWidth+1), colorGutter)
 }
@@ -431,6 +473,58 @@ func truncate(s string, width int) string {
 	return out.String()
 }
 
+func wrapVisible(s string, width int) []string {
+	if width <= 0 {
+		return []string{""}
+	}
+	if visibleLen(s) <= width {
+		return []string{s}
+	}
+
+	var rows []string
+	var current strings.Builder
+	activeANSI := ""
+	segmentHasANSI := false
+	visible := 0
+
+	flush := func() {
+		if segmentHasANSI {
+			current.WriteString("\x1b[0m")
+		}
+		rows = append(rows, current.String())
+		current.Reset()
+		visible = 0
+		segmentHasANSI = false
+		if activeANSI != "" {
+			current.WriteString(activeANSI)
+			segmentHasANSI = true
+		}
+	}
+
+	for i := 0; i < len(s); {
+		if end, ok := ansiSequenceEnd(s, i); ok {
+			seq := s[i:end]
+			current.WriteString(seq)
+			segmentHasANSI = true
+			activeANSI = updateActiveANSI(activeANSI, seq)
+			i = end
+			continue
+		}
+		if visible >= width {
+			flush()
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		current.WriteRune(r)
+		visible++
+		i += size
+	}
+	if segmentHasANSI {
+		current.WriteString("\x1b[0m")
+	}
+	rows = append(rows, current.String())
+	return rows
+}
+
 func padRight(s string, width int) string {
 	padding := width - visibleLen(s)
 	if padding <= 0 {
@@ -484,4 +578,20 @@ func ansiSequenceEnd(s string, start int) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func updateActiveANSI(active, seq string) string {
+	if !strings.HasSuffix(seq, "m") {
+		return active
+	}
+	body := strings.TrimSuffix(strings.TrimPrefix(seq, "\x1b["), "m")
+	if body == "" || body == "0" {
+		return ""
+	}
+	for _, part := range strings.Split(body, ";") {
+		if part == "0" {
+			return ""
+		}
+	}
+	return seq
 }

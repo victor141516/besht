@@ -80,7 +80,7 @@ _BESHT_LOADED_lib__log=1
 
 ### Visualization (`visualize`)
 
-`besht visualize <file.bsh>` opens an in-terminal side-by-side view sized to the current terminal width. The left pane shows Besht source with line numbers, including blank and unmapped source lines; the right pane shows the compiled POSIX shell with line numbers. Panes use a bat-style line-number gutter and rule. When one source line expands into multiple shell lines, the source pane leaves blank rows beside the generated block so the next source line aligns after that block. The view is for inspection only: it does not write an output file, and displayed shell omits `# besht:file:line:col` source comments. When `bat` is installed and output is a terminal, the view uses TypeScript and shell syntax highlighting; otherwise it falls back to plain text.
+`besht visualize <file.bsh>` opens an in-terminal side-by-side view sized to the current terminal width. The left pane shows Besht source with line numbers, including blank and unmapped source lines; the right pane shows the compiled POSIX shell with line numbers. Panes use a bat-style line-number gutter and rule. When one source line expands into multiple shell lines, the source pane leaves blank rows beside the generated block so the next source line aligns after that block. Long lines wrap inside their pane with a `↳` continuation marker instead of hiding text behind horizontal scrolling. The view is for inspection only: it does not write an output file, and displayed shell omits `# besht:file:line:col` source comments. When `bat` is installed and output is a terminal, the view uses TypeScript and shell syntax highlighting; otherwise it falls back to plain text.
 
 ---
 

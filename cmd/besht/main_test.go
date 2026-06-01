@@ -165,6 +165,7 @@ func TestUsageDocumentsCompileAndVisualizeModes(t *testing.T) {
 		"besht visualize <file.bsh>",
 		"Alias for besht compile",
 		"Sizes the side-by-side view to the current terminal width",
+		"wraps long lines with continuation markers",
 	} {
 		if !strings.Contains(usage, want) {
 			t.Fatalf("usage missing %q", want)
