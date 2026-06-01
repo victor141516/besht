@@ -1438,6 +1438,23 @@ console.log(same)`)
 	}
 }
 
+func TestIntegration_StaticPrimitiveToStringBindingsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let a = true.toString()
+let b = false.toString()
+let c = ("x" === "x").toString()
+let d = Boolean("").toString()
+let e = (2 + 3).toString()
+console.log(a)
+console.log(b)
+console.log(c)
+console.log(d)
+console.log(e)`)
+	want := "true\nfalse\ntrue\nfalse\n5\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PrimitiveToStringAndParseIntRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let s: string = "x"
 console.log(s.toString())

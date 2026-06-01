@@ -486,6 +486,21 @@ let whole: string = (3.9).toFixed()`)
 	assertNotContains(t, out, `awk`)
 }
 
+func TestCodegen_StaticPrimitiveToStringBindings(t *testing.T) {
+	out := compile(t, `let a = true.toString()
+let b = false.toString()
+let c = ("x" === "x").toString()
+let d = Boolean("").toString()
+let e = (2 + 3).toString()`)
+	assertContains(t, out, `a='true'`)
+	assertContains(t, out, `b='false'`)
+	assertContains(t, out, `c='true'`)
+	assertContains(t, out, `d='false'`)
+	assertContains(t, out, `e='5'`)
+	assertNotContains(t, out, `if [ 1 = 1 ]; then printf true`)
+	assertNotContains(t, out, `printf '%s' 5`)
+}
+
 func TestCodegen_StaticToStringConcatFragments(t *testing.T) {
 	out := compile(t, `let a = "count=" + (2 + 3).toString()
 let b = "flag=" + true.toString()

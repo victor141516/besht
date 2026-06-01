@@ -6726,6 +6726,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if val, ok, err := g.genStaticNumberMethod(e); ok || err != nil {
 		return val, err
 	}
+	if val, ok, err := g.genStaticToStringMethod(e); ok || err != nil {
+		return val, err
+	}
 	if val, ok, err := g.genStaticStringSplitMethod(e); ok || err != nil {
 		return val, err
 	}
@@ -6906,6 +6909,17 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 	default:
 		return "", false, nil
 	}
+}
+
+func (g *Generator) genStaticToStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	if e.Method != "toString" {
+		return "", false, nil
+	}
+	value, ok, err := g.staticStringFragment(e)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return shellQuote(value), true, nil
 }
 
 func (g *Generator) genFetchCall(e *ast.BuiltinCallExpr) (string, error) {

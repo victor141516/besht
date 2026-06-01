@@ -100,7 +100,7 @@ Files use the `.bsh` extension.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
 - Static numeric arithmetic over literal numbers compiles to constants; dynamic arithmetic keeps shell arithmetic or POSIX `awk`.
 - Static numeric literal `.toString()`/`.toFixed()` calls and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
-- Static primitive `.toString()` fragments inside string concatenation and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+- Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 - Static ASCII string literals, variables bound to static ASCII string literals, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `at()`, and indexing use AWK substring extraction.
 - Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 - `switch/case/default` compiles to shell `case/esac`.
