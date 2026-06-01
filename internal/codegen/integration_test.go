@@ -1416,8 +1416,10 @@ let c: list<string> = a.concat(b)
 let total: number = c.length
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `printf '%s\n%s'`)
-	assertContains(t, out, `wc -l`)
+	assertContains(t, out, "c='one\ntwo\nthree\nfour'")
+	assertContains(t, out, `total=4`)
+	assertNotContains(t, out, `printf '%s\n%s'`)
+	assertNotContains(t, out, `wc -l`)
 }
 
 func TestIntegration_NativeListAPIsReplaceGlobalListHelpersRuntime(t *testing.T) {
@@ -1463,6 +1465,26 @@ func TestIntegration_StaticListLiteralJoinRuntime(t *testing.T) {
 console.log(["can't", "stop"].join(" / "))
 console.log([1, 2, 3].join(","))`)
 	want := "a|b|c\ncan't / stop\n1,2,3\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StaticListMethodChainsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(["a", "b"].concat(["c"]).join(","))
+console.log(["a", "b", "c"].slice(1).join(","))
+console.log(["a", "b"].reverse().join(","))
+console.log(["a", "b"].push("c").join(","))
+console.log(Array.of("a", "b").concat(Array.of("c")).join("|"))
+let xs = ["a", "b"]
+console.log(xs.concat(["c"]).join(","))
+console.log(xs.slice(1).join(","))
+console.log(xs.reverse().join(","))
+console.log(xs.push("c").join(","))
+for (value of xs.concat(["c"])) {
+    console.log(value)
+}`)
+	want := "a,b,c\nb,c\nb,a\na,b,c\na|b|c\na,b,c\nb\nb,a\na,b,c\na\nb\nc\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

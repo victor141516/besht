@@ -549,7 +549,7 @@ for (let f of files) {
 for (f of files) $("echo", f).run()
 ```
 
-Static scalar list literals, static scalar `Array.of(...)` calls, static `Array.from({ length: N })` calls, and variables bound to them compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
+Static scalar list expressions, static scalar `Array.of(...)` calls, static `Array.from({ length: N })` calls, and variables bound to them compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
 
 **For — command output (line by line):**
 
@@ -641,19 +641,20 @@ let withNew = files.push("new.txt")
 let alsoWithNew = [...files, "new.txt"]
 let text: string = files.toString() // scalar lists: same as files.join(",")
 let literalText: string = ["a", "b", "c"].join(",") // compiles to 'a,b,c'
+let compactText: string = ["a", "b"].concat(["c"]).join(",") // compiles to 'a,b,c'
 let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
 ```
 
-Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice. Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static.
+Scalar `list.toString()` is supported as comma-join output; nested-list JavaScript flattening is not part of this slice. Static scalar list expression `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static.
 
-Static scalar list literals compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the generated `printf` builder.
+Static scalar list literals and list-returning method chains over static scalar lists (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the generated `printf` builder.
 
 Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder.
 
-Static string literals, variables bound to static string literals, and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
+Static string literals, variables bound to static string literals, and static scalar list expression `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
 
-Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls compile to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path.
+Static scalar list expression `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls compile to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path.
 
 Static scalar list indexes with known in-range integer indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed` path.
 
