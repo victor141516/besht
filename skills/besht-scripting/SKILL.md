@@ -87,7 +87,7 @@ let debug: string = process.env.DEBUG ?? "false"
 
 ```
 
-`process.env.NAME` is nullish only when the variable is unset. Empty strings are preserved, so use `??` for defaults.
+`process.env.NAME` is nullish only when the variable is unset. Empty strings are preserved, so use `??` for defaults. Static safe defaults compile to POSIX unset-only expansion such as `${PORT-8080}`.
 
 ## Script Arguments
 
