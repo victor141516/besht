@@ -30,7 +30,7 @@ besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to
 besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
 ```
 
-Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators.
+Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. When options leave the runtime preamble empty, generated entry scripts keep a single blank separator between the header and the first shell statement.
 
 ## Variable Declarations
 
