@@ -6794,6 +6794,22 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 			return "", false, nil
 		}
 		return shellQuote(strings.Repeat(recv, count)), true, nil
+	case "replace", "replaceAll":
+		if len(e.Args) != 2 {
+			return "", true, fmt.Errorf("%s() requires two arguments", e.Method)
+		}
+		search, ok := staticArg(0)
+		if !ok {
+			return "", false, nil
+		}
+		replacement, ok := staticArg(1)
+		if !ok {
+			return "", false, nil
+		}
+		if e.Method == "replace" {
+			return shellQuote(strings.Replace(recv, search, replacement, 1)), true, nil
+		}
+		return shellQuote(strings.ReplaceAll(recv, search, replacement)), true, nil
 	case "padStart", "padEnd":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", true, fmt.Errorf("%s() takes one or two arguments", e.Method)
@@ -6820,6 +6836,17 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 			return shellQuote(padding + recv), true, nil
 		}
 		return shellQuote(recv + padding), true, nil
+	case "concat":
+		var b strings.Builder
+		b.WriteString(recv)
+		for _, arg := range e.Args {
+			value, ok := g.staticASCIIStringExprValue(arg)
+			if !ok {
+				return "", false, nil
+			}
+			b.WriteString(value)
+		}
+		return shellQuote(b.String()), true, nil
 	default:
 		return "", false, nil
 	}

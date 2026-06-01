@@ -2256,8 +2256,12 @@ console.log("hello".slice(1, 4))
 console.log("hello".substring(4, 1))
 console.log("ha".repeat(3))
 console.log("hi".padStart(5, "0"))
-console.log("hi".padEnd(5, "."))`)
-	want := "hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\n"
+console.log("hi".padEnd(5, "."))
+console.log("hello world".replace("world", "besht"))
+console.log("hello world".replaceAll("l", "L"))
+console.log("a.b.c".replaceAll(".", "!"))
+console.log("hello".concat(" ", "besht"))`)
+	want := "hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -2274,8 +2278,11 @@ console.log(greeting.startsWith("he"))
 console.log(greeting.endsWith("lo"))
 console.log(greeting.indexOf("l"))
 console.log(greeting.lastIndexOf("l"))
+console.log(greeting.replace("ell", "ipp"))
+console.log(greeting.replaceAll("l", "L"))
+console.log(greeting.concat("!", needle))
 if (greeting.includes(needle)) console.log("yes")`)
-	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\nyes\n"
+	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\nhippo\nheLLo\nhello!ell\nyes\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
