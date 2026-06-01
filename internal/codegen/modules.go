@@ -1295,6 +1295,7 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.staticObjectMap = make(map[string][]string)
 	g.staticNullishMap = make(map[string]bool)
 	g.staticObjectEntryMap = make(map[string][]string)
+	g.staticObjectValueMap = make(map[string][]string)
 	g.stringConstMap = make(map[string]string)
 	g.staticListMap = make(map[string][]string)
 	g.staticListValues = make(map[string][]string)

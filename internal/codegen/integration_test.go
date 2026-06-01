@@ -2912,6 +2912,19 @@ for (entry of Object.entries(user)) {
 	}
 }
 
+func TestIntegration_StaticNamedObjectValuesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { id: 1, name: "Ada", active: true }
+console.log(Object.values(user).length)
+console.log(Object.values(user).join(","))
+for (value of Object.values(user)) {
+    console.log(value)
+}`)
+	want := "3\n1,Ada,true\n1\nAda\ntrue\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_FunctionReadsTopLevelObjectProperties(t *testing.T) {
 	out := runCompiledShell(t, `let student = {
     name: "Laura",

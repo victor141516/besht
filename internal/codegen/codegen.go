@@ -30,6 +30,7 @@ type Generator struct {
 	objPropTypeMap       map[string]*ast.Type // "varName.propName" -> property type
 	staticObjectMap      map[string][]string
 	staticObjectEntryMap map[string][]string
+	staticObjectValueMap map[string][]string
 	staticNullishMap     map[string]bool
 	stringConstMap       map[string]string
 	boolConstMap         map[string]bool
@@ -147,6 +148,7 @@ func New() *Generator {
 		objPropTypeMap:       make(map[string]*ast.Type),
 		staticObjectMap:      make(map[string][]string),
 		staticObjectEntryMap: make(map[string][]string),
+		staticObjectValueMap: make(map[string][]string),
 		staticNullishMap:     make(map[string]bool),
 		stringConstMap:       make(map[string]string),
 		boolConstMap:         make(map[string]bool),
@@ -1337,6 +1339,11 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		} else {
 			delete(g.staticObjectEntryMap, varName)
 		}
+		if values, ok := staticObjectLiteralValues(obj); ok {
+			g.staticObjectValueMap[varName] = values
+		} else {
+			delete(g.staticObjectValueMap, varName)
+		}
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
 		delete(g.objAliasMap, s.Name)
 		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
@@ -1474,6 +1481,12 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else if entries, ok := g.staticObjectEntriesBuiltinValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(entries))
+	} else if values, ok := g.staticObjectValuesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if values, ok := staticStringSplitValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(n)
 	} else {
 		delete(g.listLenMap, varName)
 	}
@@ -1945,6 +1958,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	varName := g.resolveVarName(s.Name)
 	delete(g.staticObjectMap, varName)
 	delete(g.staticObjectEntryMap, varName)
+	delete(g.staticObjectValueMap, varName)
 	delete(g.staticNullishMap, varName)
 	delete(g.staticSetMap, varName)
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
@@ -1964,6 +1978,12 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else if entries, ok := g.staticObjectEntriesBuiltinValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(entries))
+	} else if values, ok := g.staticObjectValuesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if values, ok := staticStringSplitValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(n)
 	} else {
 		delete(g.listLenMap, varName)
 	}
@@ -2058,6 +2078,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
 	prevStaticObjectEntryMap := g.staticObjectEntryMap
+	prevStaticObjectValueMap := g.staticObjectValueMap
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
@@ -2071,6 +2092,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
 	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
+	g.staticObjectValueMap = cloneObjectFieldsMap(prevStaticObjectValueMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
@@ -2106,6 +2128,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
 	g.staticObjectEntryMap = prevStaticObjectEntryMap
+	g.staticObjectValueMap = prevStaticObjectValueMap
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
@@ -2212,6 +2235,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
 	prevStaticObjectEntryMap := g.staticObjectEntryMap
+	prevStaticObjectValueMap := g.staticObjectValueMap
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
@@ -2227,6 +2251,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
 	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
+	g.staticObjectValueMap = cloneObjectFieldsMap(prevStaticObjectValueMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
@@ -2271,6 +2296,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
 	g.staticObjectEntryMap = prevStaticObjectEntryMap
+	g.staticObjectValueMap = prevStaticObjectValueMap
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
@@ -2423,6 +2449,9 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 			return g.genForStaticEntryList(s, entries)
 		}
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
+			return g.genForStaticList(s, staticWordsFromValues(values))
+		}
+		if values, ok := g.staticObjectValuesBuiltinValues(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
 		if words, ok := staticForListWordsExpr(iter); ok {
@@ -2709,6 +2738,9 @@ func (g *Generator) staticScalarListValues(expr ast.Expression) ([]string, bool)
 		if entries, ok := g.staticObjectEntriesBuiltinValues(e); ok {
 			return entries, true
 		}
+		if values, ok := g.staticObjectValuesBuiltinValues(e); ok {
+			return values, true
+		}
 	case *ast.MethodCallExpr:
 		return g.staticScalarListMethodValues(e)
 	}
@@ -2857,6 +2889,12 @@ func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression)
 		g.staticListMap[varName] = staticWordsFromValues(entries)
 		g.staticListValues[varName] = append([]string(nil), entries...)
 		g.staticEntryListMap[varName] = append([]string(nil), entries...)
+		return
+	}
+	if values, ok := g.staticObjectValuesBuiltinValues(expr); ok {
+		g.staticListMap[varName] = staticWordsFromValues(values)
+		g.staticListValues[varName] = append([]string(nil), values...)
+		delete(g.staticEntryListMap, varName)
 		return
 	}
 	if values, ok := g.staticScalarListValuesWithoutNewlines(expr); ok {
@@ -4352,11 +4390,13 @@ func (g *Generator) invalidateStaticObjectRef(ref objectRef) {
 	if ref.StaticName != "" {
 		delete(g.staticObjectMap, ref.StaticName)
 		delete(g.staticObjectEntryMap, ref.StaticName)
+		delete(g.staticObjectValueMap, ref.StaticName)
 	}
 	if ref.RootName != "" {
 		if rootRef, ok := g.objAliasMap[ref.RootName]; ok && rootRef.StaticName != "" {
 			delete(g.staticObjectMap, rootRef.StaticName)
 			delete(g.staticObjectEntryMap, rootRef.StaticName)
+			delete(g.staticObjectValueMap, rootRef.StaticName)
 		}
 	}
 }
@@ -4444,6 +4484,24 @@ func (g *Generator) staticNamedObjectEntries(expr ast.Expression) ([]string, boo
 	return append([]string(nil), entries...), true
 }
 
+func (g *Generator) staticNamedObjectValues(expr ast.Expression) ([]string, bool) {
+	if as, ok := expr.(*ast.AsExpr); ok {
+		return g.staticNamedObjectValues(as.Expr)
+	}
+	if obj, ok := expr.(*ast.ObjectLit); ok {
+		return staticObjectLiteralValues(obj)
+	}
+	ref, ok := g.resolveObjectRef(expr)
+	if !ok || ref.StaticName == "" {
+		return nil, false
+	}
+	values, ok := g.staticObjectValueMap[ref.StaticName]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), values...), true
+}
+
 func (g *Generator) staticObjectKeysBuiltinValues(expr ast.Expression) ([]string, bool) {
 	builtin, ok := expr.(*ast.BuiltinCallExpr)
 	if !ok || builtin.Name != "Object.keys" || len(builtin.Args) != 1 {
@@ -4458,6 +4516,14 @@ func (g *Generator) staticObjectEntriesBuiltinValues(expr ast.Expression) ([]str
 		return nil, false
 	}
 	return g.staticNamedObjectEntries(builtin.Args[0])
+}
+
+func (g *Generator) staticObjectValuesBuiltinValues(expr ast.Expression) ([]string, bool) {
+	builtin, ok := expr.(*ast.BuiltinCallExpr)
+	if !ok || builtin.Name != "Object.values" || len(builtin.Args) != 1 {
+		return nil, false
+	}
+	return g.staticNamedObjectValues(builtin.Args[0])
 }
 
 func staticWordsFromValues(values []string) []string {
@@ -4730,6 +4796,9 @@ func (g *Generator) genObjectValues(expr ast.Expression) (string, error) {
 			return "", err
 		}
 		return g.genObjectLiteralValues(obj)
+	}
+	if values, ok := g.staticNamedObjectValues(expr); ok {
+		return shellQuote(strings.Join(values, "\n")), nil
 	}
 	if ref, ok := g.resolveObjectRef(expr); ok {
 		if err := g.validateObjectRefScalarValues("Object.values", ref); err != nil {
@@ -6362,6 +6431,9 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 		if entries, ok := g.staticObjectEntriesBuiltinValues(e.Receiver); ok {
 			return strconv.Itoa(len(entries)), nil
 		}
+		if values, ok := g.staticObjectValuesBuiltinValues(e.Receiver); ok {
+			return strconv.Itoa(len(values)), nil
+		}
 		if values, ok := g.staticScalarListValues(e.Receiver); ok {
 			return strconv.Itoa(len(values)), nil
 		}
@@ -7599,7 +7671,18 @@ func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool
 		values, ok = g.staticListValuesWithoutNewlines(e.Receiver)
 	}
 	if !ok {
-		return "", false, nil
+		if objectKeys, objectKeysOK := g.staticObjectKeysBuiltinValues(e.Receiver); objectKeysOK {
+			values = objectKeys
+			ok = true
+		} else if objectEntries, objectEntriesOK := g.staticObjectEntriesBuiltinValues(e.Receiver); objectEntriesOK {
+			values = objectEntries
+			ok = true
+		} else if objectValues, objectValuesOK := g.staticObjectValuesBuiltinValues(e.Receiver); objectValuesOK {
+			values = objectValues
+			ok = true
+		} else {
+			return "", false, nil
+		}
 	}
 
 	switch e.Method {
