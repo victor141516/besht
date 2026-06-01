@@ -2440,6 +2440,22 @@ console.log(Object.hasOwn(counts, "c"))`)
 	}
 }
 
+func TestIntegration_StaticObjectLiteralAPIsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(Object.keys({ name: "Ada", active: true }).join(","))
+console.log(Object.values({ name: "Ada", active: true }).join(","))
+let entries = Object.entries({ name: "Ada", active: true })
+console.log(entries[1][0] + "=" + entries[1][1])
+console.log(Object.hasOwn({ name: "Ada", active: true }, "active"))
+console.log(Object.hasOwn({ name: "Ada", active: true }, "missing"))
+for (key of Object.keys({ name: "Ada", active: true })) {
+    console.log(key)
+}`)
+	want := "name,active\nAda,true\nactive=true\ntrue\nfalse\nname\nactive\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_FunctionReadsTopLevelObjectProperties(t *testing.T) {
 	out := runCompiledShell(t, `let student = {
     name: "Laura",

@@ -1857,15 +1857,33 @@ let hasLiteral: boolean = Object.hasOwn({ value: "x", enabled: true }, "enabled"
 	assertContains(t, out, `values=$(for _bst_obj_key in $_objkeys_user`)
 	assertContains(t, out, `entries=$(for _bst_obj_key in $_objkeys_user`)
 	assertContains(t, out, `if [ "$_bst_obj_key" = 'active' ]`)
-	assertContains(t, out, `if [ "$_bst_obj_key" = 'enabled' ]`)
 	assertContains(t, out, `printf '%s\037%s\n' "$_bst_obj_key" "$_bst_obj_value"`)
-	assertContains(t, out, `_objkeys__objlit_`)
-	assertContains(t, out, `='value enabled'`)
-	assertContains(t, out, `printf '%s\n' $_objkeys__objlit_`)
+	assertContains(t, out, "literalKeys='value\nenabled'")
+	assertContains(t, out, "literalValues='x\ntrue'")
+	assertContains(t, out, "literalEntries='value\037x\nenabled\037true'")
 	assertContains(t, out, `grep -qxF -- "$_bst_obj_key"`)
 	assertContains(t, out, `hasName=$(_bst_obj_key='name'`)
-	assertContains(t, out, `hasLiteral=$(_objkeys__objlit_`)
+	assertContains(t, out, `hasLiteral=1`)
+	assertNotContains(t, out, `_objkeys__objlit_`)
 	assertNotContains(t, out, `_bst_object_keys`)
+}
+
+func TestCodegen_StaticObjectLiteralAPIs(t *testing.T) {
+	out := compile(t, `let keys = Object.keys({ name: "Ada", active: true })
+let values = Object.values({ name: "Ada", active: true })
+let entries = Object.entries({ name: "Ada", active: true })
+let yes = Object.hasOwn({ name: "Ada", active: true }, "active")
+let no = Object.hasOwn({ name: "Ada", active: true }, "missing")
+for (key of Object.keys({ name: "Ada", active: true })) {
+    console.log(key)
+}`)
+	assertContains(t, out, "keys='name\nactive'")
+	assertContains(t, out, "values='Ada\ntrue'")
+	assertContains(t, out, "entries='name\037Ada\nactive\037true'")
+	assertContains(t, out, `yes=1`)
+	assertContains(t, out, `no=0`)
+	assertContains(t, out, `for key in 'name' 'active'; do`)
+	assertNotContains(t, out, `_objkeys__objlit_`)
 }
 
 func TestCodegen_ListForEach(t *testing.T) {
