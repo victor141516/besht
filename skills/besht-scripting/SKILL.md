@@ -756,7 +756,7 @@ Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known lists
 ```
 
-Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`; `Besht.fs.*` and `Besht.strings.*` predicates also render as readable `true`/`false` in console output. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
+Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`; `Besht.fs.*` and `Besht.strings.*` predicates also render as readable `true`/`false` in console output, and dynamic boolean console arguments reuse the condition once and print `true`/`false` from it. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
 
 ## Operators
 

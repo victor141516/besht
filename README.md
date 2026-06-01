@@ -88,7 +88,7 @@ Files use the `.bsh` extension.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
-- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; `Besht.fs.*` and `Besht.strings.*` predicates also print readable `true`/`false` in console calls. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value. Dynamic booleans keep the general formatting path.
+- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; `Besht.fs.*` and `Besht.strings.*` predicates also print readable `true`/`false` in console calls. Dynamic boolean console arguments reuse the same shell condition once and print `true`/`false` from it. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - Static scalar equality comparisons and static numeric relational comparisons, including arithmetic literal operands, compile to constants. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 - String equality preserves spaces and newlines, including multiline template literals.
@@ -286,7 +286,7 @@ function log(msg: string) {
 
 ### Print
 
-`console.log()` writes a string to stdout with a trailing newline. `console.error()` writes the same format to stderr. Lists print in Bun-style `[ a, b ]` format; static scalar list output compiles to one quoted `printf` line, while dynamic and newline-sensitive lists keep the generic formatter. Objects print each property on its own line and reflect current property values. Inline object literals compile to a direct multi-line `printf`.
+`console.log()` writes a string to stdout with a trailing newline. `console.error()` writes the same format to stderr. Boolean arguments print as `true`/`false`; dynamic boolean expressions compile to one shell condition instead of a nested boolean formatter. Lists print in Bun-style `[ a, b ]` format; static scalar list output compiles to one quoted `printf` line, while dynamic and newline-sensitive lists keep the generic formatter. Objects print each property on its own line and reflect current property values. Inline object literals compile to a direct multi-line `printf`.
 
 ```ts
 console.log("Usage: myscript [options]");
