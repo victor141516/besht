@@ -314,6 +314,37 @@ let label: string = x > 5 ? "big" : "small"`)
 	assertContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
 }
 
+func TestCodegen_StaticBooleanTernary(t *testing.T) {
+	out := compile(t, `let label = true ? "yes" : "no"
+let negated = !true ? "bad" : "good"
+let both = true && false ? "bad" : "ok"`)
+	assertContains(t, out, `label='yes'`)
+	assertContains(t, out, `negated='good'`)
+	assertContains(t, out, `both='ok'`)
+	assertNotContains(t, out, `$(if true; then`)
+	assertNotContains(t, out, `$(if ! true; then`)
+	assertNotContains(t, out, `printf '%s' 'bad'`)
+}
+
+func TestCodegen_StaticBooleanIf(t *testing.T) {
+	out := compile(t, `if (true) {
+    console.log("yes")
+} else {
+    console.log("no")
+}
+if (false) {
+    console.log("bad")
+} else {
+    console.log("fallback")
+}`)
+	assertContains(t, out, `printf '%s\n' 'yes'`)
+	assertContains(t, out, `printf '%s\n' 'fallback'`)
+	assertNotContains(t, out, `if true; then`)
+	assertNotContains(t, out, `if false; then`)
+	assertNotContains(t, out, `printf '%s\n' 'no'`)
+	assertNotContains(t, out, `printf '%s\n' 'bad'`)
+}
+
 func TestCodegen_NumberToString(t *testing.T) {
 	out := compile(t, `let n: number = 42
 let s: string = n.toString()`)

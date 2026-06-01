@@ -1688,6 +1688,27 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 }
 
 func (g *Generator) genIf(s *ast.IfStmt) error {
+	if value, ok := staticBoolValue(s.Condition); ok {
+		if value {
+			for _, stmt := range s.Then.Statements {
+				if err := g.genStmt(stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if len(s.ElseIfs) == 0 {
+			if s.Else != nil {
+				for _, stmt := range s.Else.Statements {
+					if err := g.genStmt(stmt); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+	}
+
 	cond, err := g.genCondition(s.Condition)
 	if err != nil {
 		return err
@@ -6646,6 +6667,13 @@ func computedKeyValidation(varName string) string {
 }
 
 func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (string, error) {
+	if value, ok := staticBoolValue(e.Condition); ok {
+		if value {
+			return g.genExprRHS(e.Then, targetType)
+		}
+		return g.genExprRHS(e.Else, targetType)
+	}
+
 	cond, err := g.genCondition(e.Condition)
 	if err != nil {
 		return "", err
@@ -6659,6 +6687,35 @@ func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (str
 		return "", err
 	}
 	return fmt.Sprintf("$(if %s; then printf '%%s' %s; else printf '%%s' %s; fi)", cond, thenVal, elseVal), nil
+}
+
+func staticBoolValue(expr ast.Expression) (bool, bool) {
+	switch e := expr.(type) {
+	case *ast.BoolLit:
+		return e.Value, true
+	case *ast.AsExpr:
+		return staticBoolValue(e.Expr)
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			value, ok := staticBoolValue(e.Expr)
+			if ok {
+				return !value, true
+			}
+		}
+	case *ast.BinaryExpr:
+		left, leftOK := staticBoolValue(e.Left)
+		right, rightOK := staticBoolValue(e.Right)
+		if !leftOK || !rightOK {
+			return false, false
+		}
+		switch e.Op {
+		case "&&":
+			return left && right, true
+		case "||":
+			return left || right, true
+		}
+	}
+	return false, false
 }
 
 func (g *Generator) genPropagateRHS(e *ast.PropagateExpr) (string, error) {
