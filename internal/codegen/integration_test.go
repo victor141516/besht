@@ -1373,6 +1373,19 @@ console.log(Math.sqrt(9))`)
 	}
 }
 
+func TestIntegration_StaticToStringConcatRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let count = "count=" + (2 + 3).toString()
+let flag = "flag=" + true.toString()
+let same = `+"`same=${(\"a\" === \"a\").toString()}`"+`
+console.log(count)
+console.log(flag)
+console.log(same)`)
+	want := "count=5\nflag=true\nsame=true\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PrimitiveToStringAndParseIntRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let s: string = "x"
 console.log(s.toString())

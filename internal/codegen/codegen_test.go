@@ -439,6 +439,28 @@ let whole: string = (3.9).toFixed()`)
 	assertNotContains(t, out, `awk`)
 }
 
+func TestCodegen_StaticToStringConcatFragments(t *testing.T) {
+	out := compile(t, `let a = "count=" + (2 + 3).toString()
+let b = "flag=" + true.toString()
+let c = `+"`same=${(\"x\" === \"x\").toString()}`"+`
+console.log("value=" + false.toString())`)
+	assertContains(t, out, `a="count=5"`)
+	assertContains(t, out, `b="flag=true"`)
+	assertContains(t, out, `c="same=true"`)
+	assertContains(t, out, `printf '%s\n' "value=false"`)
+	assertNotContains(t, out, `count=$(printf '%s' 5)`)
+	assertNotContains(t, out, `flag=$(if [ 1 = 1 ]`)
+}
+
+func TestCodegen_StaticToStringConcatKeepsDynamicFallback(t *testing.T) {
+	out := compile(t, `function show(n: number, ok: boolean) {
+    let a = "n=" + n.toString()
+    let b = `+"`ok=${ok.toString()}`"+`
+}`)
+	assertContains(t, out, `a="n=$(printf '%s' "$_show_n")"`)
+	assertContains(t, out, `b="ok=$(if [ $_show_ok = 1 ]; then printf true; else printf false; fi)"`)
+}
+
 func TestCodegen_SpreadCommandArgs(t *testing.T) {
 	out := compile(t, `let args: list<string> = ["a b", "c"]
 $("echo", ...args).run()`)

@@ -3921,6 +3921,76 @@ func (g *Generator) genStaticBooleanArg(expr ast.Expression) (string, bool) {
 	return "false", true
 }
 
+func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, error) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticStringFragment(e.Expr)
+	case *ast.StringLit:
+		return e.Value, true, nil
+	case *ast.RawStringLit:
+		return e.Value, true, nil
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return strings.Join(e.Parts, ""), true, nil
+		}
+	case *ast.IntLit:
+		return strconv.FormatInt(e.Value, 10), true, nil
+	case *ast.FloatLit:
+		return e.Value, true, nil
+	case *ast.BoolLit:
+		if e.Value {
+			return "true", true, nil
+		}
+		return "false", true, nil
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			if value, ok := g.staticBooleanValue(e); ok {
+				if value {
+					return "true", true, nil
+				}
+				return "false", true, nil
+			}
+		}
+		if value, ok := staticArithmeticNumberValue(e); ok {
+			return formatStaticNumber(value), true, nil
+		}
+	case *ast.BinaryExpr:
+		if value, ok := staticArithmeticNumberValue(e); ok {
+			return formatStaticNumber(value), true, nil
+		}
+		if value, ok := staticComparisonResult(e); ok {
+			if value {
+				return "true", true, nil
+			}
+			return "false", true, nil
+		}
+		if value, ok := g.staticBooleanValue(e); ok {
+			if value {
+				return "true", true, nil
+			}
+			return "false", true, nil
+		}
+	case *ast.BuiltinCallExpr:
+		if value, ok := g.staticBooleanValue(e); ok {
+			if value {
+				return "true", true, nil
+			}
+			return "false", true, nil
+		}
+	case *ast.MethodCallExpr:
+		if e.Method != "toString" {
+			return "", false, nil
+		}
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toString() takes no arguments")
+		}
+		if value, ok, err := g.staticStringFragment(e.Receiver); ok || err != nil {
+			return value, ok, err
+		}
+	}
+	return "", false, nil
+}
+
 func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
@@ -4082,11 +4152,19 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 			isStrNode(e.Left) || isStrNode(e.Right)
 		if isStr {
 			lInner := strInner(leftStr)
-			if g.isBooleanExpr(e.Left) {
+			if staticLeft, ok, err := g.staticStringFragment(e.Left); err != nil {
+				return "", err
+			} else if ok {
+				lInner = escapeForDoubleQuote(staticLeft)
+			} else if g.isBooleanExpr(e.Left) {
 				lInner = fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(leftStr))
 			}
 			rInner := strInner(rightStr)
-			if g.isBooleanExpr(e.Right) {
+			if staticRight, ok, err := g.staticStringFragment(e.Right); err != nil {
+				return "", err
+			} else if ok {
+				rInner = escapeForDoubleQuote(staticRight)
+			} else if g.isBooleanExpr(e.Right) {
 				rInner = fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(rightStr))
 			}
 			return fmt.Sprintf("\"%s%s\"", lInner, rInner), nil
@@ -7474,7 +7552,11 @@ func (g *Generator) genTemplateLiteral(e *ast.TemplateLit) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if g.isBooleanExpr(e.Exprs[i]) {
+			if staticValue, ok, err := g.staticStringFragment(e.Exprs[i]); err != nil {
+				return "", err
+			} else if ok {
+				out.WriteString(escapeForDoubleQuote(staticValue))
+			} else if g.isBooleanExpr(e.Exprs[i]) {
 				out.WriteString(fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)))
 			} else {
 				out.WriteString(strInner(val))
