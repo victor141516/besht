@@ -1756,7 +1756,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 }
 
 func (g *Generator) genIf(s *ast.IfStmt) error {
-	if value, ok := staticBoolValue(s.Condition); ok {
+	if value, ok := g.staticBooleanValue(s.Condition); ok {
 		if value {
 			for _, stmt := range s.Then.Statements {
 				if err := g.genStmt(stmt); err != nil {
@@ -4031,6 +4031,9 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 		}
 	case *ast.BinaryExpr:
+		if result, ok := g.staticComparisonResult(e); ok {
+			return result, true
+		}
 		left, leftOK := g.staticBooleanValue(e.Left)
 		right, rightOK := g.staticBooleanValue(e.Right)
 		if !leftOK || !rightOK {
@@ -4128,7 +4131,7 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		return formatStaticArithmeticNumber(value), nil
 	}
 
-	if result, ok := staticComparisonResult(e); ok {
+	if result, ok := g.staticComparisonResult(e); ok {
 		if result {
 			return "1", nil
 		}
@@ -7054,7 +7057,7 @@ func computedKeyValidation(varName string) string {
 }
 
 func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (string, error) {
-	if value, ok := staticBoolValue(e.Condition); ok {
+	if value, ok := g.staticBooleanValue(e.Condition); ok {
 		if value {
 			return g.genExprRHS(e.Then, targetType)
 		}
@@ -7074,35 +7077,6 @@ func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (str
 		return "", err
 	}
 	return fmt.Sprintf("$(if %s; then printf '%%s' %s; else printf '%%s' %s; fi)", cond, thenVal, elseVal), nil
-}
-
-func staticBoolValue(expr ast.Expression) (bool, bool) {
-	switch e := expr.(type) {
-	case *ast.BoolLit:
-		return e.Value, true
-	case *ast.AsExpr:
-		return staticBoolValue(e.Expr)
-	case *ast.UnaryExpr:
-		if e.Op == "!" {
-			value, ok := staticBoolValue(e.Expr)
-			if ok {
-				return !value, true
-			}
-		}
-	case *ast.BinaryExpr:
-		left, leftOK := staticBoolValue(e.Left)
-		right, rightOK := staticBoolValue(e.Right)
-		if !leftOK || !rightOK {
-			return false, false
-		}
-		switch e.Op {
-		case "&&":
-			return left && right, true
-		case "||":
-			return left || right, true
-		}
-	}
-	return false, false
 }
 
 func (g *Generator) genPropagateRHS(e *ast.PropagateExpr) (string, error) {
@@ -7127,7 +7101,7 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 			}
 			return truthyCondition(val), nil
 		}
-		if result, ok := staticComparisonResult(e); ok {
+		if result, ok := g.staticComparisonResult(e); ok {
 			if result {
 				return "true", nil
 			}
@@ -7425,6 +7399,24 @@ func staticComparisonResult(e *ast.BinaryExpr) (bool, bool) {
 	return false, false
 }
 
+func (g *Generator) staticComparisonResult(e *ast.BinaryExpr) (bool, bool) {
+	switch e.Op {
+	case "==", "===", "!=", "!==":
+		left, leftOK := g.staticScalarComparisonValue(e.Left)
+		right, rightOK := g.staticScalarComparisonValue(e.Right)
+		if !leftOK || !rightOK {
+			return false, false
+		}
+		equal := left == right
+		if e.Op == "!=" || e.Op == "!==" {
+			return !equal, true
+		}
+		return equal, true
+	default:
+		return staticComparisonResult(e)
+	}
+}
+
 func staticScalarComparisonValue(expr ast.Expression) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
@@ -7450,6 +7442,24 @@ func staticScalarComparisonValue(expr ast.Expression) (string, bool) {
 		return "", true
 	}
 	return "", false
+}
+
+func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bool) {
+	if value, ok := staticScalarComparisonValue(expr); ok {
+		return value, true
+	}
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticScalarComparisonValue(e.Expr)
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return "", false
+		}
+		value, ok := g.stringConstMap[g.resolveVarName(e.Name)]
+		return value, ok
+	default:
+		return "", false
+	}
 }
 
 func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) {

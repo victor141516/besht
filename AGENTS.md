@@ -291,7 +291,7 @@ Static boolean `console.log()` and `console.error()` arguments such as `Boolean(
 Variables bound to static string literals may fold `.length` to a numeric constant. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
 
 
-Static scalar equality comparisons and static numeric relational comparisons compile to constants. Dynamic equality must keep the `_bst_left`/`_bst_right` binding block because direct `[ $(fn) = value ]` breaks POSIX argument parsing for spaces and newlines.
+Static scalar equality comparisons, equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants. Dynamic equality must keep the `_bst_left`/`_bst_right` binding block because direct `[ $(fn) = value ]` breaks POSIX argument parsing for spaces and newlines.
 
 ### Variable Name Mangling
 

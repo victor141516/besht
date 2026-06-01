@@ -216,13 +216,13 @@ if (a > 0 || b > 0) {
 }
 
 func TestCodegen_IfStringEquality(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-let t: string = "world"
-if (s == t) {
-    $("echo", "same").run()
+	out := compile(t, `function compare(s: string, t: string) {
+    if (s == t) {
+        $("echo", "same").run()
+    }
 }`)
-	assertContains(t, out, `_bst_left="$s"`)
-	assertContains(t, out, `_bst_right="$t"`)
+	assertContains(t, out, `_bst_left="$_compare_s"`)
+	assertContains(t, out, `_bst_right="$_compare_t"`)
 	assertContains(t, out, `[ "$_bst_left" = "$_bst_right" ]`)
 }
 
@@ -249,19 +249,51 @@ if ("a" === "a") {
 	assertContains(t, out, `diff=1`)
 	assertContains(t, out, `less=1`)
 	assertContains(t, out, `atLeast=1`)
-	assertContains(t, out, `if true; then`)
+	assertContains(t, out, `echo same`)
+	assertNotContains(t, out, `if true; then`)
 	assertNotContains(t, out, `_bst_left='a'`)
 	assertNotContains(t, out, `awk -v _a=2 -v _b=3`)
 }
 
+func TestCodegen_StaticStringVariableComparisons(t *testing.T) {
+	out := compile(t, `let mode = "prod"
+let same = mode == "prod"
+let diff = mode !== "test"
+let msg = mode == "prod" ? "live" : "dev"
+if (mode == "prod") {
+    console.log(msg)
+}
+console.log(mode !== "test")`)
+	assertContains(t, out, `same=1`)
+	assertContains(t, out, `diff=1`)
+	assertContains(t, out, `msg='live'`)
+	assertContains(t, out, `printf '%s\n' "$msg"`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `_bst_left="$mode"`)
+	assertNotContains(t, out, `_bst_right='prod'`)
+	assertNotContains(t, out, `$(if { _bst_left`)
+}
+
 func TestCodegen_StaticComparisonsKeepDynamicFallback(t *testing.T) {
-	out := compile(t, `let a = "a"
-let same = a === "a"
-let n = 2
-let less = n < 3`)
-	assertContains(t, out, `_bst_left="$a"`)
+	out := compile(t, `function compare(a: string, n: number) {
+    let same = a === "a"
+    let less = n < 3
+}`)
+	assertContains(t, out, `_bst_left="$_compare_a"`)
 	assertContains(t, out, `_bst_right='a'`)
-	assertContains(t, out, `awk -v _a=$n -v _b=3`)
+	assertContains(t, out, `awk -v _a=$_compare_n -v _b=3`)
+}
+
+func TestCodegen_StaticStringComparisonsFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let mode = "prod"
+while (true) {
+    mode = "dev"
+    break
+}
+let same = mode == "prod"`)
+	assertContains(t, out, `_bst_left="$mode"`)
+	assertContains(t, out, `_bst_right='prod'`)
+	assertNotContains(t, out, `same=1`)
 }
 
 func TestCodegen_WhileLoop(t *testing.T) {
@@ -1900,7 +1932,8 @@ if (greeting.includes(needle)) console.log("yes")`)
 	assertContains(t, out, `first=2`)
 	assertContains(t, out, `last=3`)
 	assertContains(t, out, `printf '%s\n' true`)
-	assertContains(t, out, `if true; then`)
+	assertContains(t, out, `printf '%s\n' 'yes'`)
+	assertNotContains(t, out, `if true; then`)
 	assertNotContains(t, out, `_bst_includes`)
 	assertNotContains(t, out, `_bst_starts_with`)
 	assertNotContains(t, out, `_bst_ends_with`)
