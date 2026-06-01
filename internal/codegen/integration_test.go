@@ -2612,6 +2612,20 @@ for (key of Object.keys(user)) {
 	}
 }
 
+func TestIntegration_StaticNamedObjectEntriesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { id: 1, name: "Ada", active: true }
+let entries = Object.entries(user)
+console.log(Object.entries(user).length)
+console.log(entries[1][0] + "=" + entries[1][1])
+for (entry of Object.entries(user)) {
+    console.log(entry[0] + "=" + entry[1])
+}`)
+	want := "3\nname=Ada\nid=1\nname=Ada\nactive=true\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_FunctionReadsTopLevelObjectProperties(t *testing.T) {
 	out := runCompiledShell(t, `let student = {
     name: "Laura",
