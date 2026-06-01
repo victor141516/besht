@@ -88,6 +88,7 @@ Files use the `.bsh` extension.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
+- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; dynamic booleans keep the general formatting path.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static boolean `if` conditions and ternary expressions fold to the selected branch or value; dynamic conditions keep normal shell tests.
