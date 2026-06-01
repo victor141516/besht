@@ -2140,6 +2140,36 @@ let hasActive = Object.hasOwn(user, "active")`)
 	assertNotContains(t, out, `hasActive=1`)
 }
 
+func TestCodegen_StaticNamedObjectValues(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
+let values = Object.values(user)
+let count = Object.values(user).length
+let joined = Object.values(user).join(",")
+for (value of Object.values(user)) {
+    console.log(value)
+}`)
+	assertContains(t, out, "values='1\nAda\ntrue'")
+	assertContains(t, out, `count=3`)
+	assertContains(t, out, `joined='1,Ada,true'`)
+	assertContains(t, out, `for value in '1' 'Ada' 'true'; do`)
+	assertNotContains(t, out, `eval "_bst_obj_value=`)
+	assertNotContains(t, out, `grep -q '[^A-Za-z0-9_]'`)
+	assertNotContains(t, out, `wc -l`)
+	assertNotContains(t, out, `while IFS= read -r value`)
+}
+
+func TestCodegen_StaticNamedObjectValuesFallbackAfterMutation(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada" }
+user.active = true
+let joined = Object.values(user).join(",")`)
+	assertContains(t, out, `case " $_objkeys_user " in *" active "*)`)
+	assertContains(t, out, `joined=$(printf '%s`)
+	assertContains(t, out, `for _bst_obj_key in $_objkeys_user`)
+	assertContains(t, out, `eval "_bst_obj_value=`)
+	assertContains(t, out, `if [ "$_bst_obj_key" = 'active' ]`)
+	assertNotContains(t, out, `joined='1,Ada,true'`)
+}
+
 func TestCodegen_BooleanPropertyCondition(t *testing.T) {
 	out := compile(t, `let user = { name: "Ada", active: true }
 if (user.active) {
