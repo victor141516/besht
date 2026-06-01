@@ -249,7 +249,8 @@ if ("a" === "a") {
 	assertContains(t, out, `diff=1`)
 	assertContains(t, out, `less=1`)
 	assertContains(t, out, `atLeast=1`)
-	assertContains(t, out, `if true; then`)
+	assertContains(t, out, `echo same`)
+	assertNotContains(t, out, `if true; then`)
 	assertNotContains(t, out, `_bst_left='a'`)
 	assertNotContains(t, out, `awk -v _a=2 -v _b=3`)
 }
@@ -930,6 +931,68 @@ console.error(true && false)`)
 	assertContains(t, out, `printf '%s\n' false >&2`)
 	assertNotContains(t, out, `$(if [ 0 = 1 ]; then printf true; else printf false; fi)`)
 	assertNotContains(t, out, `$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+}
+
+func TestCodegen_StaticBooleanBranchesAndTernaries(t *testing.T) {
+	out := compile(t, `if (Boolean("")) {
+    console.log("bad")
+} else {
+    console.log("fallback")
+}
+if ("hello".startsWith("he")) console.log("starts")
+if (1 + 1 == 2) console.log("math")
+if (Array.isArray(["x"])) console.log("list")
+let user = { name: "Ada" }
+if (Object.hasOwn(user, "name")) console.log("has")
+if (false) console.log("first")
+else if (Boolean("x")) console.log("elseif")
+else console.log("else")
+let label = Boolean("x") ? "yes" : "no"
+let found = "hello".includes("ell") ? "yes" : "no"
+let math = 1 + 1 == 2 ? "ok" : "bad"`)
+	assertContains(t, out, `printf '%s\n' 'fallback'`)
+	assertContains(t, out, `printf '%s\n' 'starts'`)
+	assertContains(t, out, `printf '%s\n' 'math'`)
+	assertContains(t, out, `printf '%s\n' 'list'`)
+	assertContains(t, out, `printf '%s\n' 'has'`)
+	assertContains(t, out, `printf '%s\n' 'elseif'`)
+	assertContains(t, out, `label='yes'`)
+	assertContains(t, out, `found='yes'`)
+	assertContains(t, out, `math='ok'`)
+	assertNotContains(t, out, `printf '%s\n' 'bad'`)
+	assertNotContains(t, out, `printf '%s\n' 'first'`)
+	assertNotContains(t, out, `printf '%s\n' 'else'`)
+	assertNotContains(t, out, `if [ 0 = 1 ]; then`)
+	assertNotContains(t, out, `if true; then`)
+	assertNotContains(t, out, `_bst_left=2`)
+	assertNotContains(t, out, `label=$(if`)
+	assertNotContains(t, out, `found=$(if`)
+}
+
+func TestCodegen_StaticBooleanBranchKeepsDynamicFallback(t *testing.T) {
+	out := compile(t, `let flag = process.env.FLAG
+if (Boolean(flag)) {
+    console.log("set")
+} else {
+    console.log("unset")
+}`)
+	assertContains(t, out, `if [ $(_bst_bool="$flag"`)
+	assertContains(t, out, `printf '%s\n' 'set'`)
+	assertContains(t, out, `printf '%s\n' 'unset'`)
+}
+
+func TestCodegen_StaticFalseElseIfStartsAtDynamicBranch(t *testing.T) {
+	out := compile(t, `let flag = process.env.FLAG
+if (false) console.log("dead")
+else if (Boolean(flag)) console.log("set")
+else if (true) console.log("fallback")
+else console.log("never")`)
+	assertContains(t, out, `if [ $(_bst_bool="$flag"`)
+	assertContains(t, out, `printf '%s\n' 'set'`)
+	assertContains(t, out, `printf '%s\n' 'fallback'`)
+	assertNotContains(t, out, `if false; then`)
+	assertNotContains(t, out, `printf '%s\n' 'dead'`)
+	assertNotContains(t, out, `printf '%s\n' 'never'`)
 }
 
 func TestCodegen_IndexExpr(t *testing.T) {
@@ -2004,7 +2067,8 @@ if (greeting.includes(needle)) console.log("yes")`)
 	assertContains(t, out, `first=2`)
 	assertContains(t, out, `last=3`)
 	assertContains(t, out, `printf '%s\n' true`)
-	assertContains(t, out, `if true; then`)
+	assertContains(t, out, `printf '%s\n' 'yes'`)
+	assertNotContains(t, out, `if true; then`)
 	assertNotContains(t, out, `_bst_includes`)
 	assertNotContains(t, out, `_bst_starts_with`)
 	assertNotContains(t, out, `_bst_ends_with`)

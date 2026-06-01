@@ -503,7 +503,7 @@ if (count < 0) return "negative"
 else console.log("non-negative")
 ```
 
-Static boolean conditions such as `if (true)` and `true ? a : b` compile to only the selected branch or value. Dynamic conditions keep normal POSIX shell tests.
+Static boolean conditions such as `if (Boolean("x"))`, `Array.isArray(value) ? a : b`, static string/list searches, static `Object.hasOwn()`, and static comparisons compile to only the selected branch or value. Dynamic conditions keep normal POSIX shell tests.
 
 **While:**
 
@@ -751,7 +751,7 @@ Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known lists
 ```
 
-Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`.
+Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`; static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
 
 ## Operators
 

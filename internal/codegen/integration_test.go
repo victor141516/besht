@@ -2603,6 +2603,24 @@ console.error(true && false)
 	}
 }
 
+func TestIntegration_StaticBooleanBranchesAndTernariesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `if (Boolean("")) {
+    console.log("bad")
+} else {
+    console.log("fallback")
+}
+if ("hello".startsWith("he")) console.log("starts")
+if (1 + 1 == 2) console.log("math")
+let label = Boolean("x") ? "yes" : "no"
+console.log(label)
+let found = "hello".includes("ell") ? "yes" : "no"
+console.log(found)`)
+	want := "fallback\nstarts\nmath\nyes\nyes\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticObjectLiteralAPIsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(Object.keys({ name: "Ada", active: true }).join(","))
 console.log(Object.values({ name: "Ada", active: true }).join(","))

@@ -1788,25 +1788,8 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 }
 
 func (g *Generator) genIf(s *ast.IfStmt) error {
-	if value, ok := staticBoolValue(s.Condition); ok {
-		if value {
-			for _, stmt := range s.Then.Statements {
-				if err := g.genStmt(stmt); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		if len(s.ElseIfs) == 0 {
-			if s.Else != nil {
-				for _, stmt := range s.Else.Statements {
-					if err := g.genStmt(stmt); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}
+	if handled, err := g.genStaticIf(s); handled || err != nil {
+		return err
 	}
 
 	cond, err := g.genCondition(s.Condition)
@@ -1848,6 +1831,89 @@ func (g *Generator) genIf(s *ast.IfStmt) error {
 		g.pop()
 	}
 	g.line("fi")
+	return nil
+}
+
+func (g *Generator) genStaticIf(s *ast.IfStmt) (bool, error) {
+	if value, ok := g.staticBooleanValue(s.Condition); ok {
+		if value {
+			return true, g.genBlockStatements(s.Then)
+		}
+		return true, g.genStaticElseTail(s.ElseIfs, s.Else)
+	}
+	return false, nil
+}
+
+func (g *Generator) genStaticElseTail(elseIfs []*ast.ElseIf, elseBlock *ast.Block) error {
+	for i, ei := range elseIfs {
+		eiValue, eiOK := g.staticBooleanValue(ei.Condition)
+		if !eiOK {
+			return g.genDynamicElseTail(ei, elseIfs[i+1:], elseBlock)
+		}
+		if eiValue {
+			return g.genBlockStatements(ei.Body)
+		}
+	}
+	if elseBlock != nil {
+		return g.genBlockStatements(elseBlock)
+	}
+	return nil
+}
+
+func (g *Generator) genDynamicElseTail(first *ast.ElseIf, rest []*ast.ElseIf, elseBlock *ast.Block) error {
+	cond, err := g.genCondition(first.Condition)
+	if err != nil {
+		return err
+	}
+	g.line(fmt.Sprintf("if %s; then", cond))
+	g.push()
+	if err := g.genBlockStatements(first.Body); err != nil {
+		return err
+	}
+	g.pop()
+	for _, ei := range rest {
+		if value, ok := g.staticBooleanValue(ei.Condition); ok {
+			if !value {
+				continue
+			}
+			g.line("else")
+			g.push()
+			if err := g.genBlockStatements(ei.Body); err != nil {
+				return err
+			}
+			g.pop()
+			g.line("fi")
+			return nil
+		}
+		eiCond, err := g.genCondition(ei.Condition)
+		if err != nil {
+			return err
+		}
+		g.line(fmt.Sprintf("elif %s; then", eiCond))
+		g.push()
+		if err := g.genBlockStatements(ei.Body); err != nil {
+			return err
+		}
+		g.pop()
+	}
+	if elseBlock != nil {
+		g.line("else")
+		g.push()
+		if err := g.genBlockStatements(elseBlock); err != nil {
+			return err
+		}
+		g.pop()
+	}
+	g.line("fi")
+	return nil
+}
+
+func (g *Generator) genBlockStatements(block *ast.Block) error {
+	for _, stmt := range block.Statements {
+		if err := g.genStmt(stmt); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -4052,7 +4118,7 @@ func (g *Generator) staticNullishState(expr ast.Expression) staticNullishState {
 			return staticNonNullishValue
 		}
 	case *ast.TernaryExpr:
-		if value, ok := staticBoolValue(e.Condition); ok {
+		if value, ok := g.staticBooleanValue(e.Condition); ok {
 			if value {
 				return g.staticNullishState(e.Then)
 			}
@@ -4387,6 +4453,9 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 		}
 	case *ast.BinaryExpr:
+		if result, ok := staticComparisonResult(e); ok {
+			return result, true
+		}
 		if e.Op == "??" {
 			switch g.staticNullishState(e.Left) {
 			case staticNullishValue:
@@ -7469,7 +7538,7 @@ func computedKeyValidation(varName string) string {
 }
 
 func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (string, error) {
-	if value, ok := staticBoolValue(e.Condition); ok {
+	if value, ok := g.staticBooleanValue(e.Condition); ok {
 		if value {
 			return g.genExprRHS(e.Then, targetType)
 		}
@@ -7491,35 +7560,6 @@ func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (str
 	return fmt.Sprintf("$(if %s; then printf '%%s' %s; else printf '%%s' %s; fi)", cond, thenVal, elseVal), nil
 }
 
-func staticBoolValue(expr ast.Expression) (bool, bool) {
-	switch e := expr.(type) {
-	case *ast.BoolLit:
-		return e.Value, true
-	case *ast.AsExpr:
-		return staticBoolValue(e.Expr)
-	case *ast.UnaryExpr:
-		if e.Op == "!" {
-			value, ok := staticBoolValue(e.Expr)
-			if ok {
-				return !value, true
-			}
-		}
-	case *ast.BinaryExpr:
-		left, leftOK := staticBoolValue(e.Left)
-		right, rightOK := staticBoolValue(e.Right)
-		if !leftOK || !rightOK {
-			return false, false
-		}
-		switch e.Op {
-		case "&&":
-			return left && right, true
-		case "||":
-			return left || right, true
-		}
-	}
-	return false, false
-}
-
 func (g *Generator) genPropagateRHS(e *ast.PropagateExpr) (string, error) {
 	inner, err := g.genExprValue(e.Expr)
 	if err != nil {
@@ -7533,6 +7573,12 @@ func (g *Generator) genPropagateRHS(e *ast.PropagateExpr) (string, error) {
 }
 
 func (g *Generator) genCondition(expr ast.Expression) (string, error) {
+	if value, ok := g.staticBooleanValue(expr); ok {
+		if value {
+			return "true", nil
+		}
+		return "false", nil
+	}
 	switch e := expr.(type) {
 	case *ast.BinaryExpr:
 		if e.Op == "??" {
@@ -7821,8 +7867,8 @@ func staticComparisonResult(e *ast.BinaryExpr) (bool, bool) {
 		}
 		return equal, true
 	case ">", "<", ">=", "<=":
-		left, leftOK := staticNumberValue(e.Left)
-		right, rightOK := staticNumberValue(e.Right)
+		left, leftOK := staticArithmeticNumberValue(e.Left)
+		right, rightOK := staticArithmeticNumberValue(e.Right)
 		if !leftOK || !rightOK {
 			return false, false
 		}
@@ -7844,6 +7890,10 @@ func staticScalarComparisonValue(expr ast.Expression) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
 		return staticScalarComparisonValue(e.Expr)
+	case *ast.BinaryExpr:
+		if value, ok := staticArithmeticNumberValue(e); ok {
+			return formatStaticNumber(value), true
+		}
 	case *ast.StringLit:
 		return e.Value, true
 	case *ast.RawStringLit:
