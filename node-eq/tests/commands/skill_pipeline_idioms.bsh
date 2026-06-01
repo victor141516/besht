@@ -1,0 +1,53 @@
+let root: string = Besht.args.positional(1) ?? "."
+if (Besht.strings.isEmpty(root)) {
+  root = "."
+}
+
+console.log("--- top go files ---")
+let goFiles: string = $("find", root, "-maxdepth", "2", "-type", "f", "-name", r"*.go")
+  .stderr("null")
+  .pipe($("sed", r"s#^\./##"))
+  .pipe($("grep", "-v", r"/vendor/"))
+  .pipe($("sort"))
+  .pipe($("head", "-n", "5"))
+  .run()
+  .readStdout()
+if (Besht.strings.isNonEmpty(goFiles)) {
+  console.log(goFiles)
+}
+
+console.log("--- markdown mentions ---")
+let markdownMentions: string = $("grep", "-RIn", "Besht", root, r"--include=*.md")
+  .stderr("null")
+  .pipe($("cut", "-d:", "-f1"))
+  .pipe($("sed", r"s#^\./##"))
+  .pipe($("sort", "-u"))
+  .pipe($("head", "-n", "4"))
+  .run()
+  .readStdout()
+if (Besht.strings.isNonEmpty(markdownMentions)) {
+  console.log(markdownMentions)
+}
+
+console.log("--- workdir root ---")
+console.log($("pwd").workdir(root).run().readStdout())
+
+console.log("--- env value ---")
+console.log($("printenv", "BESHT_SKILL_MODE").env("BESHT_SKILL_MODE", "scan").run().readStdout())
+
+console.log("--- silent probe ---")
+let probe = $("find", root, "-maxdepth", "1", "-type", "f").stdout("null").stderr("null")
+probe.run()
+if (probe.exitCode() == 0) {
+  console.log("ok")
+}
+
+console.log("--- silent count ---")
+console.log(
+  $("find", root, "-type", "f", "-name", r"*.bsh")
+    .stderr("null")
+    .pipe($("wc", "-l"))
+    .pipe($("tr", "-d", " "))
+    .run()
+    .readStdout()
+)

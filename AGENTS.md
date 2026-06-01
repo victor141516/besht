@@ -925,6 +925,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Never emit `local` in generated shell output.** Not POSIX. Use `_fn_varname` mangling instead.
 
+**Skill validation prompts must not leak Besht-specific answers.** When using subagents to evaluate `skills/besht-scripting/SKILL.md`, ask them only to read the skill and translate or write the requested `.bsh` artifact. Do not mention expected APIs such as `$()`, `.pipe()`, `.workdir()`, `.env()`, or `.exitCode()` in the prompt; those cues must come from the skill itself so the validation measures the skill rather than the evaluator.
+
 **`rewriteFnCalls()` runs before codegen.** When adding new expression types that contain function calls, add a case to `rewriteStmt()`/`rewriteExpr()` in `modules.go` so the pass descends into them.
 
 **`rewriteVarRefs()` must be called on `TemplateLit` values only.** Only template literals (`` `...${var}...` ``) contain `${...}` references that need var-name rewriting. Plain `StringLit` and `RawStringLit` are emitted as single-quoted sh and contain no shell expansions. Do NOT call `rewriteVarRefs()` on plain string values.
@@ -960,6 +962,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 **Command `.env(name, value)` prefixes one command invocation only.** It emits `NAME=value command ...` inside the generated pipeline and does not mutate the parent shell environment.
 
 **Command `.workdir(path)` changes cwd for one command or pipeline only.** It wraps the generated command in a subshell-style `cd path && ...` expression so subsequent statements keep the parent shell cwd. Keep redirects inside the workdir wrapper when generating command text.
+
+**node-eq command parity should cover idiomatic command APIs.** `node-eq/runtime.ts` mirrors command `.env()` and `.workdir()` and `node-eq/run-bsh` materializes Besht raw strings (`r"..."`) into JavaScript strings, so compare fixtures can exercise shell-to-Besht translations without avoiding supported language features. `node-eq/tests/commands/skill_pipeline_idioms.bsh` is paired with a source shell script to keep future skill iterations focused on pipes, redirects, workdir, env, raw patterns, and exit-code gating.
 
 **`command` objects do not auto-coerce.** Unlike the old model, `command` no longer coerces to `string` on assignment. You must explicitly call `.run()` then `.readStdout()` to get a string. The Command Analysis pass enforces this.
 

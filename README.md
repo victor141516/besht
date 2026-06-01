@@ -767,6 +767,23 @@ let user: string = $("whoami").pipe($("tr", "[:lower:]", "[:upper:]")).run().rea
 console.log($("pwd").run().readStdout()) // inline reads can compile directly to "$(pwd)"
 ```
 
+When translating shell scripts, keep shell structure in Besht's command model instead of embedding shell fragments in strings:
+
+| Shell idiom | Besht pattern |
+| ----------- | ------------- |
+| `cmd arg "$value"` | `$("cmd", "arg", value).run()` |
+| `cmd1 \| cmd2` | `$("cmd1").pipe($("cmd2")).run()` |
+| `out=$(cmd)` | `let out = $("cmd").run().readStdout()` |
+| `cmd > file`, `cmd >> file` | `.stdout(file)`, `.stdout(file, "append")` |
+| `cmd >/dev/null`, `cmd 2>/dev/null`, `cmd 2>&1` | `.stdout("null")`, `.stderr("null")`, `.stderr("&1")` |
+| `(cd dir && cmd)` | `$("cmd").workdir(dir).run()` |
+| `VAR=value cmd` | `$("cmd").env("VAR", value).run()` |
+| `cmd && next` | run a named command, check `.exitCode()`, then use `if` |
+| `${1-default}` | `Besht.args.positional(1) ?? "default"` |
+| `${1:-default}` | read the positional arg, then use `Besht.strings.isEmpty()` to apply the empty-string default |
+
+Avoid `$("sh", "-c", "...")` or inline strings containing `cd`, pipes, redirects, or `VAR=value cmd` unless the script intentionally invokes a shell interpreter. Pass arguments as separate values and use raw strings (`r"..."`) for grep/sed/awk patterns that must stay literal.
+
 Use `.env(name, value)` to prefix one command invocation with an environment variable. The name must be a string literal POSIX shell identifier.
 
 ```ts
@@ -778,6 +795,25 @@ Use `.workdir(path)` to run a command or pipeline from a specific directory with
 ```ts
 let root: string = $("pwd").workdir("/").run().readStdout() // /
 $("make", "test").workdir("/repo/app").run()
+```
+
+Use `.exitCode()` for explicit success-gated command chains:
+
+```ts
+let probe = $("find", ".", "-maxdepth", "1", "-type", "f").stdout("null").stderr("null")
+probe.run()
+if (probe.exitCode() == 0) {
+  console.log("ok")
+}
+```
+
+For shell defaults like `${1:-.}`, remember that the `:-` form treats both missing and empty arguments as absent:
+
+```ts
+let root = Besht.args.positional(1) ?? "."
+if (Besht.strings.isEmpty(root)) {
+  root = "."
+}
 ```
 
 ### Besht helpers

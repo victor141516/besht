@@ -12,6 +12,8 @@ interface PipelineStage {
 
 class Command {
   private stages: PipelineStage[]
+  private workdirPath: string | null = null
+  private envVars: Record<string, string> = {}
   private stdoutTarget: string | null = null
   private stdoutAppend: boolean = false
   private stderrTarget: StderrTarget | null = null
@@ -26,10 +28,8 @@ class Command {
   }
 
   pipe(cmd: Command): Command {
-    const next = new Command([...this.stages, ...cmd.stages])
-    next.stdoutTarget = this.stdoutTarget
-    next.stdoutAppend = this.stdoutAppend
-    next.stderrTarget = this.stderrTarget
+    const next = this.clone()
+    next.stages = [...this.stages, ...cmd.stages]
     return next
   }
 
@@ -43,6 +43,21 @@ class Command {
   stderr(target: StderrTarget): Command {
     const next = this.clone()
     next.stderrTarget = target
+    return next
+  }
+
+  env(name: string, value: string): Command {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      throw new Error(`Invalid command env name: ${name}`)
+    }
+    const next = this.clone()
+    next.envVars = { ...next.envVars, [name]: value }
+    return next
+  }
+
+  workdir(path: string): Command {
+    const next = this.clone()
+    next.workdirPath = path
     return next
   }
 
@@ -62,6 +77,10 @@ class Command {
         input,
         encoding: "buffer",
         maxBuffer: 100 * 1024 * 1024,
+      }
+      if (this.workdirPath) opts.cwd = this.workdirPath
+      if (i === 0 && Object.keys(this.envVars).length > 0) {
+        opts.env = { ...process.env, ...this.envVars }
       }
 
       const result = spawnSync(stage.argv[0], stage.argv.slice(1), opts)
@@ -130,6 +149,8 @@ class Command {
 
   clone(): Command {
     const next = new Command([...this.stages])
+    next.workdirPath = this.workdirPath
+    next.envVars = { ...this.envVars }
     next.stdoutTarget = this.stdoutTarget
     next.stdoutAppend = this.stdoutAppend
     next.stderrTarget = this.stderrTarget

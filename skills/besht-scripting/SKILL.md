@@ -427,6 +427,24 @@ Static string literal `Number.parseInt()` calls with parseable prefixes and stat
 
 All external commands use `$()` expressions. Arguments are separate strings. The compiler emits conservative shell-safe literal command words bare when possible and quotes anything that needs protection.
 
+When translating shell-style scripts, translate structure into command methods instead of embedding shell syntax in strings:
+
+| Shell idiom | Besht pattern |
+| ----------- | ------------- |
+| `cmd arg "$value"` | `$("cmd", "arg", value).run()` |
+| `cmd1 \| cmd2 \| cmd3` | `$("cmd1").pipe($("cmd2")).pipe($("cmd3")).run()` |
+| `out=$(cmd)` | `let out = $("cmd").run().readStdout()` |
+| `cmd \| while read ...` for line output | `for (line in $("cmd").run().readStdoutLines()) { ... }` |
+| `cmd > file`, `cmd >> file` | `$("cmd").stdout(file).run()`, `$("cmd").stdout(file, "append").run()` |
+| `cmd >/dev/null`, `cmd 2>/dev/null`, `cmd 2>&1` | `.stdout("null")`, `.stderr("null")`, `.stderr("&1")` |
+| `(cd dir && cmd)` | `$("cmd").workdir(dir).run()` |
+| `VAR=value cmd` | `$("cmd").env("VAR", value).run()` |
+| `cmd && next` | run a named command, inspect `.exitCode()`, then use `if` |
+| `${1-default}` | `Besht.args.positional(1) ?? "default"` |
+| `${1:-default}` | read the positional arg, then use `Besht.strings.isEmpty()` to apply the empty-string default |
+
+Avoid `$("sh", "-c", "...")`, `$("bash", "-c", "...")`, embedded `cd`, `VAR=value cmd`, `cmd1 | cmd2`, or redirect text inside command strings unless the script's real purpose is to invoke a shell interpreter. Besht should own quoting, argument boundaries, pipes, redirects, per-command environment, and per-command working directory. Use raw strings (`r"..."`) for grep/sed/awk patterns and globs that must stay literal.
+
 ```ts
 // Capture stdout explicitly
 let user: string = $("whoami").run().readStdout()
@@ -469,6 +487,19 @@ $("make", "build").env("CI", "1").run()     // CI=1 make build
 // Per-command working directory; parent script cwd is unchanged
 let root: string = $("pwd").workdir("/").run().readStdout()
 $("make", "test").workdir("/repo/app").run()
+
+// Shell-style cmd && next, expressed through exit code inspection
+let probe = $("find", ".", "-maxdepth", "1", "-type", "f").stdout("null").stderr("null")
+probe.run()
+if (probe.exitCode() == 0) {
+  console.log("ok")
+}
+
+// Shell ${1:-.}: default on missing OR empty positional arg
+let root = Besht.args.positional(1) ?? "."
+if (Besht.strings.isEmpty(root)) {
+  root = "."
+}
 
 // Use raw strings for patterns containing special characters
 $("grep", "-v", r"^sha256").run()
@@ -842,7 +873,7 @@ try {
 ```ts
 let n: number = 42;
 let s: string = n.toString(); // number -> string
-let raw: string = $("wc", "-l", "file.txt");
+let raw: string = $("wc", "-l", "file.txt").run().readStdout();
 let lines: number = Number.parseInt(raw); // string -> number
 
 // Older helpers remain supported for now:
