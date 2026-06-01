@@ -1676,6 +1676,25 @@ let n: number = l.length`)
 	assertNotContains(t, out, `wc -l`)
 }
 
+func TestCodegen_ListLengthFallsBackAfterControlFlowAssignment(t *testing.T) {
+	out := compile(t, `let l: list<string> = ["a", "b"]
+while (true) {
+    l = ["a", "b", "c"]
+    break
+}
+let n: number = l.length`)
+	assertContains(t, out, `wc -l`)
+	assertNotContains(t, out, `n=2`)
+}
+
+func TestCodegen_ListLengthUpdatesAfterStaticMutation(t *testing.T) {
+	out := compile(t, `let l: list<string> = ["a", "b"]
+l.push("c")
+let n: number = l.length`)
+	assertContains(t, out, `n=3`)
+	assertNotContains(t, out, `wc -l`)
+}
+
 func TestCodegen_StaticListLiteralLength(t *testing.T) {
 	out := compile(t, `let n: number = ["a", "b", "c"].length`)
 	assertContains(t, out, `n=3`)
@@ -1737,6 +1756,7 @@ let appended: list<string> = files.push("x")
 if (files.includes("x")) { $("echo", "found").run() }
 let combined: list<string> = files.concat(other)`)
 	assertContains(t, out, `count=3`)
+	assertNotContains(t, out, `wc -l`)
 	assertContains(t, out, `first='a'`)
 	assertContains(t, out, "rest='b\nc'")
 	assertContains(t, out, "appended='a\nb\nc\nx'")

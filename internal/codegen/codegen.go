@@ -1448,15 +1448,9 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
-	if emptyArrayOf(s.Value) {
-		g.listLenMap[varName] = "0"
-	} else if isArgsArgvCall(s.Value) {
+	if isArgsArgvCall(s.Value) {
 		g.listLenMap[varName] = g.argsArgcExpr()
-	} else if values, ok := g.staticObjectKeysBuiltinValues(s.Value); ok {
-		g.listLenMap[varName] = strconv.Itoa(len(values))
-	} else if values, ok := staticStringSplitValues(s.Value); ok {
-		g.listLenMap[varName] = strconv.Itoa(len(values))
-	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
+	} else if n, ok := staticListBindingLength(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
 	} else {
 		delete(g.listLenMap, varName)
@@ -1477,6 +1471,20 @@ func staticArrayFactoryLengthExpr(expr ast.Expression) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func staticListBindingLength(expr ast.Expression) (int, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return staticListBindingLength(e.Expr)
+	}
+	if values, ok := staticStringSplitValues(expr); ok {
+		return len(values), true
+	}
+	if values, ok := staticScalarListValuesWithoutNewlines(expr); ok {
+		return len(values), true
+	}
+	return staticArrayFactoryLengthExpr(expr)
 }
 
 func (g *Generator) objectRefForBinding(varName string, expr ast.Expression) (objectRef, bool) {
@@ -1927,13 +1935,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
-	if emptyArrayOf(s.Value) {
-		g.listLenMap[varName] = "0"
-	} else if values, ok := g.staticObjectKeysBuiltinValues(s.Value); ok {
-		g.listLenMap[varName] = strconv.Itoa(len(values))
-	} else if values, ok := staticStringSplitValues(s.Value); ok {
-		g.listLenMap[varName] = strconv.Itoa(len(values))
-	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
+	if n, ok := staticListBindingLength(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
 	} else {
 		delete(g.listLenMap, varName)
@@ -3638,6 +3640,7 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 					if err != nil {
 						return err
 					}
+					delete(g.listLenMap, recvVar)
 					g.line(fmt.Sprintf("%s=%s", recvVar, val))
 					if g.listLenMap == nil {
 						g.listLenMap = make(map[string]string)
@@ -7131,6 +7134,9 @@ func (g *Generator) argsArgcExpr() string {
 
 func (g *Generator) listLengthExpr(expr ast.Expression) string {
 	if ident, ok := expr.(*ast.IdentExpr); ok {
+		if g.controlAssigned[ident.Name] {
+			return ""
+		}
 		if known, ok := g.listLenMap[g.resolveVarName(ident.Name)]; ok {
 			return known
 		}
