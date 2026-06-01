@@ -825,6 +825,40 @@ func TestCodegen_ProcessEnvWithDefault(t *testing.T) {
 	assertContains(t, out, `8080`)
 }
 
+func TestCodegen_StaticNullishCoalescing(t *testing.T) {
+	out := compile(t, `let name = "Ada"
+let missing = null
+let empty = ""
+let zero = 0
+let nope = false
+console.log(name ?? "fallback")
+console.log(missing ?? "fallback")
+console.log(undefined ?? "direct")
+console.log(empty ?? "fallback")
+console.log(zero ?? 99)
+console.log(nope ?? true)`)
+	assertContains(t, out, `printf '%s\n' "$name"`)
+	assertContains(t, out, `missing=__BESHT_NULLISH_$$`)
+	assertContains(t, out, `printf '%s\n' 'fallback'`)
+	assertContains(t, out, `printf '%s\n' 'direct'`)
+	assertContains(t, out, `printf '%s\n' "$empty"`)
+	assertContains(t, out, `printf '%s\n' "$zero"`)
+	assertContains(t, out, `if [ $nope = 1 ]`)
+	assertNotContains(t, out, `_BESHT_NULLISH_SENTINEL=`)
+	assertNotContains(t, out, `_bst_l=`)
+}
+
+func TestCodegen_StaticNullishCoalescingFallsBackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let value = "Ada"
+if (true) {
+    value = null
+}
+console.log(value ?? "fallback")`)
+	assertContains(t, out, `_BESHT_NULLISH_SENTINEL=`)
+	assertContains(t, out, `_bst_l="$value"`)
+	assertContains(t, out, `if [ "$_bst_l" = "$_BESHT_NULLISH_SENTINEL" ]`)
+}
+
 func TestCodegen_FetchDirectText(t *testing.T) {
 	out := compile(t, `let url: string = "file:///tmp/data.txt"
 let body: string = fetch(url).text()`)

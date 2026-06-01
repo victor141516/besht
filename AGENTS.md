@@ -285,6 +285,7 @@ The compiler assigns each `$()` call a unique identity during the semantic analy
 
 Static primitive `.toString()` fragments inside string concatenation and template interpolation compile to constants; dynamic receivers keep runtime formatting.
 
+Static `??` expressions compile to the selected side when the left operand is provably nullish or non-nullish. Preserve `""`, `0`, and `false` as non-nullish; control-flow assigned variables and optional/dynamic nullish sources must keep the sentinel path.
 
 Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static `!`/`&&`/`||` expressions render directly as `true`/`false`; dynamic boolean expressions keep the general formatting path.
 
@@ -981,7 +982,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`||` and `&&` in value position return actual values (JS semantics), not booleans.** `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. This is different from condition position (used in `if`/`while`) which returns 1/0. The implementation uses a subshell with `_l=temp` capture to test the left side, then returns the appropriate value.
 
-**`??` uses an internal nullish sentinel, not shell default expansion.** Do not lower it to `${var:-fallback}` because empty string, `0`, and `false` must be preserved. Only `null`, `undefined`, missing `args` values, missing `process.env.NAME` variables, and missing indexes in nullish-left position should trigger the fallback.
+**`??` uses an internal nullish sentinel, not shell default expansion.** Do not lower it to `${var:-fallback}` because empty string, `0`, and `false` must be preserved. Only `null`, `undefined`, missing `args` values, missing `process.env.NAME` variables, and missing indexes in nullish-left position should trigger the fallback. Static nullish coalescing may bypass the sentinel branch only when the left side is provably nullish or provably non-nullish; variables assigned in control flow and optional/dynamic nullish sources must keep the runtime sentinel comparison.
 
 **`process.env.NAME ?? fallback` must use unset-only detection.** Lower `process.env.NAME` with `${NAME+x}` and `_BESHT_NULLISH_SENTINEL`; never use `${NAME:-fallback}` for this API because an explicitly empty environment variable must be preserved.
 

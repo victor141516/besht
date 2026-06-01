@@ -116,7 +116,7 @@ Files use the `.bsh` extension.
 - TypeScript-only class modifiers such as `private`, `public`, `protected`, and `readonly` are accepted and ignored.
 - `Record<K, V>` annotations are accepted for object-map style code; they are annotations only and add no runtime type checks.
 - Tuple destructuring declarations such as `const [x, y] = pair` are supported for list/tuple values.
-- `null` and `undefined` are accepted for TypeScript-compatible syntax; `??` falls back only for nullish values and preserves `""`, `0`, and `false`. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains.
+- `null` and `undefined` are accepted for TypeScript-compatible syntax; `??` falls back only for nullish values and preserves `""`, `0`, and `false`. Static nullish coalescing folds to the known side when the left operand is provably nullish or non-nullish. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains.
 - `$()` calls support list spreading with `...args`; spreading an entire command vector must use sole-argument form `$(...cmd)`.
 - Literal `$()` command words are emitted bare when they are conservative shell-safe words, and quoted when they need protection.
 - Single-command stdout/stderr redirects compile directly as `cmd > file`; pipeline redirects keep grouping braces so the redirect applies to the whole pipeline.
@@ -234,7 +234,7 @@ This slice deliberately rejects or defers `await`, `fetch(url, options)`, POST/m
 
 ### Nullish coalescing
 
-`a ?? b` returns `a` unless it is `null` or `undefined`. Unlike shell `${VAR:-default}`, it preserves valid falsey values.
+`a ?? b` returns `a` unless it is `null` or `undefined`. Unlike shell `${VAR:-default}`, it preserves valid falsey values. Static `??` expressions compile to the selected side when the left side is known.
 
 ```ts
 let missing = undefined

@@ -3324,3 +3324,18 @@ console.log(sentinelText ?? "fallback")`)
 		t.Fatalf("hostile nullish fallback created marker %s", marker)
 	}
 }
+
+func TestIntegration_StaticNullishCoalescingRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let name = "Ada"
+let missing = null
+console.log(name ?? "fallback")
+console.log(missing ?? "fallback")
+console.log(undefined ?? "direct")
+console.log("" ?? "fallback")
+console.log(0 ?? 99)
+console.log(false ?? true)`)
+	want := "Ada\nfallback\ndirect\n\n0\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}

@@ -15,41 +15,42 @@ import (
 const nullishSentinelVar = "_BESHT_NULLISH_SENTINEL"
 
 type Generator struct {
-	sb              strings.Builder
-	indent          int
-	currentFn       string
-	fnReturnMap     map[string]*ast.Type
-	varTypeMap      map[string]*ast.Type // codegen-level var → inferred type (list detection)
-	inFunction      bool
-	inLoop          bool
-	topLevel        bool
-	paramMap        map[string]string // besht param name → mangled shell var name
-	globalVarMap    map[string]string // top-level/imported besht name → shell var name
-	objAliasMap     map[string]objectRef
-	objFieldsMap    map[string][]string  // object var name → list of field names
-	objPropTypeMap  map[string]*ast.Type // "varName.propName" → property type
-	staticObjectMap map[string][]string
-	stringConstMap  map[string]string
-	staticListMap   map[string][]string
-	controlAssigned map[string]bool
-	fnParamTypes    map[string]*ast.Type // current fn param name → type annotation
-	fnParamNames    map[string][]string  // function name → param names (in order)
-	classMap        map[string]*ast.ClassDecl
-	varClassMap     map[string]string
-	currentClass    string
-	currentThisVar  string
-	floatVars       map[string]bool
-	listLenMap      map[string]string
-	runtimeHelpers  map[string]bool
-	argsOptions     map[string]bool
-	argsFlags       map[string]bool
-	NoCheck         bool
-	NoSourceMap     bool
-	cmdAnalysis     *CmdAnalysis
-	cmdScope        *cmdScope
-	cmdChains       map[string]ast.Expression
-	reduceReturns   []reduceReturnContext
-	mapReturns      []mapReturnContext
+	sb               strings.Builder
+	indent           int
+	currentFn        string
+	fnReturnMap      map[string]*ast.Type
+	varTypeMap       map[string]*ast.Type // codegen-level var → inferred type (list detection)
+	inFunction       bool
+	inLoop           bool
+	topLevel         bool
+	paramMap         map[string]string // besht param name → mangled shell var name
+	globalVarMap     map[string]string // top-level/imported besht name → shell var name
+	objAliasMap      map[string]objectRef
+	objFieldsMap     map[string][]string  // object var name → list of field names
+	objPropTypeMap   map[string]*ast.Type // "varName.propName" → property type
+	staticObjectMap  map[string][]string
+	staticNullishMap map[string]bool
+	stringConstMap   map[string]string
+	staticListMap    map[string][]string
+	controlAssigned  map[string]bool
+	fnParamTypes     map[string]*ast.Type // current fn param name → type annotation
+	fnParamNames     map[string][]string  // function name → param names (in order)
+	classMap         map[string]*ast.ClassDecl
+	varClassMap      map[string]string
+	currentClass     string
+	currentThisVar   string
+	floatVars        map[string]bool
+	listLenMap       map[string]string
+	runtimeHelpers   map[string]bool
+	argsOptions      map[string]bool
+	argsFlags        map[string]bool
+	NoCheck          bool
+	NoSourceMap      bool
+	cmdAnalysis      *CmdAnalysis
+	cmdScope         *cmdScope
+	cmdChains        map[string]ast.Expression
+	reduceReturns    []reduceReturnContext
+	mapReturns       []mapReturnContext
 }
 
 type reduceReturnContext struct {
@@ -123,29 +124,30 @@ type Options struct {
 
 func New() *Generator {
 	return &Generator{
-		fnReturnMap:     make(map[string]*ast.Type),
-		varTypeMap:      make(map[string]*ast.Type),
-		paramMap:        make(map[string]string),
-		globalVarMap:    make(map[string]string),
-		objAliasMap:     make(map[string]objectRef),
-		objFieldsMap:    make(map[string][]string),
-		objPropTypeMap:  make(map[string]*ast.Type),
-		staticObjectMap: make(map[string][]string),
-		stringConstMap:  make(map[string]string),
-		staticListMap:   make(map[string][]string),
-		controlAssigned: make(map[string]bool),
-		fnParamTypes:    make(map[string]*ast.Type),
-		fnParamNames:    make(map[string][]string),
-		classMap:        make(map[string]*ast.ClassDecl),
-		varClassMap:     make(map[string]string),
-		floatVars:       make(map[string]bool),
-		listLenMap:      make(map[string]string),
-		runtimeHelpers:  make(map[string]bool),
-		argsOptions:     make(map[string]bool),
-		argsFlags:       make(map[string]bool),
-		cmdScope:        newCmdScope(nil),
-		cmdChains:       make(map[string]ast.Expression),
-		topLevel:        true,
+		fnReturnMap:      make(map[string]*ast.Type),
+		varTypeMap:       make(map[string]*ast.Type),
+		paramMap:         make(map[string]string),
+		globalVarMap:     make(map[string]string),
+		objAliasMap:      make(map[string]objectRef),
+		objFieldsMap:     make(map[string][]string),
+		objPropTypeMap:   make(map[string]*ast.Type),
+		staticObjectMap:  make(map[string][]string),
+		staticNullishMap: make(map[string]bool),
+		stringConstMap:   make(map[string]string),
+		staticListMap:    make(map[string][]string),
+		controlAssigned:  make(map[string]bool),
+		fnParamTypes:     make(map[string]*ast.Type),
+		fnParamNames:     make(map[string][]string),
+		classMap:         make(map[string]*ast.ClassDecl),
+		varClassMap:      make(map[string]string),
+		floatVars:        make(map[string]bool),
+		listLenMap:       make(map[string]string),
+		runtimeHelpers:   make(map[string]bool),
+		argsOptions:      make(map[string]bool),
+		argsFlags:        make(map[string]bool),
+		cmdScope:         newCmdScope(nil),
+		cmdChains:        make(map[string]ast.Expression),
+		topLevel:         true,
 	}
 }
 
@@ -156,6 +158,10 @@ func Generate(prog *ast.Program) (string, error) {
 
 func nullishSentinelRef() string {
 	return "\"$" + nullishSentinelVar + "\""
+}
+
+func nullishSentinelLiteral() string {
+	return "__BESHT_NULLISH_$$"
 }
 
 func isProcessEnvObject(expr ast.Expression) bool {
@@ -935,6 +941,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		}
 		g.objFieldsMap[varName] = fields
 		g.staticObjectMap[varName] = uniqueStrings(fields)
+		g.staticNullishMap[varName] = false
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
 		delete(g.objAliasMap, s.Name)
 		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
@@ -949,6 +956,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	// Lazy command chain (no .run() inline): just register the identity, no code.
 	if g.isLazyCommandBinding(s.Value) && g.cmdAnalysis != nil {
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeCommand}
+		g.updateStaticNullishBinding(varName, s.Value)
 		if g.cmdChains == nil {
 			g.cmdChains = make(map[string]ast.Expression)
 		}
@@ -997,6 +1005,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 				if varName != valueVar {
 					g.line(fmt.Sprintf("%s=\"$%s\"", varName, valueVar))
 				}
+				delete(g.staticNullishMap, varName)
 				return nil
 			}
 		}
@@ -1051,6 +1060,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	} else {
 		delete(g.stringConstMap, varName)
 	}
+	g.updateStaticNullishBinding(varName, s.Value)
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
@@ -1464,6 +1474,7 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 func (g *Generator) genAssignment(s *ast.Assignment) error {
 	varName := g.resolveVarName(s.Name)
 	delete(g.staticObjectMap, varName)
+	delete(g.staticNullishMap, varName)
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
 		return err
 	}
@@ -1499,6 +1510,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	} else {
 		delete(g.stringConstMap, varName)
 	}
+	g.updateStaticNullishBinding(varName, s.Value)
 	g.updateStaticListBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
 	if ref, ok := g.objectRefForBinding(varName, s.Value); ok {
@@ -1567,6 +1579,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
+	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	g.currentFn = s.Name
 	g.inFunction = true
@@ -1576,6 +1589,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 
 	for i, param := range s.Params {
@@ -1607,6 +1621,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
+	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.pop()
 	g.line("}")
@@ -1709,6 +1724,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
+	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	prevClass := g.currentClass
 	prevThis := g.currentThisVar
@@ -1720,6 +1736,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.currentClass = c.Name
 	g.currentThisVar = ""
@@ -1760,6 +1777,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
+	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.currentClass = prevClass
 	g.currentThisVar = prevThis
@@ -3727,8 +3745,7 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 		}
 		return "0", nil
 	case *ast.UndefinedLit, *ast.NullLit:
-		g.requireRuntimeHelper("nullish")
-		return nullishSentinelRef(), nil
+		return nullishSentinelLiteral(), nil
 	case *ast.ListLit:
 		return g.genListLiteral(e)
 	case *ast.ObjectLit:
@@ -3819,6 +3836,87 @@ func isNullishLiteral(expr ast.Expression) bool {
 		return true
 	}
 	return false
+}
+
+type staticNullishState int
+
+const (
+	staticNullishUnknown staticNullishState = iota
+	staticNullishValue
+	staticNonNullishValue
+)
+
+func (g *Generator) updateStaticNullishBinding(varName string, expr ast.Expression) {
+	if g.staticNullishMap == nil {
+		g.staticNullishMap = make(map[string]bool)
+	}
+	switch g.staticNullishState(expr) {
+	case staticNullishValue:
+		g.staticNullishMap[varName] = true
+	case staticNonNullishValue:
+		g.staticNullishMap[varName] = false
+	default:
+		delete(g.staticNullishMap, varName)
+	}
+}
+
+func (g *Generator) staticNullishState(expr ast.Expression) staticNullishState {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticNullishState(e.Expr)
+	case *ast.UndefinedLit, *ast.NullLit:
+		return staticNullishValue
+	case *ast.StringLit, *ast.RawStringLit, *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.ListLit, *ast.ObjectLit, *ast.NewExpr:
+		return staticNonNullishValue
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return staticNonNullishValue
+		}
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return staticNullishUnknown
+		}
+		if state, ok := g.staticNullishMap[g.resolveVarName(e.Name)]; ok {
+			if state {
+				return staticNullishValue
+			}
+			return staticNonNullishValue
+		}
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case "??":
+			left := g.staticNullishState(e.Left)
+			switch left {
+			case staticNullishValue:
+				return g.staticNullishState(e.Right)
+			case staticNonNullishValue:
+				return staticNonNullishValue
+			}
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
+			if _, ok := g.staticBooleanValue(e); ok {
+				return staticNonNullishValue
+			}
+		}
+		if _, ok := staticArithmeticNumberValue(e); ok {
+			return staticNonNullishValue
+		}
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			return staticNonNullishValue
+		}
+	case *ast.TernaryExpr:
+		if value, ok := staticBoolValue(e.Condition); ok {
+			if value {
+				return g.staticNullishState(e.Then)
+			}
+			return g.staticNullishState(e.Else)
+		}
+	case *ast.BuiltinCallExpr:
+		if _, ok := g.staticBooleanValue(e); ok {
+			return staticNonNullishValue
+		}
+	}
+	return staticNullishUnknown
 }
 
 func nullishAwareTruthyCondition(val string) string {
@@ -4142,6 +4240,16 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 		}
 	case *ast.BinaryExpr:
+		if e.Op == "??" {
+			switch g.staticNullishState(e.Left) {
+			case staticNullishValue:
+				return g.staticBooleanValue(e.Right)
+			case staticNonNullishValue:
+				return g.staticBooleanValue(e.Left)
+			default:
+				return false, false
+			}
+		}
 		left, leftOK := g.staticBooleanValue(e.Left)
 		right, rightOK := g.staticBooleanValue(e.Right)
 		if !leftOK || !rightOK {
@@ -4253,6 +4361,12 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 			return "1", nil
 		}
 		return "0", nil
+	}
+
+	if e.Op == "??" {
+		if value, ok, err := g.genStaticNullishCoalesce(e, targetType); ok || err != nil {
+			return value, err
+		}
 	}
 
 	leftStr, err := g.genExprValue(e.Left)
@@ -4378,6 +4492,19 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		return fmt.Sprintf("$(( %s %s %s ))", lClean, e.Op, rClean), nil
 	}
 	return "", fmt.Errorf("binary op %q cannot appear on RHS directly; use in conditions", e.Op)
+}
+
+func (g *Generator) genStaticNullishCoalesce(e *ast.BinaryExpr, targetType *ast.Type) (string, bool, error) {
+	switch g.staticNullishState(e.Left) {
+	case staticNullishValue:
+		value, err := g.genExprRHS(e.Right, targetType)
+		return value, true, err
+	case staticNonNullishValue:
+		value, err := g.genExprRHS(e.Left, targetType)
+		return value, true, err
+	default:
+		return "", false, nil
+	}
 }
 
 func (g *Generator) genUpdateRHS(e *ast.UpdateExpr) string {
