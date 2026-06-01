@@ -2597,6 +2597,21 @@ for (key of Object.keys({ name: "Ada", active: true })) {
 	}
 }
 
+func TestIntegration_StaticNamedObjectKeysRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = { id: 1, name: "Ada", active: true }
+console.log(Object.keys(user).length)
+console.log(Object.keys(user).join(","))
+console.log(Object.hasOwn(user, "name"))
+console.log(Object.hasOwn(user, "missing"))
+for (key of Object.keys(user)) {
+    console.log(key)
+}`)
+	want := "3\nid,name,active\ntrue\nfalse\nid\nname\nactive\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_FunctionReadsTopLevelObjectProperties(t *testing.T) {
 	out := runCompiledShell(t, `let student = {
     name: "Laura",

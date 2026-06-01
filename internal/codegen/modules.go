@@ -1263,6 +1263,7 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.objAliasMap = make(map[string]objectRef)
 	g.objFieldsMap = make(map[string][]string)
 	g.objPropTypeMap = make(map[string]*ast.Type)
+	g.staticObjectMap = make(map[string][]string)
 	g.stringConstMap = make(map[string]string)
 	g.staticListMap = make(map[string][]string)
 	g.controlAssigned = make(map[string]bool)
