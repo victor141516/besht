@@ -122,7 +122,7 @@ console.log("Result: " + value);
 console.error("Something went wrong");
 console.log(["a", "b"]); // [ a, b ]
 
-// Objects are printed in multi-line format
+// Inline objects print in multi-line format with a direct printf
 console.log({ apple: 3, banana: 2 });
 // Output:
 // {

@@ -3165,6 +3165,9 @@ func (g *Generator) genConsoleList(expr ast.Expression, dest string) (string, er
 }
 
 func (g *Generator) genConsoleLogObject(expr ast.Expression) (string, error) {
+	if obj, ok := inlineObjectLiteral(expr); ok {
+		return g.genInlineObjectPrintCode(obj, "stdout")
+	}
 	varName := g.resolveObjectVarName(expr)
 	if varName == "" {
 		return "", fmt.Errorf("cannot log object: unable to resolve variable name")
@@ -3173,11 +3176,63 @@ func (g *Generator) genConsoleLogObject(expr ast.Expression) (string, error) {
 }
 
 func (g *Generator) genConsoleErrorObject(expr ast.Expression) (string, error) {
+	if obj, ok := inlineObjectLiteral(expr); ok {
+		return g.genInlineObjectPrintCode(obj, "stderr")
+	}
 	varName := g.resolveObjectVarName(expr)
 	if varName == "" {
 		return "", fmt.Errorf("cannot log object: unable to resolve variable name")
 	}
 	return g.genObjectPrintCode(varName, "stderr"), nil
+}
+
+func inlineObjectLiteral(expr ast.Expression) (*ast.ObjectLit, bool) {
+	switch e := expr.(type) {
+	case *ast.ObjectLit:
+		return e, true
+	case *ast.AsExpr:
+		return inlineObjectLiteral(e.Expr)
+	default:
+		return nil, false
+	}
+}
+
+func (g *Generator) genInlineObjectPrintCode(obj *ast.ObjectLit, dest string) (string, error) {
+	var format strings.Builder
+	format.WriteString("{\n")
+	var args []string
+	for _, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return "", err
+		}
+		format.WriteString("  " + field.Key + ": %s,\n")
+		if g.isBooleanExpr(field.Value) {
+			if val, ok := g.genStaticBooleanArg(field.Value); ok {
+				args = append(args, val)
+				continue
+			}
+			val, err := g.genExprValue(field.Value)
+			if err != nil {
+				return "", err
+			}
+			args = append(args, ensureArgSafe(fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val))))
+			continue
+		}
+		val, err := g.genExprValue(field.Value)
+		if err != nil {
+			return "", err
+		}
+		args = append(args, ensureArgSafe(val))
+	}
+	format.WriteString("}\n")
+	redirect := ""
+	if dest == "stderr" {
+		redirect = " >&2"
+	}
+	if len(args) == 0 {
+		return "printf " + shellQuote(format.String()) + redirect, nil
+	}
+	return "printf " + shellQuote(format.String()) + " " + strings.Join(args, " ") + redirect, nil
 }
 
 func (g *Generator) resolveObjectVarName(expr ast.Expression) string {

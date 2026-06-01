@@ -286,7 +286,7 @@ function log(msg: string) {
 
 ### Print
 
-`console.log()` writes a string to stdout with a trailing newline. `console.error()` writes the same format to stderr. Lists print in Bun-style `[ a, b ]` format; objects print each property on its own line.
+`console.log()` writes a string to stdout with a trailing newline. `console.error()` writes the same format to stderr. Lists print in Bun-style `[ a, b ]` format; objects print each property on its own line. Inline object literals compile to a direct multi-line `printf`.
 
 ```ts
 console.log("Usage: myscript [options]");

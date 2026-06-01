@@ -1471,6 +1471,26 @@ console.log(counts[key])`)
 	assertContains(t, out, `if [ -z "$_objk_4_19" ]`)
 }
 
+func TestCodegen_ConsoleLogInlineObject(t *testing.T) {
+	out := compile(t, `let ok = false
+console.log({ apple: 3, banana: 2 })
+console.error({ name: "Ada", active: true })
+console.log({ ok: ok, text: "hi there" })`)
+	assertContains(t, out, `printf '{
+  apple: %s,
+  banana: %s,
+}
+' 3 2`)
+	assertContains(t, out, `printf '{
+  name: %s,
+  active: %s,
+}
+' 'Ada' true >&2`)
+	assertContains(t, out, `"$(if [ $ok = 1 ]; then printf true; else printf false; fi)" 'hi there'`)
+	assertNotContains(t, out, `cannot log object`)
+	assertNotContains(t, out, `_objkeys_`)
+}
+
 func TestCodegen_ConsoleLogList(t *testing.T) {
 	out := compile(t, `let nums = [0, 1]
 console.log(nums)`)
