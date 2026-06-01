@@ -1449,12 +1449,18 @@ console.log(Number.parseInt("42"))
 console.log(Number.parseInt("42", 10))
 console.log(Number.parseInt("2a", 10))
 console.log(Number.parseInt("ff", 16))
+let hex = "ff"
+let prefixed = "0x10"
+let partial = "2a"
+console.log(Number.parseInt(hex, 16))
+console.log(Number.parseInt(prefixed))
+console.log(Number.parseInt(partial, 10))
 try {
     $("false").run()
 } catch (code: status) {
     console.log(code.toString())
 }`)
-	want := "x\ntrue\nfalse\n42\n42\n2\n255\n1\n"
+	want := "x\ntrue\nfalse\n42\n42\n2\n255\n255\n16\n2\n1\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -2160,6 +2166,20 @@ console.log(s.substring(4, 1))
 console.log(s.substring(-2, 2))
 console.log(s.substring(2, 99))`)
 	want := "b\nb\ntrue\ntrue\nbcd\nab\ncdef\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_DynamicStringSliceAndAtRuntime(t *testing.T) {
+	out := runCompiledShell(t, `function show(s: string) {
+    console.log(s.slice(1, 4))
+    console.log(s.slice(-2))
+    console.log(s.at(-1))
+    console.log(s[1])
+}
+show("hello")`)
+	want := "ell\nlo\no\ne\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

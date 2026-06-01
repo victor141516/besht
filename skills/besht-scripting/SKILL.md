@@ -276,7 +276,9 @@ Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.
 
 Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literals, variables bound to them, and chained static ASCII transforms fold searches and `charAt()` calls with static arguments to constants. Lists also support `items.includes(x)` for exact item membership.
 
-Static ASCII string literals, variables bound to them, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools.
+Static ASCII string literals, variables bound to them, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools; dynamic string `slice()`, `at()`, and indexing support normal substring extraction.
+
+Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile compactly while keeping the same Besht behavior.
 
 Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools.
 
@@ -392,13 +394,14 @@ let eps = Number.EPSILON
 
 ## Type Conversion
 
-Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `Number.parseInt(value)` accepts one argument or an optional radix argument.
+Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `Number.parseInt(value)` accepts one argument or an optional radix argument, including non-decimal radix values such as 16.
 
 ```ts
 let countText = count.toString()
 let flagText = flag.toString()
 let lines = Number.parseInt(raw)
 let lines10 = Number.parseInt(raw, 10)
+let red = Number.parseInt(hexByte, 16)
 ```
 
 Static numeric arithmetic over literal numbers compiles to constants. Dynamic arithmetic keeps shell arithmetic or POSIX `awk`.
