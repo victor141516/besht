@@ -1279,6 +1279,7 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.staticNullishMap = make(map[string]bool)
 	g.stringConstMap = make(map[string]string)
 	g.staticListMap = make(map[string][]string)
+	g.staticSetMap = make(map[string][]string)
 	g.controlAssigned = make(map[string]bool)
 	g.fnParamTypes = make(map[string]*ast.Type)
 	g.fnParamNames = make(map[string][]string)

@@ -32,6 +32,7 @@ type Generator struct {
 	staticNullishMap map[string]bool
 	stringConstMap   map[string]string
 	staticListMap    map[string][]string
+	staticSetMap     map[string][]string
 	controlAssigned  map[string]bool
 	fnParamTypes     map[string]*ast.Type // current fn param name → type annotation
 	fnParamNames     map[string][]string  // function name → param names (in order)
@@ -136,6 +137,7 @@ func New() *Generator {
 		staticNullishMap: make(map[string]bool),
 		stringConstMap:   make(map[string]string),
 		staticListMap:    make(map[string][]string),
+		staticSetMap:     make(map[string][]string),
 		controlAssigned:  make(map[string]bool),
 		fnParamTypes:     make(map[string]*ast.Type),
 		fnParamNames:     make(map[string][]string),
@@ -228,6 +230,8 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 			if inControl {
 				assigned[s.Name] = true
 			}
+		case *ast.ExprStmt:
+			markControlFlowMutations(s.Expr, inControl, assigned)
 		case *ast.Block:
 			walkBlock(s, inControl)
 		case *ast.IfStmt:
@@ -269,6 +273,165 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 		walkStmt(stmt, false)
 	}
 	return assigned
+}
+
+func markControlFlowMutations(expr ast.Expression, inControl bool, assigned map[string]bool) {
+	switch e := expr.(type) {
+	case nil:
+		return
+	case *ast.AsExpr:
+		markControlFlowMutations(e.Expr, inControl, assigned)
+	case *ast.MethodCallExpr:
+		if inControl && methodMutatesReceiver(e.Method) {
+			if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
+				assigned[ident.Name] = true
+			}
+		}
+		markControlFlowMutations(e.Receiver, inControl, assigned)
+		for _, arg := range e.Args {
+			markControlFlowMutations(arg, inControl, assigned)
+		}
+	case *ast.BuiltinCallExpr:
+		for _, arg := range e.Args {
+			markControlFlowMutations(arg, inControl, assigned)
+		}
+	case *ast.BinaryExpr:
+		markControlFlowMutations(e.Left, inControl, assigned)
+		markControlFlowMutations(e.Right, inControl, assigned)
+	case *ast.UnaryExpr:
+		markControlFlowMutations(e.Expr, inControl, assigned)
+	case *ast.TernaryExpr:
+		markControlFlowMutations(e.Condition, inControl, assigned)
+		markControlFlowMutations(e.Then, true, assigned)
+		markControlFlowMutations(e.Else, true, assigned)
+	case *ast.IndexExpr:
+		markControlFlowMutations(e.Expr, inControl, assigned)
+		markControlFlowMutations(e.Index, inControl, assigned)
+	case *ast.PropertyExpr:
+		markControlFlowMutations(e.Receiver, inControl, assigned)
+	case *ast.FnCallExpr:
+		for _, arg := range e.Args {
+			markControlFlowMutations(arg, inControl, assigned)
+		}
+	case *ast.ListLit:
+		for _, elem := range e.Elements {
+			markControlFlowMutations(elem, inControl, assigned)
+		}
+	case *ast.ObjectLit:
+		for _, field := range e.Fields {
+			markControlFlowMutations(field.Value, inControl, assigned)
+		}
+	case *ast.TemplateLit:
+		for _, part := range e.Exprs {
+			markControlFlowMutations(part, inControl, assigned)
+		}
+	case *ast.ArrowExpr:
+		markControlFlowMutations(e.Body, true, assigned)
+		if e.BlockBody != nil {
+			for _, stmt := range e.BlockBody.Statements {
+				markControlFlowStmtMutations(stmt, true, assigned)
+			}
+		}
+	case *ast.SpreadExpr:
+		markControlFlowMutations(e.Expr, inControl, assigned)
+	case *ast.NewExpr:
+		for _, arg := range e.Args {
+			markControlFlowMutations(arg, inControl, assigned)
+		}
+	}
+}
+
+func markControlFlowStmtMutations(stmt ast.Statement, inControl bool, assigned map[string]bool) {
+	switch s := stmt.(type) {
+	case nil:
+		return
+	case *ast.Assignment:
+		if inControl {
+			assigned[s.Name] = true
+		}
+		markControlFlowMutations(s.Value, inControl, assigned)
+	case *ast.IndexAssignStmt:
+		if inControl {
+			assigned[s.Name] = true
+		}
+		markControlFlowMutations(s.Index, inControl, assigned)
+		markControlFlowMutations(s.Value, inControl, assigned)
+	case *ast.PropertyAssignStmt:
+		markControlFlowMutations(s.Value, inControl, assigned)
+	case *ast.LetDecl:
+		markControlFlowMutations(s.Value, inControl, assigned)
+	case *ast.DestructureDecl:
+		markControlFlowMutations(s.Value, inControl, assigned)
+	case *ast.ExprStmt:
+		markControlFlowMutations(s.Expr, inControl, assigned)
+	case *ast.ReturnStmt:
+		markControlFlowMutations(s.Value, inControl, assigned)
+	case *ast.ExitStmt:
+		markControlFlowMutations(s.Code, inControl, assigned)
+	case *ast.Block:
+		for _, child := range s.Statements {
+			markControlFlowStmtMutations(child, inControl, assigned)
+		}
+	case *ast.IfStmt:
+		markControlFlowMutations(s.Condition, inControl, assigned)
+		for _, child := range s.Then.Statements {
+			markControlFlowStmtMutations(child, true, assigned)
+		}
+		for _, elseif := range s.ElseIfs {
+			markControlFlowMutations(elseif.Condition, inControl, assigned)
+			for _, child := range elseif.Body.Statements {
+				markControlFlowStmtMutations(child, true, assigned)
+			}
+		}
+		if s.Else != nil {
+			for _, child := range s.Else.Statements {
+				markControlFlowStmtMutations(child, true, assigned)
+			}
+		}
+	case *ast.WhileStmt:
+		markControlFlowMutations(s.Condition, inControl, assigned)
+		for _, child := range s.Body.Statements {
+			markControlFlowStmtMutations(child, true, assigned)
+		}
+	case *ast.ForStmt:
+		markControlFlowMutations(s.Iterator, inControl, assigned)
+		for _, child := range s.Body.Statements {
+			markControlFlowStmtMutations(child, true, assigned)
+		}
+	case *ast.CStyleForStmt:
+		markControlFlowStmtMutations(s.Init, inControl, assigned)
+		markControlFlowMutations(s.Condition, inControl, assigned)
+		markControlFlowStmtMutations(s.Update, true, assigned)
+		for _, child := range s.Body.Statements {
+			markControlFlowStmtMutations(child, true, assigned)
+		}
+	case *ast.TryStmt:
+		for _, child := range s.Body.Statements {
+			markControlFlowStmtMutations(child, true, assigned)
+		}
+		if s.Catch != nil {
+			for _, child := range s.Catch.Statements {
+				markControlFlowStmtMutations(child, true, assigned)
+			}
+		}
+	case *ast.SwitchStmt:
+		markControlFlowMutations(s.Value, inControl, assigned)
+		for _, switchCase := range s.Cases {
+			markControlFlowMutations(switchCase.Value, inControl, assigned)
+			for _, child := range switchCase.Body.Statements {
+				markControlFlowStmtMutations(child, true, assigned)
+			}
+		}
+	}
+}
+
+func methodMutatesReceiver(method string) bool {
+	switch method {
+	case "add", "push", "pop", "shift", "unshift", "concat", "slice", "reverse":
+		return true
+	default:
+		return false
+	}
 }
 
 func walkArgsStmt(stmt ast.Statement, visit func(ast.Expression)) {
@@ -929,6 +1092,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	varName := g.resolveVarName(s.Name)
 	g.paramMap[s.Name] = varName
 	delete(g.objAliasMap, s.Name)
+	delete(g.staticSetMap, varName)
 
 	if newExpr, ok := s.Value.(*ast.NewExpr); ok {
 		return g.genNewLetDecl(varName, s.Name, newExpr)
@@ -1117,6 +1281,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		delete(g.listLenMap, varName)
 	}
 	g.updateStaticListBinding(varName, s.Value)
+	g.updateStaticSetBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
 	return nil
 }
@@ -1313,6 +1478,7 @@ func (g *Generator) genNewLetDecl(varName, sourceName string, e *ast.NewExpr) er
 			elem = e.TypeArgs[0]
 		}
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeSet, Elem: elem}
+		g.setStaticSetValues(varName, nil)
 		return nil
 	}
 	className := g.resolveClassName(e.ClassName)
@@ -1514,6 +1680,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	varName := g.resolveVarName(s.Name)
 	delete(g.staticObjectMap, varName)
 	delete(g.staticNullishMap, varName)
+	delete(g.staticSetMap, varName)
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
 		return err
 	}
@@ -1557,6 +1724,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	}
 	g.updateStaticNullishBinding(varName, s.Value)
 	g.updateStaticListBinding(varName, s.Value)
+	g.updateStaticSetBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
 	if ref, ok := g.objectRefForBinding(varName, s.Value); ok {
 		g.objAliasMap[s.Name] = ref
@@ -1626,6 +1794,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevStaticObjectMap := g.staticObjectMap
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
+	prevStaticSetMap := g.staticSetMap
 	g.currentFn = s.Name
 	g.inFunction = true
 	g.paramMap = make(map[string]string)
@@ -1636,6 +1805,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
+	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
 
 	for i, param := range s.Params {
 		varName := fnParamVar(s.Name, param.Name)
@@ -1668,6 +1838,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.staticObjectMap = prevStaticObjectMap
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
+	g.staticSetMap = prevStaticSetMap
 	g.pop()
 	g.line("}")
 	g.line("")
@@ -1771,6 +1942,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevStaticObjectMap := g.staticObjectMap
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
+	prevStaticSetMap := g.staticSetMap
 	prevClass := g.currentClass
 	prevThis := g.currentThisVar
 	g.currentFn = fnName
@@ -1783,6 +1955,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
+	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
 	g.currentClass = c.Name
 	g.currentThisVar = ""
 	argOffset := 1
@@ -1824,6 +1997,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.staticObjectMap = prevStaticObjectMap
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
+	g.staticSetMap = prevStaticSetMap
 	g.currentClass = prevClass
 	g.currentThisVar = prevThis
 	g.pop()
@@ -2397,6 +2571,85 @@ func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression)
 		return
 	}
 	delete(g.staticListMap, varName)
+}
+
+func (g *Generator) setStaticSetValues(varName string, values []string) {
+	if g.staticSetMap == nil {
+		g.staticSetMap = make(map[string][]string)
+	}
+	g.staticSetMap[varName] = append([]string(nil), values...)
+}
+
+func (g *Generator) updateStaticSetBinding(varName string, expr ast.Expression) {
+	if newExpr, ok := unwrapAsExpr(expr).(*ast.NewExpr); ok && newExpr.ClassName == "Set" && len(newExpr.Args) == 0 {
+		g.setStaticSetValues(varName, nil)
+		return
+	}
+	if values, ok := g.staticSetValues(expr); ok {
+		g.setStaticSetValues(varName, values)
+		return
+	}
+	delete(g.staticSetMap, varName)
+}
+
+func (g *Generator) staticSetValues(expr ast.Expression) ([]string, bool) {
+	switch e := unwrapAsExpr(expr).(type) {
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return nil, false
+		}
+		values, ok := g.staticSetMap[g.resolveVarName(e.Name)]
+		if !ok {
+			return nil, false
+		}
+		return append([]string(nil), values...), true
+	default:
+		return nil, false
+	}
+}
+
+func staticScalarValueWithoutNewline(expr ast.Expression) (string, bool) {
+	value, ok := staticScalarValue(expr)
+	if !ok || strings.Contains(value, "\n") {
+		return "", false
+	}
+	return value, true
+}
+
+func (g *Generator) genStaticSetAdd(setName, setVar string, arg ast.Expression) (string, bool) {
+	values, ok := g.staticSetMap[setVar]
+	if !ok || g.controlAssigned[setName] {
+		delete(g.staticSetMap, setVar)
+		return "", false
+	}
+	value, ok := staticScalarValueWithoutNewline(arg)
+	if !ok {
+		delete(g.staticSetMap, setVar)
+		return "", false
+	}
+	next := uniqueStrings(append(append([]string(nil), values...), value))
+	g.setStaticSetValues(setVar, next)
+	return fmt.Sprintf("%s=%s", setVar, shellQuote(strings.Join(next, "\n"))), true
+}
+
+func (g *Generator) staticSetHasValue(e *ast.MethodCallExpr) (bool, bool) {
+	if e.Method != "has" || len(e.Args) != 1 {
+		return false, false
+	}
+	values, ok := g.staticSetValues(e.Receiver)
+	if !ok {
+		return false, false
+	}
+	needle, ok := staticScalarValueWithoutNewline(e.Args[0])
+	if !ok {
+		return false, false
+	}
+	for _, value := range values {
+		if value == needle {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 func staticListLiteralValue(list *ast.ListLit) (string, bool) {
@@ -4683,6 +4936,9 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			return value == "1", true
 		}
 	case *ast.MethodCallExpr:
+		if value, ok := g.staticSetHasValue(e); ok {
+			return value, true
+		}
 		switch e.Method {
 		case "includes", "startsWith", "endsWith":
 			value, ok, err := g.genStaticStringMethod(e)
@@ -6862,15 +7118,36 @@ func (g *Generator) genSetMethod(e *ast.MethodCallExpr) (string, error) {
 		return "", fmt.Errorf("Set.%s() requires an identifier receiver", e.Method)
 	}
 	setVar := g.resolveVarName(ident.Name)
-	arg, err := g.genExprValue(e.Args[0])
-	if err != nil {
-		return "", err
-	}
-	arg = ensureArgSafe(arg)
 	switch e.Method {
 	case "has":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Set.has() takes 1 argument")
+		}
+		if value, ok := g.staticSetHasValue(e); ok {
+			if value {
+				return "1", nil
+			}
+			return "0", nil
+		}
+		arg, err := g.genExprValue(e.Args[0])
+		if err != nil {
+			return "", err
+		}
+		arg = ensureArgSafe(arg)
 		return fmt.Sprintf("$([ -n \"$%s\" ] && printf '%%s\\n' \"$%s\" | grep -qxF -- %s && printf 1 || printf 0)", setVar, setVar, arg), nil
 	case "add":
+		if len(e.Args) != 1 {
+			return "", fmt.Errorf("Set.add() takes 1 argument")
+		}
+		if line, ok := g.genStaticSetAdd(ident.Name, setVar, e.Args[0]); ok {
+			return line, nil
+		}
+		delete(g.staticSetMap, setVar)
+		arg, err := g.genExprValue(e.Args[0])
+		if err != nil {
+			return "", err
+		}
+		arg = ensureArgSafe(arg)
 		return fmt.Sprintf("%s=$( { if [ -n \"$%s\" ]; then printf '%%s\n' \"$%s\"; fi; printf '%%s\n' %s; } | awk '!seen[$0]++')", setVar, setVar, setVar, arg), nil
 	}
 	return "", fmt.Errorf("Set has no method %q", e.Method)
