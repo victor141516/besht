@@ -2188,6 +2188,32 @@ func staticASCIIStringValue(expr ast.Expression) (string, bool) {
 	return value, true
 }
 
+func (g *Generator) staticASCIIStringExprValue(expr ast.Expression) (string, bool) {
+	if value, ok := staticASCIIStringValue(expr); ok {
+		return value, true
+	}
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticASCIIStringExprValue(e.Expr)
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return "", false
+		}
+		value, ok := g.stringConstMap[g.resolveVarName(e.Name)]
+		if !ok {
+			return "", false
+		}
+		for i := 0; i < len(value); i++ {
+			if value[i] >= utf8.RuneSelf {
+				return "", false
+			}
+		}
+		return value, true
+	default:
+		return "", false
+	}
+}
+
 func staticIntValue(expr ast.Expression) (int, bool) {
 	switch e := expr.(type) {
 	case *ast.IntLit:
@@ -4039,6 +4065,15 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 			return false, true
+		}
+	case *ast.MethodCallExpr:
+		switch e.Method {
+		case "includes", "startsWith", "endsWith":
+			value, ok, err := g.genStaticStringMethod(e)
+			if err != nil || !ok {
+				return false, false
+			}
+			return value == "1", true
 		}
 	}
 	return false, false
@@ -6536,7 +6571,7 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 }
 
 func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := staticASCIIStringValue(e.Receiver)
+	recv, ok := g.staticASCIIStringExprValue(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -6545,7 +6580,7 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 		if len(e.Args) == 0 {
 			return "", false, fmt.Errorf("%s() requires an argument", e.Method)
 		}
-		value, ok := staticASCIIStringValue(e.Args[0])
+		value, ok := g.staticASCIIStringExprValue(e.Args[0])
 		return value, ok, nil
 	}
 	intArg := func(idx int, fallback int) (int, bool) {
@@ -6662,7 +6697,7 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 }
 
 func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := staticASCIIStringValue(e.Receiver)
+	recv, ok := g.staticASCIIStringExprValue(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -6670,7 +6705,7 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 		if len(e.Args) <= idx {
 			return "", false
 		}
-		return staticASCIIStringValue(e.Args[idx])
+		return g.staticASCIIStringExprValue(e.Args[idx])
 	}
 	staticIntArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -7198,6 +7233,12 @@ func (g *Generator) genMethodCondition(e *ast.MethodCallExpr) (string, error) {
 			return "", err
 		}
 		return truthyCondition(val), nil
+	}
+	if value, ok := g.staticBooleanValue(e); ok {
+		if value {
+			return "true", nil
+		}
+		return "false", nil
 	}
 	recv, err := g.genExprValue(e.Receiver)
 	if err != nil {
