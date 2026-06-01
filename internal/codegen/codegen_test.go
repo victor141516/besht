@@ -1239,8 +1239,10 @@ func TestCodegen_SetHasAdd(t *testing.T) {
 seen.add("a")
 if (seen.has("a")) { console.log("yes") }`)
 	assertContains(t, out, `seen=""`)
-	assertContains(t, out, `awk '!seen[$0]++'`)
-	assertContains(t, out, `grep -qxF -- 'a'`)
+	assertContains(t, out, `seen='a'`)
+	assertContains(t, out, `printf '%s\n' 'yes'`)
+	assertNotContains(t, out, `awk '!seen[$0]++'`)
+	assertNotContains(t, out, `grep -qxF -- 'a'`)
 	assertNotContains(t, out, `local `)
 	assertNotContains(t, out, `[[`)
 }
@@ -1708,17 +1710,43 @@ func TestCodegen_SetHasAndAdd(t *testing.T) {
 seen.add("a")
 let found: boolean = seen.has("a")`)
 	assertContains(t, out, `seen=""`)
-	assertContains(t, out, `awk '!seen[$0]++'`)
-	assertContains(t, out, `grep -qxF -- 'a'`)
+	assertContains(t, out, `seen='a'`)
+	assertContains(t, out, `found=1`)
+	assertNotContains(t, out, `awk '!seen[$0]++'`)
+	assertNotContains(t, out, `grep -qxF -- 'a'`)
 	assertNotContains(t, out, `local `)
 	assertNotContains(t, out, `[[`)
 }
 
 func TestCodegen_SetHasDashPrefixedValueUsesGrepDelimiter(t *testing.T) {
 	out := compile(t, `const seen = new Set<string>()
-seen.add("-f/etc/passwd")
+let value = process.env.VALUE ?? "-f/etc/passwd"
+seen.add(value)
 if (seen.has("-f/etc/passwd")) { console.log("yes") }`)
+	assertContains(t, out, `awk '!seen[$0]++'`)
 	assertContains(t, out, `grep -qxF -- '-f/etc/passwd'`)
+}
+
+func TestCodegen_StaticSetMembershipConsoleOutput(t *testing.T) {
+	out := compile(t, `const seen = new Set<string>()
+seen.add("a")
+seen.add("b")
+console.log(seen.has("a"))
+console.log(seen.has("z"))`)
+	assertContains(t, out, "seen='a\nb'")
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' false`)
+	assertNotContains(t, out, `awk '!seen[$0]++'`)
+	assertNotContains(t, out, `grep -qxF`)
+}
+
+func TestCodegen_SetAddInControlFlowKeepsRuntimeMembership(t *testing.T) {
+	out := compile(t, `const seen = new Set<string>()
+if (process.env.FLAG) { seen.add("a") }
+console.log(seen.has("a"))`)
+	assertContains(t, out, `awk '!seen[$0]++'`)
+	assertContains(t, out, `grep -qxF -- 'a'`)
+	assertNotContains(t, out, `printf '%s\n' true`)
 }
 
 func TestCodegen_SetAddExpressionRejected(t *testing.T) {

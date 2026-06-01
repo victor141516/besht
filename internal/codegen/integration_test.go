@@ -569,6 +569,20 @@ console.log(matrix[0].length)
 	}
 }
 
+func TestIntegration_StaticSetMembershipRuntime(t *testing.T) {
+	out := runCompiledShell(t, `const seen = new Set<string>()
+seen.add("a")
+seen.add("b")
+seen.add("a")
+console.log(seen.has("a"))
+console.log(seen.has("b"))
+console.log(seen.has("z"))
+`)
+	if strings.TrimSpace(out) != "true\ntrue\nfalse" {
+		t.Fatalf("output: got %q, want true\\ntrue\\nfalse", out)
+	}
+}
+
 func TestIntegration_HelloWorld(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "hello.bsh", `let name: string = "world"

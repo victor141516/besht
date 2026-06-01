@@ -125,7 +125,7 @@ Files use the `.bsh` extension.
 - `type` aliases and `interface` declarations are parsed and silently ignored (no runtime output).
 - Simple `type Name = ExistingType` aliases can be used in annotations, including `string[]` and `Set<string>`.
 - Type assertions such as `[] as string[]` are parsed and erased at compile time.
-- `new Set<T>()` supports `.add(value)` and `.has(value)` with no runtime type checking.
+- `new Set<T>()` supports `.add(value)` and `.has(value)` with no runtime type checking; straight-line static adds and membership checks compile to constants.
 - Nested lists such as `string[][]` preserve row structure for `.map()`, nested indexing, and row `.length`.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
 - Semicolons are optional (only required inside `for` headers).
@@ -644,7 +644,7 @@ let maybe = matrix?.[row]?.[col] ?? "missing"
 
 ### Sets
 
-`Set<T>` is a lightweight newline-backed collection for membership tracking. Type parameters are annotations only; `.add(value)` mutates the set and `.has(value)` checks membership without runtime type checks.
+`Set<T>` is a lightweight newline-backed collection for membership tracking. Type parameters are annotations only; `.add(value)` mutates the set and `.has(value)` checks membership without runtime type checks. Straight-line static scalar adds and static membership checks compile to direct assignments and constants; dynamic values, callback/control-flow adds, and newline-containing values keep the runtime `awk`/`grep` path.
 
 ```ts
 let visited = new Set<string>()
