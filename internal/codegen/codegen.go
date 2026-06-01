@@ -7085,6 +7085,9 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if t := g.inferReceiverType(e); t != nil && t.Kind == ast.TypeBoolean {
+			return fmt.Sprintf("[ %s = 1 ]", ensureArgSafe(val)), nil
+		}
 		return truthyCondition(val), nil
 	case *ast.IndexExpr:
 		if e.Optional {
