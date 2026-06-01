@@ -123,6 +123,7 @@ console.error("Something went wrong");
 console.log(["a", "b"]); // [ a, b ]; static scalar list output compiles to one printf
 
 // Objects are printed in multi-line format using current property values
+// Inline object literals use a direct multi-line printf
 console.log({ apple: 3, banana: 2 });
 // Output:
 // {

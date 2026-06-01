@@ -3110,6 +3110,37 @@ console.log(user)`)
 	}
 }
 
+func TestIntegration_InlineObjectConsoleRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let ok = false
+console.log({ apple: 3, banana: 2 })
+console.error({ name: "Ada", active: true })
+console.log({ ok: ok, text: "hi there" })`)
+	outShell, err := codegen.CompileFile(path, codegen.Options{})
+	if err != nil {
+		t.Fatalf("compile inline object print fixture: %v", err)
+	}
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(outShell), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run shell: %v\nstdout:\n%s\nstderr:\n%s\n--- script ---\n%s", err, stdout.String(), stderr.String(), outShell)
+	}
+	wantStdout := "{\n  apple: 3,\n  banana: 2,\n}\n{\n  ok: false,\n  text: hi there,\n}\n"
+	wantStderr := "{\n  name: Ada,\n  active: true,\n}\n"
+	if stdout.String() != wantStdout {
+		t.Fatalf("stdout: got %q", stdout.String())
+	}
+	if stderr.String() != wantStderr {
+		t.Fatalf("stderr: got %q", stderr.String())
+	}
+}
+
 func TestIntegration_ObjectValuesEntriesRejectAliasMutatedRootListValues(t *testing.T) {
 	tests := []struct {
 		name    string
