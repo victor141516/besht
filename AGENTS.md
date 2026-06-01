@@ -1003,7 +1003,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Computed object keys are validated before eval.** Dynamic keys must match `[A-Za-z0-9_]+`. Generated code stores the key and value in temporary variables, rejects unsafe keys, and assigns through escaped temp-var references.
 
-**`console.log` for objects prints multi-line format matching bun.** Dynamic-key objects iterate `_objkeys_*` at runtime; static-key objects use known fields. The output format is `{ key: value, }` with one property per line. Boolean properties (where `objPropTypeMap` indicates `TypeBoolean`) are displayed as `true`/`false`; numeric and string values are displayed as-is.
+**`console.log` for objects prints multi-line format matching bun.** Dynamic-key objects iterate `_objkeys_*` at runtime; static-key objects use known fields and emit one `printf` format with object slot values as arguments. The output format is `{ key: value, }` with one property per line. Boolean properties (where `objPropTypeMap` indicates `TypeBoolean`) are displayed as `true`/`false`; numeric and string values are displayed as-is. Static-key object printing must still read the current `_obj_*` slots so later property assignments are reflected.
 
 **`return acc` inside a reduce callback with object accumulator is a no-op.** Object mutations are applied via property assignments that persist across iterations. The `genReturn` function consults the scoped `reduceReturns` stack, skips `return acc`, and rejects returning a different value from an object-accumulator callback.
 
