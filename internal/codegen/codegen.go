@@ -1055,7 +1055,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		g.listLenMap[varName] = "0"
 	} else if isArgsArgvCall(s.Value) {
 		g.listLenMap[varName] = g.argsArgcExpr()
-	} else if values, ok := staticStringSplitValues(s.Value); ok {
+	} else if values, ok := g.staticStringSplitValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
@@ -1471,7 +1471,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	}
 	if emptyArrayOf(s.Value) {
 		g.listLenMap[varName] = "0"
-	} else if values, ok := staticStringSplitValues(s.Value); ok {
+	} else if values, ok := g.staticStringSplitValues(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(len(values))
 	} else if n, ok := staticArrayFactoryLengthExpr(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
@@ -1825,7 +1825,7 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		if iter.Name == "Besht.iter.range" {
 			return g.genForRange(s, iter)
 		}
-		if words, ok := staticForListWordsExpr(iter); ok {
+		if words, ok := g.staticForListWordsExpr(iter); ok {
 			return g.genForStaticList(s, words)
 		}
 	case *ast.IdentExpr:
@@ -1843,7 +1843,7 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		if builtin, ok := beshtBuiltinCall(iter); ok && builtin.Name == "Besht.iter.range" {
 			return g.genForRange(s, builtin)
 		}
-		if words, ok := staticForListWordsExpr(iter); ok {
+		if words, ok := g.staticForListWordsExpr(iter); ok {
 			return g.genForStaticList(s, words)
 		}
 		pipeline, redirect, err := g.genCmdChain(iter)
@@ -2011,12 +2011,12 @@ func staticScalarListValuesWithoutNewlines(expr ast.Expression) ([]string, bool)
 	return values, true
 }
 
-func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
+func (g *Generator) staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
 	case *ast.ListLit:
 		return staticForListWords(e)
 	case *ast.MethodCallExpr:
-		values, ok := staticStringSplitValues(e)
+		values, ok := g.staticStringSplitValues(e)
 		if !ok {
 			return nil, false
 		}
@@ -2036,7 +2036,7 @@ func staticForListWordsExpr(expr ast.Expression) ([]string, bool) {
 		}
 		return words, true
 	case *ast.AsExpr:
-		return staticForListWordsExpr(e.Expr)
+		return g.staticForListWordsExpr(e.Expr)
 	default:
 		return nil, false
 	}
@@ -2046,7 +2046,7 @@ func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression)
 	if g.staticListMap == nil {
 		g.staticListMap = make(map[string][]string)
 	}
-	if words, ok := staticForListWordsExpr(expr); ok {
+	if words, ok := g.staticForListWordsExpr(expr); ok {
 		g.staticListMap[varName] = words
 		return
 	}
@@ -2152,8 +2152,8 @@ func staticObjectBuiltinListValues(e *ast.BuiltinCallExpr) ([]string, bool) {
 	}
 }
 
-func staticScalarListLength(expr ast.Expression) (int, bool) {
-	if values, ok := staticStringSplitValues(expr); ok {
+func (g *Generator) staticScalarListLength(expr ast.Expression) (int, bool) {
+	if values, ok := g.staticStringSplitValues(expr); ok {
 		return len(values), true
 	}
 	values, ok := staticScalarListValues(expr)
@@ -2257,19 +2257,19 @@ func staticStringText(expr ast.Expression) (string, bool) {
 	return "", false
 }
 
-func staticStringSplitValues(expr ast.Expression) ([]string, bool) {
+func (g *Generator) staticStringSplitValues(expr ast.Expression) ([]string, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
-		return staticStringSplitValues(e.Expr)
+		return g.staticStringSplitValues(e.Expr)
 	case *ast.MethodCallExpr:
 		if e.Method != "split" || len(e.Args) != 1 {
 			return nil, false
 		}
-		recv, ok := staticASCIIStringValue(e.Receiver)
+		recv, ok := g.staticASCIIStringExprValue(e.Receiver)
 		if !ok {
 			return nil, false
 		}
-		sep, ok := staticASCIIStringValue(e.Args[0])
+		sep, ok := g.staticASCIIStringExprValue(e.Args[0])
 		if !ok {
 			return nil, false
 		}
@@ -4501,7 +4501,7 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 		}
 	}
 	if e.Property == "length" {
-		if n, ok := staticScalarListLength(e.Receiver); ok {
+		if n, ok := g.staticScalarListLength(e.Receiver); ok {
 			return strconv.Itoa(n), nil
 		}
 		if n, ok := staticStringByteLength(e.Receiver); ok {
@@ -6829,7 +6829,7 @@ func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, b
 	if e.Method != "split" {
 		return "", false, nil
 	}
-	values, ok := staticStringSplitValues(e)
+	values, ok := g.staticStringSplitValues(e)
 	if !ok {
 		return "", false, nil
 	}
@@ -6892,7 +6892,7 @@ func (g *Generator) staticListIndexValue(e *ast.IndexExpr) (string, bool) {
 		return "", false
 	}
 	var words []string
-	if values, ok := staticForListWordsExpr(e.Expr); ok {
+	if values, ok := g.staticForListWordsExpr(e.Expr); ok {
 		words = values
 	} else if ident, ok := e.Expr.(*ast.IdentExpr); ok {
 		if g.controlAssigned[ident.Name] {

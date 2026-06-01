@@ -94,7 +94,7 @@ Files use the `.bsh` extension.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static boolean `if` conditions and ternary expressions fold to the selected branch or value; dynamic conditions keep normal shell tests.
 - Static ASCII string literals and variables bound to static ASCII string literals fold `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
-- Static ASCII string literal `.split()` calls with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
+- Static ASCII string literals and variables bound to static ASCII string literals fold `.split()` calls with static separators to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls keep the shell arithmetic path.
 - Static numeric arithmetic over literal numbers compiles to constants; dynamic arithmetic keeps shell arithmetic or POSIX `awk`.
 - Static numeric literal `.toString()`/`.toFixed()` calls and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
@@ -456,7 +456,7 @@ One-argument string `includes()`, `startsWith()`, and `endsWith()` use tiny POSI
 
 Static ASCII string literal transforms and transforms on variables bound to static ASCII string literals compile to constants when arguments are static. Dynamic and non-ASCII transforms use POSIX tools such as `sed`, `tr`, `cut`, and `awk`.
 
-Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools such as `tr` and `awk`.
+Static ASCII string literal `.split()` calls and `.split()` calls on variables bound to static ASCII string literals compile to constants when the separator is static and the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools such as `tr` and `awk`.
 
 Primitive values have basic formatting helpers:
 
