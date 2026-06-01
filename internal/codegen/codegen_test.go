@@ -310,11 +310,15 @@ for (let f of files) {
 
 func TestCodegen_ForStaticListVariableInvalidatedAfterAssignment(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
-files = files.push("c")
+while (true) {
+    files = files.push("c")
+    break
+}
 for (let f of files) {
     $("echo", f).run()
 }`)
 	assertContains(t, out, `while IFS= read -r`)
+	assertNotContains(t, out, `for f in 'a' 'b' 'c'; do`)
 }
 
 func TestCodegen_CompoundAssignment(t *testing.T) {
@@ -602,7 +606,8 @@ if (ok) {
 func TestCodegen_BuiltinLen(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a"]
 let n: number = files.length`)
-	assertContains(t, out, `wc -l`)
+	assertContains(t, out, `n=1`)
+	assertNotContains(t, out, `wc -l`)
 }
 
 func TestCodegen_BuiltinHead(t *testing.T) {
@@ -615,13 +620,15 @@ let first: string = files[0]`)
 func TestCodegen_BuiltinTail(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
 let rest: list<string> = files.slice(1)`)
-	assertContains(t, out, `tail -n +$(( 1 + 1 ))`)
+	assertContains(t, out, `rest='b'`)
+	assertNotContains(t, out, `tail -n +$(( 1 + 1 ))`)
 }
 
 func TestCodegen_BuiltinAppend(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a"]
 files = files.push("b")`)
-	assertContains(t, out, `printf`)
+	assertContains(t, out, "files='a\nb'")
+	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_BuiltinContainsCondition(t *testing.T) {
@@ -1026,7 +1033,8 @@ func TestCodegen_ListConcatMethod(t *testing.T) {
 	out := compile(t, `let a: list<string> = ["x"]
 let b: list<string> = ["y"]
 let c: list<string> = a.concat(b)`)
-	assertContains(t, out, `printf '%s\n%s'`)
+	assertContains(t, out, "c='x\ny'")
+	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_StringTrim(t *testing.T) {
@@ -1238,13 +1246,15 @@ func TestCodegen_StaticStringLiteralLength(t *testing.T) {
 func TestCodegen_ListPush(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a"]
 let l2: list<string> = l.push("b")`)
-	assertContains(t, out, `printf '%s\n%s'`)
+	assertContains(t, out, "l2='a\nb'")
+	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_ListJoin(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.join(", ")`)
-	assertContains(t, out, `NR>1{printf s}`)
+	assertContains(t, out, `s='a, b, c'`)
+	assertNotContains(t, out, `NR>1{printf s}`)
 }
 
 func TestCodegen_StaticListLiteralJoin(t *testing.T) {
@@ -1260,11 +1270,63 @@ func TestCodegen_StaticListLiteralToString(t *testing.T) {
 	assertNotContains(t, out, `awk -v s=','`)
 }
 
+func TestCodegen_StaticListMethodChains(t *testing.T) {
+	out := compile(t, `let inlineJoined = ["a", "b"].concat(["c"]).join(",")
+let slicedJoined = ["a", "b", "c"].slice(1).join(",")
+let reversedJoined = ["a", "b"].reverse().join(",")
+let pushedJoined = ["a", "b"].push("c").join(",")
+let factoryJoined = Array.of("a", "b").concat(Array.of("c")).join("|")
+let xs = ["a", "b"]
+let varJoined = xs.concat(["c"]).join(",")
+let varSlice = xs.slice(1).join(",")
+let varReverse = xs.reverse().join(",")
+let varPush = xs.push("c").join(",")
+let count = xs.concat(["c"]).length
+let item = xs.concat(["c"])[2]
+let bound = xs.concat(["c"])
+xs.unshift("z")
+let mutatedJoined = xs.join(",")
+for (value of xs.concat(["d"])) {
+    console.log(value)
+}`)
+	assertContains(t, out, `inlineJoined='a,b,c'`)
+	assertContains(t, out, `slicedJoined='b,c'`)
+	assertContains(t, out, `reversedJoined='b,a'`)
+	assertContains(t, out, `pushedJoined='a,b,c'`)
+	assertContains(t, out, `factoryJoined='a|b|c'`)
+	assertContains(t, out, `varJoined='a,b,c'`)
+	assertContains(t, out, `varSlice='b'`)
+	assertContains(t, out, `varReverse='b,a'`)
+	assertContains(t, out, `varPush='a,b,c'`)
+	assertContains(t, out, `count=3`)
+	assertContains(t, out, `item='c'`)
+	assertContains(t, out, "bound='a\nb\nc'")
+	assertContains(t, out, `mutatedJoined='z,a,b'`)
+	assertContains(t, out, `for value in 'z' 'a' 'b' 'd'; do`)
+	assertNotContains(t, out, `awk -v s=','`)
+	assertNotContains(t, out, `tail -n +$(( 1 + 1 ))`)
+	assertNotContains(t, out, `tail -r`)
+	assertNotContains(t, out, `printf '%s\n%s' 'a`)
+}
+
+func TestCodegen_StaticListMethodChainFallsBackAfterControlFlowAssignment(t *testing.T) {
+	out := compile(t, `let xs = ["a", "b"]
+while (true) {
+    xs = xs.push("c")
+    break
+}
+let joined = xs.concat(["d"]).join(",")`)
+	assertContains(t, out, `awk -v s=','`)
+	assertContains(t, out, `printf '%s\n%s' "$xs" 'd'`)
+	assertNotContains(t, out, `joined='a,b,c,d'`)
+}
+
 func TestCodegen_ListToString(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.toString()`)
-	assertContains(t, out, `awk -v s=','`)
-	assertContains(t, out, `NR>1{printf s}`)
+	assertContains(t, out, `s='a,b,c'`)
+	assertNotContains(t, out, `awk -v s=','`)
+	assertNotContains(t, out, `NR>1{printf s}`)
 	assertNotContains(t, out, `_bst_includes()`)
 	assertNotContains(t, out, `local `)
 	assertNotContains(t, out, `[[`)
@@ -1273,7 +1335,8 @@ let s: string = l.toString()`)
 func TestCodegen_ListLength(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 let n: number = l.length`)
-	assertContains(t, out, `wc -l`)
+	assertContains(t, out, `n=2`)
+	assertNotContains(t, out, `wc -l`)
 }
 
 func TestCodegen_StaticListLiteralLength(t *testing.T) {
@@ -1285,20 +1348,23 @@ func TestCodegen_StaticListLiteralLength(t *testing.T) {
 func TestCodegen_ListReverse(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["c", "b", "a"]
 let r: list<string> = l.reverse()`)
-	assertContains(t, out, `tail -r`)
+	assertContains(t, out, "r='a\nb\nc'")
+	assertNotContains(t, out, `tail -r`)
 }
 
 func TestCodegen_ListConcat(t *testing.T) {
 	out := compile(t, `let a: list<string> = ["x"]
 let b: list<string> = ["y"]
 let c: list<string> = a.concat(b)`)
-	assertContains(t, out, `printf '%s\n%s'`)
+	assertContains(t, out, "c='x\ny'")
+	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_ListSlice(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c", "d"]
 let s: list<string> = l.slice(1, 3)`)
-	assertContains(t, out, `awk -v _s=1 -v _e=3`)
+	assertContains(t, out, "s='b\nc'")
+	assertNotContains(t, out, `awk -v _s=1 -v _e=3`)
 }
 
 func TestCodegen_ListIncludesCondition(t *testing.T) {
@@ -1333,11 +1399,15 @@ let rest: list<string> = files.slice(1)
 let appended: list<string> = files.push("x")
 if (files.includes("x")) { $("echo", "found").run() }
 let combined: list<string> = files.concat(other)`)
-	assertContains(t, out, `wc -l`)
+	assertContains(t, out, `count=3`)
 	assertContains(t, out, `first='a'`)
-	assertContains(t, out, `tail -n +$(( 1 + 1 ))`)
-	assertContains(t, out, `printf '%s\n%s'`)
+	assertContains(t, out, "rest='b\nc'")
+	assertContains(t, out, "appended='a\nb\nc\nx'")
+	assertContains(t, out, "combined='a\nb\nc\nd'")
 	assertContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `wc -l`)
+	assertNotContains(t, out, `tail -n +$(( 1 + 1 ))`)
+	assertNotContains(t, out, `printf '%s\n%s'`)
 	assertNotContains(t, out, `head -n1`)
 	assertNotContains(t, out, `tail -n +2`)
 	assertNotContains(t, out, `_bst_includes()`)
@@ -2050,15 +2120,15 @@ func TestCodegen_StringSubstring(t *testing.T) {
 func TestCodegen_ListLastIndexOf(t *testing.T) {
 	out := compile(t, `let l: string[] = ["a", "b", "a"]
 let i: number = l.lastIndexOf("a")`)
-	assertContains(t, out, `awk`)
-	assertContains(t, out, `-1`)
+	assertContains(t, out, `i=2`)
+	assertNotContains(t, out, `awk -v _needle`)
 }
 
 func TestCodegen_ListUnshift(t *testing.T) {
 	out := compile(t, `let l: string[] = ["b", "c"]
 let next: string[] = l.unshift("a")`)
-	assertContains(t, out, `printf '%s\n%s'`)
-	assertContains(t, out, `a`)
+	assertContains(t, out, "next='a\nb\nc'")
+	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_ArrayOf(t *testing.T) {

@@ -102,13 +102,13 @@ Files use the `.bsh` extension.
 - Static ASCII string literals and variables bound to static ASCII string literals fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
-- Static scalar list literals compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the `printf` builder.
+- Static scalar list literals and list-returning method chains over static scalar lists (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the `printf` builder.
 - Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
-- Static string literals, variables bound to static string literals, and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths keep the POSIX `wc` path.
-- `for (... of [...])` and loops over variables bound to static scalar list literals compile to compact shell `for` loops when values do not contain newlines; dynamic lists keep the newline-safe read loop.
+- Static string literals, variables bound to static string literals, and static scalar list expression `.length` properties compile to numeric constants; dynamic lengths keep the POSIX `wc` path.
+- `for (... of [...])` and loops over static scalar list expressions or variables bound to them compile to compact shell `for` loops when values do not contain newlines; dynamic lists keep the newline-safe read loop.
 - Static scalar list indexes with known in-range integer indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed` path.
-- Static scalar list literal `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
-- Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles compile to constants; dynamic searches keep the POSIX `grep`/`awk` path.
+- Static scalar list expression `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
+- Static scalar list expression `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles compile to constants; dynamic searches keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()` and static-key `Object.hasOwn()` calls also fold from compiler-managed key metadata.
 - Object literals compile to per-property shell variables; `Object.keys(obj)` returns known object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership.
 - Boolean object properties used directly in conditions compile to direct `= 1` shell tests; non-boolean property conditions keep generic JavaScript-style truthiness.
@@ -616,6 +616,7 @@ l.concat(other); // two lists joined
 l.slice(1, 3); // ["beta", "gamma"]
 l.join(", "); // "alpha, beta, gamma"
 ["a", "b", "c"].join(","); // static scalar literal compiles to 'a,b,c'
+["a", "b"].concat(["c"]).join(","); // static scalar chains compile to 'a,b,c'
 l.toString(); // "alpha,beta,gamma" for scalar lists; same as l.join(",")
 l.includes("beta"); // boolean, uses `grep -qxF` membership and does not emit the string `_bst_includes` helper
 l.indexOf("gamma"); // int (0-based, -1 if not found)
