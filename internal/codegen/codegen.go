@@ -53,6 +53,7 @@ type Generator struct {
 	cmdChains        map[string]ast.Expression
 	reduceReturns    []reduceReturnContext
 	mapReturns       []mapReturnContext
+	UseJQ            bool
 }
 
 type reduceReturnContext struct {
@@ -122,6 +123,7 @@ type Options struct {
 	NoSourceMap               bool
 	ResolveTsImports          bool
 	AllowExternalShellImports bool
+	UseJQ                     bool
 }
 
 func New() *Generator {
@@ -160,6 +162,14 @@ func Generate(prog *ast.Program) (string, error) {
 	return g.generate(prog)
 }
 
+func GenerateWithOptions(prog *ast.Program, opts Options) (string, error) {
+	g := New()
+	g.NoCheck = opts.NoCheck
+	g.NoSourceMap = opts.NoSourceMap
+	g.UseJQ = opts.UseJQ
+	return g.generate(prog)
+}
+
 func nullishSentinelRef() string {
 	return "\"$" + nullishSentinelVar + "\""
 }
@@ -187,6 +197,147 @@ func isProcessEnvProperty(expr ast.Expression) (*ast.PropertyExpr, bool) {
 
 func (g *Generator) collectArgsSchema(stmts []ast.Statement) {
 	walkArgsStatements(stmts, g.collectArgsSchemaExpr)
+}
+
+func statementsUseJSONStringify(stmts []ast.Statement) bool {
+	for _, stmt := range stmts {
+		if stmtUsesJSONStringify(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtUsesJSONStringify(stmt ast.Statement) bool {
+	if stmt == nil {
+		return false
+	}
+	switch s := stmt.(type) {
+	case *ast.LetDecl:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.DestructureDecl:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.Assignment:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.IndexAssignStmt:
+		return exprUsesJSONStringify(s.Index) || exprUsesJSONStringify(s.Value)
+	case *ast.PropertyAssignStmt:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.ExprStmt:
+		return exprUsesJSONStringify(s.Expr)
+	case *ast.ReturnStmt:
+		return exprUsesJSONStringify(s.Value)
+	case *ast.IfStmt:
+		if exprUsesJSONStringify(s.Condition) || blockUsesJSONStringify(s.Then) || blockUsesJSONStringify(s.Else) {
+			return true
+		}
+		for _, ei := range s.ElseIfs {
+			if exprUsesJSONStringify(ei.Condition) || blockUsesJSONStringify(ei.Body) {
+				return true
+			}
+		}
+	case *ast.WhileStmt:
+		return exprUsesJSONStringify(s.Condition) || blockUsesJSONStringify(s.Body)
+	case *ast.ForStmt:
+		return exprUsesJSONStringify(s.Iterator) || blockUsesJSONStringify(s.Body)
+	case *ast.FnDecl:
+		return blockUsesJSONStringify(s.Body)
+	case *ast.TryStmt:
+		return blockUsesJSONStringify(s.Body) || blockUsesJSONStringify(s.Catch)
+	case *ast.SwitchStmt:
+		if exprUsesJSONStringify(s.Value) {
+			return true
+		}
+		for _, c := range s.Cases {
+			if exprUsesJSONStringify(c.Value) || blockUsesJSONStringify(c.Body) {
+				return true
+			}
+		}
+		return false
+	case *ast.ClassDecl:
+		for _, m := range s.Methods {
+			if blockUsesJSONStringify(m.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func blockUsesJSONStringify(block *ast.Block) bool {
+	if block == nil {
+		return false
+	}
+	return statementsUseJSONStringify(block.Statements)
+}
+
+func exprUsesJSONStringify(expr ast.Expression) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case *ast.BuiltinCallExpr:
+		if e.Name == "JSON.stringify" {
+			return true
+		}
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.FnCallExpr:
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.MethodCallExpr:
+		if exprUsesJSONStringify(e.Receiver) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.PropertyExpr:
+		return exprUsesJSONStringify(e.Receiver)
+	case *ast.IndexExpr:
+		return exprUsesJSONStringify(e.Expr) || exprUsesJSONStringify(e.Index)
+	case *ast.BinaryExpr:
+		return exprUsesJSONStringify(e.Left) || exprUsesJSONStringify(e.Right)
+	case *ast.TernaryExpr:
+		return exprUsesJSONStringify(e.Condition) || exprUsesJSONStringify(e.Then) || exprUsesJSONStringify(e.Else)
+	case *ast.UnaryExpr:
+		return exprUsesJSONStringify(e.Expr)
+	case *ast.PipeExpr:
+		return exprUsesJSONStringify(e.Left) || exprUsesJSONStringify(e.Right)
+	case *ast.CmdExpr:
+		for _, arg := range e.Args {
+			if exprUsesJSONStringify(arg) {
+				return true
+			}
+		}
+	case *ast.ListLit:
+		for _, elem := range e.Elements {
+			if exprUsesJSONStringify(elem) {
+				return true
+			}
+		}
+	case *ast.ObjectLit:
+		for _, field := range e.Fields {
+			if exprUsesJSONStringify(field.Value) {
+				return true
+			}
+		}
+	case *ast.ArrowExpr:
+		return exprUsesJSONStringify(e.Body) || blockUsesJSONStringify(e.BlockBody)
+	case *ast.SpreadExpr:
+		return exprUsesJSONStringify(e.Expr)
+	case *ast.AsExpr:
+		return exprUsesJSONStringify(e.Expr)
+	}
+	return false
 }
 
 func statementsUseArgs(stmts []ast.Statement) bool {
@@ -902,6 +1053,12 @@ func runtimeHelpersSource(helpers map[string]bool) string {
 	return sb.String()
 }
 
+const beshtJQCheckBlock = `command -v jq >/dev/null 2>&1 || {
+  printf '[besht] FATAL: jq is required by generated JSON code but was not found\n' >&2
+  exit 1
+}
+`
+
 const beshtCheckBlock = `_r=$(printf 'hello:world' | grep -F 'hello' | sed 's/hello/goodbye/' 2>/dev/null) || {
   printf '[besht] FATAL: required utilities (printf/grep/sed) are not working correctly\n' >&2
   exit 1
@@ -941,8 +1098,14 @@ func shellBodyUsesCommand(body, name string) bool {
 }
 
 func writeCheckBlockIfNeeded(out *strings.Builder, noCheck bool, helpers map[string]bool, body string) {
-	if !noCheck && shouldEmitCheckBlock(body, helpers) {
+	if noCheck {
+		return
+	}
+	if shouldEmitCheckBlock(body, helpers) {
 		out.WriteString(beshtCheckBlock)
+	}
+	if helpers["jq"] {
+		out.WriteString(beshtJQCheckBlock)
 	}
 }
 
@@ -4114,6 +4277,216 @@ func objectHasOwnRefExpr(ref objectRef, keyExpr string) string {
 	return objectHasOwnSlotExpr(ref.SlotExpr, keyExpr)
 }
 
+func (g *Generator) genJSONStringify(expr ast.Expression) (string, error) {
+	if !g.UseJQ {
+		return "", fmt.Errorf("JSON.stringify() requires --opt-use-jq")
+	}
+	g.requireRuntimeHelper("jq")
+	if as, ok := expr.(*ast.AsExpr); ok {
+		return g.genJSONStringify(as.Expr)
+	}
+	typ := g.inferReceiverType(expr)
+	switch e := expr.(type) {
+	case *ast.ObjectLit:
+		if err := g.validateObjectLiteralScalarValues("JSON.stringify", e); err != nil {
+			return "", err
+		}
+		return g.genJSONObjectLiteral(e)
+	case *ast.ListLit:
+		val, err := g.genListLiteral(e)
+		if err != nil {
+			return "", err
+		}
+		return g.genJSONListValue(val, typ, e.Pos), nil
+	}
+	if typ != nil {
+		switch typ.Kind {
+		case ast.TypeString:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return jqScalarString(val), nil
+		case ast.TypeNumber:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return jqScalarJSON(val), nil
+		case ast.TypeBoolean:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)), nil
+		case ast.TypeList:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return g.genJSONListValue(val, typ, jsonExprPos(expr)), nil
+		case ast.TypeObject:
+			return g.genJSONObjectRef(expr)
+		}
+	}
+	val, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	return jqScalarString(val), nil
+}
+
+func jsonExprPos(expr ast.Expression) ast.Pos {
+	switch e := expr.(type) {
+	case *ast.StringLit:
+		return e.Pos
+	case *ast.RawStringLit:
+		return e.Pos
+	case *ast.TemplateLit:
+		return e.Pos
+	case *ast.IntLit:
+		return e.Pos
+	case *ast.FloatLit:
+		return e.Pos
+	case *ast.BoolLit:
+		return e.Pos
+	case *ast.ListLit:
+		return e.Pos
+	case *ast.ObjectLit:
+		return e.Pos
+	case *ast.IdentExpr:
+		return e.Pos
+	case *ast.BuiltinCallExpr:
+		return e.Pos
+	case *ast.MethodCallExpr:
+		return e.Pos
+	case *ast.PropertyExpr:
+		return e.Pos
+	case *ast.IndexExpr:
+		return e.Pos
+	case *ast.AsExpr:
+		return e.Pos
+	}
+	return ast.Pos{}
+}
+
+func jqScalarString(val string) string {
+	return fmt.Sprintf("$(jq -cn --arg _v %s '$_v')", ensureArgSafe(val))
+}
+
+func jqScalarJSON(val string) string {
+	return fmt.Sprintf("$(jq -cn --argjson _v %s '$_v')", ensureArgSafe(val))
+}
+
+func jsonListJQProgram(elem *ast.Type) string {
+	base := `split("\n") | if .[-1] == "" then .[:-1] else . end`
+	if elem == nil {
+		return base
+	}
+	switch elem.Kind {
+	case ast.TypeNumber:
+		return base + " | map(tonumber)"
+	case ast.TypeBoolean:
+		return base + ` | map(. == "1")`
+	default:
+		return base
+	}
+}
+
+func (g *Generator) genJSONListValue(val string, typ *ast.Type, pos ast.Pos) string {
+	elem := (*ast.Type)(nil)
+	if typ != nil && typ.Kind == ast.TypeList {
+		elem = typ.Elem
+	}
+	tmp := fmt.Sprintf("_bst_json_list_%d_%d", pos.Line, pos.Column)
+	program := shellQuote(jsonListJQProgram(elem))
+	return fmt.Sprintf("$(%s=%s; if [ -n \"$%s\" ]; then printf '%%s\n' \"$%s\" | jq -Rsc %s; else printf '[]'; fi)", tmp, val, tmp, tmp, program)
+}
+
+func (g *Generator) genJSONObjectLiteral(obj *ast.ObjectLit) (string, error) {
+	var args []string
+	var pairs []string
+	for i, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return "", err
+		}
+		val, err := g.genExprValue(field.Value)
+		if err != nil {
+			return "", err
+		}
+		name := fmt.Sprintf("_v%d", i)
+		key := fmt.Sprintf("_k%d", i)
+		args = append(args, "--arg", key, shellQuote(field.Key))
+		args = append(args, jsonJQValueArg(name, val, g.inferReceiverType(field.Value))...)
+		pairs = append(pairs, fmt.Sprintf("($%s): $%s", key, name))
+	}
+	if len(pairs) == 0 {
+		return "'{}'", nil
+	}
+	program := "{" + strings.Join(pairs, ", ") + "}"
+	return fmt.Sprintf("$(jq -cn %s %s)", strings.Join(args, " "), shellQuote(program)), nil
+}
+
+func (g *Generator) genJSONObjectRef(expr ast.Expression) (string, error) {
+	ref, ok := g.resolveObjectRef(expr)
+	if ok {
+		if err := g.validateObjectRefScalarValues("JSON.stringify", ref); err != nil {
+			return "", err
+		}
+	}
+	if !ok {
+		return "", fmt.Errorf("JSON.stringify() requires an object literal or named object")
+	}
+	if ref.StaticName == "" {
+		return g.genJSONDynamicObjectRef(ref), nil
+	}
+	fields, hasStaticFields := g.objFieldsMap[ref.StaticName]
+	if !hasStaticFields {
+		return g.genJSONStaticObjectMetadata(ref.StaticName), nil
+	}
+	if len(fields) == 0 {
+		return "'{}'", nil
+	}
+	var args []string
+	var pairs []string
+	for i, field := range fields {
+		name := fmt.Sprintf("_v%d", i)
+		key := fmt.Sprintf("_k%d", i)
+		propVar := objectPropVar(ref.StaticName, field)
+		args = append(args, "--arg", key, shellQuote(field))
+		args = append(args, jsonJQValueArg(name, fmt.Sprintf("\"$%s\"", propVar), g.objPropTypeMap[ref.StaticName+"."+field])...)
+		pairs = append(pairs, fmt.Sprintf("($%s): $%s", key, name))
+	}
+	program := "{" + strings.Join(pairs, ", ") + "}"
+	return fmt.Sprintf("$(jq -cn %s %s)", strings.Join(args, " "), shellQuote(program)), nil
+}
+
+func (g *Generator) genJSONStaticObjectMetadata(varName string) string {
+	loop := fmt.Sprintf("for _bst_obj_key in $_objkeys_%s; do %s; eval \"_bst_obj_value=\\\"\\${_obj_%s_${_bst_obj_key}}\\\"\"; printf '%%s\\037%%s\\n' \"$_bst_obj_key\" \"$_bst_obj_value\"; done", varName, computedKeyValidation("_bst_obj_key"), varName)
+	program := shellQuote(`split("\n") | map(select(length > 0)) | map(split("\u001f") | {key: .[0], value: .[1]}) | from_entries`)
+	return fmt.Sprintf("$(%s | jq -Rsc %s)", loop, program)
+}
+
+func (g *Generator) genJSONDynamicObjectRef(ref objectRef) string {
+	tmp := "_bst_json_obj_slot"
+	loop := fmt.Sprintf("%s=%s; for _bst_obj_key in $(eval \"printf '%%s' \\\"\\${_objkeys_${%s}}\\\"\"); do %s; eval \"_bst_obj_value=\\\"\\${_obj_${%s}_${_bst_obj_key}}\\\"\"; printf '%%s\\037%%s\n' \"$_bst_obj_key\" \"$_bst_obj_value\"; done", tmp, ref.SlotExpr, tmp, computedKeyValidation("_bst_obj_key"), tmp)
+	program := shellQuote(`split("\n") | map(select(length > 0)) | map(split("\u001f") | {key: .[0], value: .[1]}) | from_entries`)
+	return fmt.Sprintf("$(%s | jq -Rsc %s)", loop, program)
+}
+
+func jsonJQValueArg(name, val string, typ *ast.Type) []string {
+	if typ != nil {
+		switch typ.Kind {
+		case ast.TypeNumber:
+			return []string{"--argjson", name, ensureArgSafe(val)}
+		case ast.TypeBoolean:
+			boolVal := fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val))
+			return []string{"--argjson", name, ensureArgSafe(boolVal)}
+		}
+	}
+	return []string{"--arg", name, ensureArgSafe(val)}
+}
+
 func (g *Generator) genObjectKeys(expr ast.Expression) (string, error) {
 	if as, ok := expr.(*ast.AsExpr); ok {
 		return g.genObjectKeys(as.Expr)
@@ -5536,6 +5909,9 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Object.hasOwn":
 		return g.genObjectHasOwn(e.Args[0], e.Args[1])
 
+	case "JSON.stringify":
+		return g.genJSONStringify(e.Args[0])
+
 	case "Number.isInteger":
 		argStr, err := g.genExprValue(e.Args[0])
 		if err != nil {
@@ -5927,6 +6303,8 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeFetchResponse}
 		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
 			return &ast.Type{Kind: ast.TypeBoolean}
+		case "JSON.stringify":
+			return typeString
 		case "Object.keys", "Object.values":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "Object.entries":

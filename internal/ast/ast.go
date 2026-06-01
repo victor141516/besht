@@ -718,7 +718,7 @@ func IsBuiltin(name string) bool {
 	switch name {
 	case "fetch", "Boolean",
 		"Array.isArray", "Object.keys", "Object.values", "Object.entries", "Object.hasOwn",
-		"console.log", "console.error":
+		"JSON.stringify", "console.log", "console.error":
 		return true
 	}
 	return false

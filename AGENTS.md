@@ -119,6 +119,9 @@ go run ./cmd/besht/ <file.bsh> --opt-resolve-ts-imports
 
 # Allow explicit .sh imports outside the compiler root
 go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
+
+# Opt in to jq-backed JSON.stringify() codegen
+go run ./cmd/besht/ <file.bsh> --opt-use-jq
 ```
 
 ### CLI Flags
@@ -134,6 +137,7 @@ go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
 | `--opt-no-source-map`          | Omit `# besht:file:line:col` source comments from compiled output        |
 | `--opt-resolve-ts-imports`     | Let extensionless imports fall back to `.ts` only when `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Allow explicit `.sh` imports outside the compiler root          |
+| `--opt-use-jq`               | Enable jq-backed `JSON.stringify()` codegen                     |
 | `--version`                   | Print version                                                         |
 
 ### `--opt-*` flags
@@ -146,8 +150,9 @@ All flags that change how code is transformed or what is emitted share the `--op
 | `--opt-no-source-map`          | Do not emit `# besht:file:line:col` source comments in compiled output         |
 | `--opt-resolve-ts-imports`     | Resolve extensionless imports to `.bsh` first, then `.ts` if `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Permit explicit `.sh` imports outside the compiler root; `.bsh` imports remain root-confined |
+| `--opt-use-jq` | Permit generated JSON code to invoke `jq`; required for `JSON.stringify()` |
 
-Pass via `codegen.Options{NoCheck: true, NoSourceMap: true, ResolveTsImports: true, AllowExternalShellImports: true}` in Go code.
+Pass via `codegen.Options{NoCheck: true, NoSourceMap: true, ResolveTsImports: true, AllowExternalShellImports: true, UseJQ: true}` in Go code.
 
 Generated shell emits inline `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions. Class declarations skip the generic statement-boundary comment so synthetic property accessors and implicit default constructors do not receive source comments.
 
@@ -359,7 +364,7 @@ internal/codegen/codegen_test.go   # Unit: AST → sh output patterns (uses Gene
 internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh output
 ```
 
-`node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.
+`node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Fixtures that need non-default compiler flags may include a top-of-file `// besht-compile-flags: ...` directive; the compare runner applies those flags only to that fixture. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.
 
 Tests use `go test ./...`. Coverage target: `make cover`. Current coverage: ~75%.
 
@@ -403,6 +408,8 @@ let objectKeys: string[] = Object.keys(user) // object key list
 let objectValues: string[] = Object.values(user) // object value list
 let objectEntries: string[][] = Object.entries(user) // packed [key, value] rows
 let objectHasName: boolean = Object.hasOwn(user, "name")
+let jsonUser: string = JSON.stringify(user) // scalar-valued objects; requires --opt-use-jq
+let jsonList: string = JSON.stringify(["a", "b"])
 
 // Constants (compile-time immutability)
 const MAX: number = 100

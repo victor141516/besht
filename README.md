@@ -32,6 +32,8 @@ besht script.bsh --split -o build/
 # Validate imports, command usage, and unsupported fetch APIs
 besht --check script.bsh
 
+# Opt in to jq-backed JSON.stringify() support
+besht script.bsh --opt-use-jq
 # Run directly
 besht script.bsh | sh
 ```
@@ -111,7 +113,7 @@ Files use the `.bsh` extension.
 - Static scalar list expression `.join()` and `.toString()` calls compile to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
 - Static scalar list expression `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles compile to constants; dynamic searches keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()` and static-key `Object.hasOwn()` calls also fold from compiler-managed key metadata.
-- Object literals compile to per-property shell variables; `Object.keys(obj)` returns known object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership.
+- Object literals compile to per-property shell variables; `Object.keys(obj)` returns known object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership. `JSON.stringify(value)` is available when compiling with `--opt-use-jq`.
 - Boolean object properties used directly in conditions compile to direct `= 1` shell tests; non-boolean property conditions keep generic JavaScript-style truthiness.
 - Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters.
 - TypeScript-only class modifiers such as `private`, `public`, `protected`, and `readonly` are accepted and ignored.
@@ -132,6 +134,7 @@ Files use the `.bsh` extension.
 - Semicolons are optional (only required inside `for` headers).
 - `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.of(...)` creates a list from the given values; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
 - `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use compiler-managed object key metadata and do not emit runtime helpers.
+- `JSON.stringify(value)` is opt-in through `--opt-use-jq`; generated scripts then require `jq` only when JSON code is emitted.
 - `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
 - Arrow callbacks support expression and block bodies for list `.map()`, `.reduce()`, and statement-position `.forEach()`; `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, and `.forEach()` callbacks may also receive a zero-based index parameter.
 - Generated shell elides string runtime helpers unless one-argument string `.includes()`, `.startsWith()`, or `.endsWith()` actually needs them.
@@ -824,6 +827,14 @@ Object helpers:
 | `Object.entries(obj)`    | Return object `[key, value]` rows as a `string[][]` |
 | `Object.hasOwn(obj, key)` | Return whether a compiler-managed object has an exact key |
 
+JSON helper:
+
+| Function | Description |
+| -------- | ----------- |
+| `JSON.stringify(value)` | Encode strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when compiled with `--opt-use-jq` |
+
+`JSON.stringify()` intentionally requires the `--opt-use-jq` compiler flag. With that flag, generated JSON code invokes `jq` and the runtime self-check verifies `jq` is available whenever JSON code is emitted. Without the flag, compiling a program that calls `JSON.stringify()` is an error. `JSON.parse()` is not implemented.
+
 ### Type conversion
 
 Use JS-style conversion APIs for new code:
@@ -995,6 +1006,7 @@ besht <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-check wh
 besht <file.bsh> --opt-no-source-map            Omit source comments from compiled output
 besht <file.bsh> --opt-resolve-ts-imports       Resolve extensionless imports to .ts only when .bsh is absent
 besht <file.bsh> --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
+besht <file.bsh> --opt-use-jq                  Enable jq-backed JSON.stringify() codegen
 besht --version                     Show version
 besht --help                        Show usage
 ```
