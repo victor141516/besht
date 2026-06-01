@@ -556,6 +556,31 @@ console.log("left:right".split(":")[0])
 	}
 }
 
+func TestIntegration_StaticStringIndexRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `console.log("abc"[1])
+let s = "abc"
+console.log(s[2])
+console.log(s[99] === "")
+`)
+	out := compileFile(t, path)
+	assertNotContains(t, out, `cut -c$(( 1 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 2 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 99 + 1 ))`)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", shPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
+	}
+	if string(output) != "b\nc\ntrue\n" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestIntegration_SetValuesWithSpacesAndNestedListLiterals(t *testing.T) {
 	out := runCompiledShell(t, `const seen = new Set<string>()
 seen.add("a b")

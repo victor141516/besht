@@ -269,7 +269,7 @@ Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.
 
 ## String and List Search
 
-Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literals and variables bound to them fold searches and `charAt()` calls with static arguments to constants. Lists also support `items.includes(x)` for exact item membership.
+Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string literals and variables bound to them fold `[index]`, searches, and `charAt()` calls with static arguments to constants. Lists also support `items.includes(x)` for exact item membership.
 
 Static ASCII string literals and variables bound to them fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools.
 
@@ -735,6 +735,7 @@ pi.toFixed(2); // "3.14"
 let s = "hello";
 s.substring(1, 4); // "ell"
 s.charAt(1); // "e"
+s[1]; // "e"
 s.indexOf("l", 3); // 3, optional start position
 s.lastIndexOf("l"); // 3
 s.lastIndexOf("l", 2); // 2, optional backward start position

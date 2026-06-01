@@ -955,6 +955,30 @@ func TestCodegen_StaticListOutOfRangeIndexKeepsRuntimePath(t *testing.T) {
 	assertContains(t, out, `sed -n "$(( 3 + 1 ))p"`)
 }
 
+func TestCodegen_StaticStringIndexExpr(t *testing.T) {
+	out := compile(t, `let second: string = "abc"[1]
+let s = "abc"
+let third: string = s[2]
+let missing: string = s[99]`)
+	assertContains(t, out, `second='b'`)
+	assertContains(t, out, `third='c'`)
+	assertContains(t, out, `missing=''`)
+	assertNotContains(t, out, `cut -c$(( 1 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 2 + 1 ))`)
+	assertNotContains(t, out, `cut -c$(( 99 + 1 ))`)
+}
+
+func TestCodegen_StaticStringIndexSkipsControlFlowAssignedVars(t *testing.T) {
+	out := compile(t, `let s = "abc"
+while (true) {
+    s = "xyz"
+    break
+}
+let ch: string = s[1]`)
+	assertContains(t, out, `cut -c$(( 1 + 1 ))`)
+	assertNotContains(t, out, `ch='b'`)
+}
+
 func TestCodegen_StaticListIndexSkipsControlFlowAssignedVars(t *testing.T) {
 	out := compile(t, `let currentPos = [0, 0]
 while (true) {

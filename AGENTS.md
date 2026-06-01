@@ -287,6 +287,8 @@ Static primitive `.toString()` fragments inside string concatenation and templat
 
 Static `??` expressions compile to the selected side when the left operand is provably nullish or non-nullish. Preserve `""`, `0`, and `false` as non-nullish; control-flow assigned variables and optional/dynamic nullish sources must keep the sentinel path.
 
+Static ASCII string literal indexes and indexes into variables bound to static ASCII strings compile to constants when the index is a known non-negative integer; dynamic indexes, non-ASCII strings, and control-flow assigned string variables keep the POSIX `cut` path.
+
 Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static `!`/`&&`/`||` expressions render directly as `true`/`false`; dynamic boolean expressions keep the general formatting path.
 
 Variables bound to static string literals may fold `.length` to a numeric constant. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
@@ -564,6 +566,7 @@ for (f in files) {
 let first: string = files[0] // static scalar list indexes fold to constants when known
 let item: string = files[i]
 let cell: string = matrix[row][col]
+let letter: string = "abc"[1] // static ASCII string indexes fold to constants when known
 let maybeName: string = user?.name ?? "anonymous"
 let maybeItem: string = items?.[i] ?? "fallback"
 let maybeCell: string = matrix?.[row]?.[col] ?? "missing"
