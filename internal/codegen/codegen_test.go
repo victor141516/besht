@@ -501,7 +501,8 @@ let n: number = files.length`)
 func TestCodegen_BuiltinHead(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
 let first: string = files[0]`)
-	assertContains(t, out, `sed -n "$(( 0 + 1 ))p"`)
+	assertContains(t, out, `first='a'`)
+	assertNotContains(t, out, `sed -n "$(( 0 + 1 ))p"`)
 }
 
 func TestCodegen_BuiltinTail(t *testing.T) {
@@ -774,7 +775,8 @@ console.log(msg)`)
 func TestCodegen_IndexExpr(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
 let first: string = files[0]`)
-	assertContains(t, out, `sed -n`)
+	assertContains(t, out, `first='a'`)
+	assertNotContains(t, out, `sed -n "$(( 0 + 1 ))p"`)
 }
 
 func TestCodegen_IndexExprVariable(t *testing.T) {
@@ -782,6 +784,33 @@ func TestCodegen_IndexExprVariable(t *testing.T) {
 let i: number = 1
 let item: string = files[i]`)
 	assertContains(t, out, `$(( $i + 1 ))`)
+}
+
+func TestCodegen_StaticListLiteralIndexExpr(t *testing.T) {
+	out := compile(t, `let first: string = ["a", "b"][0]
+let fromFactory: string = Array.of("x", "y")[1]
+let fromSplit: string = "a,b".split(",")[1]`)
+	assertContains(t, out, `first='a'`)
+	assertContains(t, out, `fromFactory='y'`)
+	assertContains(t, out, `fromSplit='b'`)
+	assertNotContains(t, out, `sed -n "$(( 0 + 1 ))p"`)
+	assertNotContains(t, out, `sed -n "$(( 1 + 1 ))p"`)
+}
+
+func TestCodegen_StaticListOutOfRangeIndexKeepsRuntimePath(t *testing.T) {
+	out := compile(t, `let missing: string = ["a", "b"][3]`)
+	assertContains(t, out, `sed -n "$(( 3 + 1 ))p"`)
+}
+
+func TestCodegen_StaticListIndexSkipsControlFlowAssignedVars(t *testing.T) {
+	out := compile(t, `let currentPos = [0, 0]
+while (true) {
+    let row = currentPos[0]
+    currentPos = [row + 1, currentPos[1]]
+    break
+}`)
+	assertContains(t, out, `row=$(printf '%s\n' "$currentPos" | sed -n "$(( 0 + 1 ))p")`)
+	assertNotContains(t, out, `row='0'`)
 }
 
 func TestCodegen_ConstDecl(t *testing.T) {
@@ -1108,7 +1137,7 @@ let appended: list<string> = files.push("x")
 if (files.includes("x")) { $("echo", "found").run() }
 let combined: list<string> = files.concat(other)`)
 	assertContains(t, out, `wc -l`)
-	assertContains(t, out, `sed -n`)
+	assertContains(t, out, `first='a'`)
 	assertContains(t, out, `tail -n +$(( 1 + 1 ))`)
 	assertContains(t, out, `printf '%s\n%s'`)
 	assertContains(t, out, `grep -qxF`)

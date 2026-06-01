@@ -576,6 +576,8 @@ let cell: string = matrix[row][col]
 let width: number = matrix[0].length
 ````
 
+Static scalar list indexes with known in-range integer indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed` extraction path.
+
 ## Error Handling
 
 **try/catch** — catches any failing command in the block:
@@ -646,6 +648,8 @@ Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls
 Static string literal and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
 
 Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls compile to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path.
+
+Static scalar list indexes with known in-range integer indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed` path.
 
 ## Imports and Modules
 
