@@ -2961,8 +2961,8 @@ func TestCodegen_BooleanPropertyCondition(t *testing.T) {
 if (user.active) {
     console.log("active")
 }`)
-	assertContains(t, out, `if [ "$_obj_user_active" = 1 ]; then`)
 	assertContains(t, out, `printf '%s\n' 'active'`)
+	assertNotContains(t, out, `if [ '1' = 1 ]; then`)
 	assertNotContains(t, out, `_bst_cond="$_obj_user_active"`)
 }
 
@@ -2971,8 +2971,34 @@ func TestCodegen_StringPropertyConditionKeepsTruthyFallback(t *testing.T) {
 if (user.name) {
     console.log("named")
 }`)
-	assertContains(t, out, `if (_bst_cond="$_obj_user_name"; [ -n "$_bst_cond" ] && [ "$_bst_cond" != 0 ]); then`)
+	assertContains(t, out, `if (_bst_cond='Ada'; [ -n "$_bst_cond" ] && [ "$_bst_cond" != 0 ]); then`)
 	assertNotContains(t, out, `if [ "$_obj_user_name" = 1 ]; then`)
+}
+
+func TestCodegen_StaticObjectPropertyReads(t *testing.T) {
+	out := compile(t, `let user = { name: "Ada", city: "Paris", active: true, age: 42 }
+console.log(user.name)
+console.log(user.city)
+console.log(user.active)
+console.log(user.age)`)
+	assertContains(t, out, `printf '%s\n' 'Ada'`)
+	assertContains(t, out, `printf '%s\n' 'Paris'`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' '42'`)
+	assertNotContains(t, out, `printf '%s\n' "$_obj_user_name"`)
+	assertNotContains(t, out, `printf '%s\n' "$_obj_user_city"`)
+}
+
+func TestCodegen_StaticObjectPropertyReadsFallbackAfterMutation(t *testing.T) {
+	out := compile(t, `let user = { name: "Ada" }
+user.name = "Grace"
+console.log(user.name)
+let key = "name"
+user[key] = "Katherine"
+console.log(user.name)`)
+	assertContains(t, out, `printf '%s\n' "$_obj_user_name"`)
+	assertNotContains(t, out, `printf '%s\n' 'Ada'`)
+	assertNotContains(t, out, `printf '%s\n' 'Grace'`)
 }
 
 func TestCodegen_StaticObjectLiteralAPIs(t *testing.T) {
