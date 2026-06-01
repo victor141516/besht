@@ -651,7 +651,7 @@ Static scalar list literals compile to quoted newline-backed shell strings when 
 
 Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder.
 
-Static string literals, variables bound to static string literals, and static scalar list literal `.length` properties compile to numeric constants; dynamic lengths use POSIX `wc`.
+Static string literals, variables bound to static string literals, static scalar list literals, and variables bound to static scalar lists compile `.length` properties to numeric constants; dynamic lengths use POSIX `wc`.
 
 Static scalar list literal `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls compile to constants when the needle is static. Dynamic list searches keep the POSIX `grep`/`awk` path.
 

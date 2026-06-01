@@ -602,7 +602,8 @@ if (ok) {
 func TestCodegen_BuiltinLen(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a"]
 let n: number = files.length`)
-	assertContains(t, out, `wc -l`)
+	assertContains(t, out, `n=1`)
+	assertNotContains(t, out, `wc -l`)
 }
 
 func TestCodegen_BuiltinHead(t *testing.T) {
@@ -1178,7 +1179,8 @@ let l2: list<string> = l.push("b")`)
 func TestCodegen_ListJoin(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.join(", ")`)
-	assertContains(t, out, `NR>1{printf s}`)
+	assertContains(t, out, `awk -v s=', ' -v _len=3`)
+	assertContains(t, out, `NR<=_len`)
 }
 
 func TestCodegen_StaticListLiteralJoin(t *testing.T) {
@@ -1197,8 +1199,8 @@ func TestCodegen_StaticListLiteralToString(t *testing.T) {
 func TestCodegen_ListToString(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.toString()`)
-	assertContains(t, out, `awk -v s=','`)
-	assertContains(t, out, `NR>1{printf s}`)
+	assertContains(t, out, `awk -v s=',' -v _len=3`)
+	assertContains(t, out, `NR<=_len`)
 	assertNotContains(t, out, `_bst_includes()`)
 	assertNotContains(t, out, `local `)
 	assertNotContains(t, out, `[[`)
@@ -1207,7 +1209,27 @@ let s: string = l.toString()`)
 func TestCodegen_ListLength(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 let n: number = l.length`)
+	assertContains(t, out, `n=2`)
+	assertNotContains(t, out, `wc -l`)
+}
+
+func TestCodegen_ListLengthFallsBackAfterControlFlowAssignment(t *testing.T) {
+	out := compile(t, `let l: list<string> = ["a", "b"]
+while (true) {
+    l = ["a", "b", "c"]
+    break
+}
+let n: number = l.length`)
 	assertContains(t, out, `wc -l`)
+	assertNotContains(t, out, `n=2`)
+}
+
+func TestCodegen_ListLengthFallsBackAfterMutation(t *testing.T) {
+	out := compile(t, `let l: list<string> = ["a", "b"]
+l.push("c")
+let n: number = l.length`)
+	assertContains(t, out, `wc -l`)
+	assertNotContains(t, out, `n=2`)
 }
 
 func TestCodegen_StaticListLiteralLength(t *testing.T) {
@@ -1267,7 +1289,8 @@ let rest: list<string> = files.slice(1)
 let appended: list<string> = files.push("x")
 if (files.includes("x")) { $("echo", "found").run() }
 let combined: list<string> = files.concat(other)`)
-	assertContains(t, out, `wc -l`)
+	assertContains(t, out, `count=3`)
+	assertNotContains(t, out, `wc -l`)
 	assertContains(t, out, `first='a'`)
 	assertContains(t, out, `tail -n +$(( 1 + 1 ))`)
 	assertContains(t, out, `printf '%s\n%s'`)

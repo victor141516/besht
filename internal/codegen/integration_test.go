@@ -1447,6 +1447,18 @@ console.log([true, false].length)`)
 	}
 }
 
+func TestIntegration_StaticListVariableLengthRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let files = ["a", "b", "c"]
+let count = files.length
+console.log(count)
+let empty: string[] = []
+console.log(empty.length)`)
+	want := "3\n0\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_ListToStringRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(["a", "b"].toString())
 let empty: string[] = []
