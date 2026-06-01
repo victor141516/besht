@@ -114,6 +114,7 @@ Files use the `.bsh` extension.
 - Static scalar list expression `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles compile to constants; dynamic searches keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()` and static-key `Object.hasOwn()` calls also fold from compiler-managed key metadata.
 - Object literals compile to per-property shell variables; `Object.keys(obj)` returns known object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership. `JSON.stringify(value)` is available when compiling with `--opt-use-jq`.
+- Static scalar list destructuring over literals and variables bound to them emits direct assignments; dynamic destructuring keeps the temp-and-`sed` path.
 - Boolean object properties used directly in conditions compile to direct `= 1` shell tests; non-boolean property conditions keep generic JavaScript-style truthiness.
 - Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters.
 - TypeScript-only class modifiers such as `private`, `public`, `protected`, and `readonly` are accepted and ignored.
@@ -646,7 +647,7 @@ let copied = [...l, "omega"]; // list spread in list literals
 l.length; // number
 matrix[0][1]; // nested indexing
 matrix[0].length; // row length
-const [row, col] = [1, 2]; // tuple/list destructuring
+const [row, col] = [1, 2]; // tuple/list destructuring, direct assignments for static scalar lists
 let maybe = matrix?.[row]?.[col] ?? "missing"
 ```
 
