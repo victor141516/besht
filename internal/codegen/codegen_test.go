@@ -342,6 +342,33 @@ let negated = -3`)
 	assertNotContains(t, out, `awk -v _a=5 -v _b=2`)
 }
 
+func TestCodegen_StaticFoldedComparisons(t *testing.T) {
+	out := compile(t, `console.log(Math.min(4, 2) === 2)
+console.log((2 + 3) === 5)
+console.log(Number.parseInt("42") === 42)
+console.log(Number.parseFloat("3.5") > 3)
+console.log("hello".charAt(99) === "")
+console.log("hi".toUpperCase() === "HI")
+console.log("  hi  ".trim() === "hi")
+console.log(Math.max(4, 2) < 4)
+console.log("hi".toUpperCase() !== "HI")`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' false`)
+	assertNotContains(t, out, `_bst_left=2; _bst_right=2`)
+	assertNotContains(t, out, `if [ 1 = 1 ]; then printf true`)
+	assertNotContains(t, out, `if [ 0 = 1 ]; then printf true`)
+}
+
+func TestCodegen_StaticFoldedComparisonsKeepDynamicFallback(t *testing.T) {
+	out := compile(t, `function pick(): string {
+    return "hi"
+}
+let value = pick()
+console.log(value === "hi")`)
+	assertContains(t, out, `_bst_left="$value"`)
+	assertContains(t, out, `_bst_right='hi'`)
+}
+
 func TestCodegen_StaticArithmeticKeepsDynamicFallback(t *testing.T) {
 	out := compile(t, `let a = 2
 let sum = a + 3

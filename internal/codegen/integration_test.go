@@ -1346,6 +1346,22 @@ console.log(-3 + 5)`)
 	}
 }
 
+func TestIntegration_StaticFoldedComparisonsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(Math.min(4, 2) === 2)
+console.log((2 + 3) === 5)
+console.log(Number.parseInt("42") === 42)
+console.log(Number.parseFloat("3.5") > 3)
+console.log("hello".charAt(99) === "")
+console.log("hi".toUpperCase() === "HI")
+console.log("  hi  ".trim() === "hi")
+console.log(Math.max(4, 2) < 4)
+console.log("hi".toUpperCase() !== "HI")`)
+	want := "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_NumberMethods(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", "let n = 42\nlet ns = n.toString()\nlet pi = 3.14159\nlet fixed = pi.toFixed(2)\nconsole.log(ns)\nconsole.log(fixed)\n")
