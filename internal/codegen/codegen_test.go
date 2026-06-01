@@ -1796,10 +1796,24 @@ let next: string[] = l.unshift("a")`)
 
 func TestCodegen_ArrayOf(t *testing.T) {
 	out := compile(t, `let l: string[] = Array.of("a", "b", "c")`)
-	assertContains(t, out, `printf`)
-	assertContains(t, out, `a`)
-	assertContains(t, out, `b`)
-	assertContains(t, out, `c`)
+	assertContains(t, out, "l='a\nb\nc'")
+	assertNotContains(t, out, `printf '%s\n%s'`)
+}
+
+func TestCodegen_StaticArrayFactories(t *testing.T) {
+	out := compile(t, `let ofValues = Array.of("a", "b", "c")
+let indexes = Array.from({ length: 3 })
+for (value of Array.of("x", "y")) {
+    console.log(value)
+}
+for (i of Array.from({ length: 3 })) {
+    console.log(i)
+}`)
+	assertContains(t, out, "ofValues='a\nb\nc'")
+	assertContains(t, out, "indexes='0\n1\n2'")
+	assertContains(t, out, `for value in 'x' 'y'; do`)
+	assertContains(t, out, `for i in '0' '1' '2'; do`)
+	assertNotContains(t, out, `_arrfrom_`)
 }
 
 func TestCodegen_ArrayIsArray(t *testing.T) {
@@ -2103,7 +2117,8 @@ let mapped = Array.from({ length: 3 }).map((_, i) => {
     if (++count % 2 !== 0) return i
     return count
 })`)
-	assertContains(t, out, `_arrfrom_2_14=0`)
+	assertNotContains(t, out, `_arrfrom_2_14=0`)
+	assertContains(t, out, "0\n1\n2")
 	assertContains(t, out, `_cb_2_45_i=$_cb_2_44_index`)
 	assertContains(t, out, `(count = count + 1)`)
 	assertContains(t, out, `continue`)

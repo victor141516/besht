@@ -2301,6 +2301,21 @@ console.log(empty.join(",") === "")`)
 	}
 }
 
+func TestIntegration_StaticArrayFactoriesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let indexes = Array.from({ length: 3 })
+console.log(indexes.length)
+for (value of Array.of("x", "y")) {
+    console.log(value)
+}
+for (i of indexes) {
+    console.log(i)
+}`)
+	want := "3\nx\ny\n0\n1\n2\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_ArrayIsArrayRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(Array.isArray(["a", "b"]))
 console.log(Array.isArray(Array.of("x")))
