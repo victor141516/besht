@@ -2263,6 +2263,24 @@ console.log("hi".padEnd(5, "."))`)
 	}
 }
 
+func TestIntegration_StaticStringVariableMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let greeting = "hello"
+let spaced = "  hi  "
+let needle = "ell"
+console.log(greeting.toUpperCase())
+console.log(spaced.trim())
+console.log(greeting.includes(needle))
+console.log(greeting.startsWith("he"))
+console.log(greeting.endsWith("lo"))
+console.log(greeting.indexOf("l"))
+console.log(greeting.lastIndexOf("l"))
+if (greeting.includes(needle)) console.log("yes")`)
+	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\nyes\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticStringSplitRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let parts = "a,b,c".split(",")
 console.log(parts.length)

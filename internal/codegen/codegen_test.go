@@ -996,20 +996,23 @@ let c: list<string> = a.concat(b)`)
 }
 
 func TestCodegen_StringTrim(t *testing.T) {
-	out := compile(t, `let s: string = "  hi  "
-let t: string = s.trim()`)
+	out := compile(t, `function trimIt(s: string) {
+    let t: string = s.trim()
+}`)
 	assertContains(t, out, `sed 's/^[[:space:]]`)
 }
 
 func TestCodegen_StringToUpperCase(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-let u: string = s.toUpperCase()`)
+	out := compile(t, `function upper(s: string) {
+    let u: string = s.toUpperCase()
+}`)
 	assertContains(t, out, `tr '[:lower:]' '[:upper:]'`)
 }
 
 func TestCodegen_StringToLowerCase(t *testing.T) {
-	out := compile(t, `let s: string = "HELLO"
-let l: string = s.toLowerCase()`)
+	out := compile(t, `function lower(s: string) {
+    let l: string = s.toLowerCase()
+}`)
 	assertContains(t, out, `tr '[:upper:]' '[:lower:]'`)
 }
 
@@ -1078,31 +1081,34 @@ console.log(MathUtils.round(2.7))`)
 }
 
 func TestCodegen_OneArgStringRuntimeHelpersEmittedWhenUsed(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-let has = s.includes("ell")
-let sw = s.startsWith("he")
-let ew = s.endsWith("lo")`)
+	out := compile(t, `function check(s: string) {
+    let has = s.includes("ell")
+    let sw = s.startsWith("he")
+    let ew = s.endsWith("lo")
+}`)
 	assertContains(t, out, `_bst_includes()`)
-	assertContains(t, out, `_bst_includes "$s" 'ell'`)
+	assertContains(t, out, `_bst_includes "$_check_s" 'ell'`)
 	assertContains(t, out, `_bst_starts_with()`)
-	assertContains(t, out, `_bst_starts_with "$s" 'he'`)
+	assertContains(t, out, `_bst_starts_with "$_check_s" 'he'`)
 	assertContains(t, out, `_bst_ends_with()`)
-	assertContains(t, out, `_bst_ends_with "$s" 'lo'`)
+	assertContains(t, out, `_bst_ends_with "$_check_s" 'lo'`)
 }
 
 func TestCodegen_StringStartsWithCondition(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-if (s.startsWith("hel")) {
-    $("echo", "yes").run()
+	out := compile(t, `function check(s: string) {
+    if (s.startsWith("hel")) {
+        $("echo", "yes").run()
+    }
 }`)
 	assertContains(t, out, `_bst_starts_with`)
 	assertContains(t, out, `'hel'`)
 }
 
 func TestCodegen_StringEndsWithCondition(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-if (s.endsWith("llo")) {
-    $("echo", "yes").run()
+	out := compile(t, `function check(s: string) {
+    if (s.endsWith("llo")) {
+        $("echo", "yes").run()
+    }
 }`)
 	assertContains(t, out, `_bst_ends_with`)
 	assertContains(t, out, `'llo'`)
@@ -1143,6 +1149,32 @@ let ended: string = "hi".padEnd(5, ".")`)
 	assertNotContains(t, out, `tr '[:lower:]'`)
 	assertNotContains(t, out, `cut -c`)
 	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticStringVariableTransforms(t *testing.T) {
+	out := compile(t, `let greeting = "hello"
+let spaced = "  hi  "
+let fill = "."
+let upper = greeting.toUpperCase()
+let trimmed = spaced.trim()
+let padded = greeting.padStart(8, fill)`)
+	assertContains(t, out, `upper='HELLO'`)
+	assertContains(t, out, `trimmed='hi'`)
+	assertContains(t, out, `padded='...hello'`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `printf '%8s'`)
+}
+
+func TestCodegen_StaticStringVariableTransformsFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let greeting = "hello"
+while (true) {
+    greeting = "bye"
+    break
+}
+let upper = greeting.toUpperCase()`)
+	assertContains(t, out, `tr '[:lower:]' '[:upper:]'`)
+	assertNotContains(t, out, `upper='HELLO'`)
 }
 
 func TestCodegen_StringLength(t *testing.T) {
@@ -1798,8 +1830,9 @@ let c: string = s.at(0)`)
 }
 
 func TestCodegen_StringSlice(t *testing.T) {
-	out := compile(t, `let s: string = "hello world"
-let sub: string = s.slice(0, 5)`)
+	out := compile(t, `function sliceIt(s: string) {
+    let sub: string = s.slice(0, 5)
+}`)
 	assertContains(t, out, `cut -c`)
 }
 
@@ -1811,18 +1844,20 @@ let c: string = a.concat(b)`)
 }
 
 func TestCodegen_StringIndexOf(t *testing.T) {
-	out := compile(t, `let s: string = "hello world"
-let i: number = s.indexOf("world")`)
+	out := compile(t, `function find(s: string) {
+    let i: number = s.indexOf("world")
+}`)
 	assertContains(t, out, `awk`)
 }
 
 func TestCodegen_StringSearchOptionalArgsUseAwkArgs(t *testing.T) {
-	out := compile(t, `let s: string = "hello hello"
-let i: number = s.indexOf("lo", 4)
-let j: number = s.lastIndexOf("lo", 7)
-let has: boolean = s.includes("lo", 4)
-let sw: boolean = s.startsWith("lo", 3)
-let ew: boolean = s.endsWith("hel", 3)`)
+	out := compile(t, `function find(s: string) {
+    let i: number = s.indexOf("lo", 4)
+    let j: number = s.lastIndexOf("lo", 7)
+    let has: boolean = s.includes("lo", 4)
+    let sw: boolean = s.startsWith("lo", 3)
+    let ew: boolean = s.endsWith("hel", 3)
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `_pos`)
 	assertContains(t, out, `_needle`)
@@ -1849,6 +1884,40 @@ let pos: number = "hello hello".indexOf("lo", 4)`)
 	assertNotContains(t, out, `awk`)
 }
 
+func TestCodegen_StaticStringVariableSearchMethods(t *testing.T) {
+	out := compile(t, `let greeting = "hello"
+let needle = "ell"
+let has = greeting.includes(needle)
+let sw = greeting.startsWith("he")
+let ew = greeting.endsWith("lo")
+let first = greeting.indexOf("l")
+let last = greeting.lastIndexOf("l")
+console.log(greeting.includes(needle))
+if (greeting.includes(needle)) console.log("yes")`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `sw=1`)
+	assertContains(t, out, `ew=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=3`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `if true; then`)
+	assertNotContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `_bst_starts_with`)
+	assertNotContains(t, out, `_bst_ends_with`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticStringVariableSearchFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let greeting = "hello"
+while (true) {
+    greeting = "bye"
+    break
+}
+let has = greeting.includes("ell")`)
+	assertContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `has=1`)
+}
+
 func TestCodegen_StaticStringCharAt(t *testing.T) {
 	out := compile(t, `let c: string = "hello".charAt(1)
 let missing: string = "hello".charAt(99)`)
@@ -1858,16 +1927,18 @@ let missing: string = "hello".charAt(99)`)
 }
 
 func TestCodegen_StringLastIndexOf(t *testing.T) {
-	out := compile(t, `let s: string = "banana"
-let i: number = s.lastIndexOf("na")`)
+	out := compile(t, `function find(s: string) {
+    let i: number = s.lastIndexOf("na")
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `length(_needle)`)
 	assertContains(t, out, `substr(_s,i+1,n)==_needle`)
 }
 
 func TestCodegen_StringLastIndexOfSafeAwkArgs(t *testing.T) {
-	out := compile(t, `let s: string = "hello hello"
-let i: number = s.lastIndexOf("lo")`)
+	out := compile(t, `function find(s: string) {
+    let i: number = s.lastIndexOf("lo")
+}`)
 	assertContains(t, out, `found=-1`)
 	assertContains(t, out, `_needle`)
 }
@@ -1927,15 +1998,17 @@ let sum = r + 2`)
 }
 
 func TestCodegen_StringCharAt(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-let c: string = s.charAt(1)`)
+	out := compile(t, `function pick(s: string) {
+    let c: string = s.charAt(1)
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `substr`)
 }
 
 func TestCodegen_StringSubstring(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-let sub: string = s.substring(1, 4)`)
+	out := compile(t, `function cutIt(s: string) {
+    let sub: string = s.substring(1, 4)
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `substr`)
 }
@@ -2112,26 +2185,29 @@ func TestCodegen_CmdInCondition(t *testing.T) {
 }
 
 func TestCodegen_StringIncludesInCondition(t *testing.T) {
-	out := compile(t, `let s: string = "hello world"
-if (s.includes("world")) {
-    $("echo", "found").run()
+	out := compile(t, `function check(s: string) {
+    if (s.includes("world")) {
+        $("echo", "found").run()
+    }
 }`)
 	assertContains(t, out, `case`)
 }
 
 func TestCodegen_StringStartsWithInCondition(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-if (s.startsWith("hel")) {
-    $("echo", "yes").run()
+	out := compile(t, `function check(s: string) {
+    if (s.startsWith("hel")) {
+        $("echo", "yes").run()
+    }
 }`)
 	assertContains(t, out, `_bst_starts_with`)
 	assertContains(t, out, `'hel'`)
 }
 
 func TestCodegen_StringEndsWithInCondition(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-if (s.endsWith("llo")) {
-    $("echo", "yes").run()
+	out := compile(t, `function check(s: string) {
+    if (s.endsWith("llo")) {
+        $("echo", "yes").run()
+    }
 }`)
 	assertContains(t, out, `_bst_ends_with`)
 	assertContains(t, out, `'llo'`)
