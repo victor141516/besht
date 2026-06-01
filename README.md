@@ -191,7 +191,7 @@ let bigger = a > b ? a : b;
 
 ### Environment variables
 
-Use `process.env.NAME` for JavaScript-style environment access. Missing variables are nullish, so `??` falls back only when the variable is unset and preserves an explicitly empty value.
+Use `process.env.NAME` for JavaScript-style environment access. Missing variables are nullish, so `??` falls back only when the variable is unset and preserves an explicitly empty value. Static safe defaults compile to POSIX unset-only expansion such as `${PORT-8080}`.
 
 ```ts
 let home: string = process.env.HOME

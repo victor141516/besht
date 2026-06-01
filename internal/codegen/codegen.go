@@ -4580,6 +4580,9 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 	}
 
 	if e.Op == "??" {
+		if value, ok, err := g.genProcessEnvNullishCoalesce(e); ok || err != nil {
+			return value, err
+		}
 		if value, ok, err := g.genStaticNullishCoalesce(e, targetType); ok || err != nil {
 			return value, err
 		}
@@ -4708,6 +4711,55 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		return fmt.Sprintf("$(( %s %s %s ))", lClean, e.Op, rClean), nil
 	}
 	return "", fmt.Errorf("binary op %q cannot appear on RHS directly; use in conditions", e.Op)
+}
+
+func (g *Generator) genProcessEnvNullishCoalesce(e *ast.BinaryExpr) (string, bool, error) {
+	prop, ok := isProcessEnvProperty(e.Left)
+	if !ok {
+		return "", false, nil
+	}
+	fallback, ok := staticEnvDefaultWord(e.Right)
+	if !ok {
+		return "", false, nil
+	}
+	return fmt.Sprintf("\"${%s-%s}\"", prop.Property, fallback), true, nil
+}
+
+func staticEnvDefaultWord(expr ast.Expression) (string, bool) {
+	value, ok := staticEnvDefaultValue(expr)
+	if !ok || strings.ContainsAny(value, "\n\r'\"`\\$}") {
+		return "", false
+	}
+	return value, true
+}
+
+func staticEnvDefaultValue(expr ast.Expression) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return staticEnvDefaultValue(e.Expr)
+	case *ast.StringLit:
+		return e.Value, true
+	case *ast.RawStringLit:
+		return e.Value, true
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return strings.Join(e.Parts, ""), true
+		}
+	case *ast.IntLit:
+		return strconv.FormatInt(e.Value, 10), true
+	case *ast.FloatLit:
+		return e.Value, true
+	case *ast.BoolLit:
+		if e.Value {
+			return "1", true
+		}
+		return "0", true
+	case *ast.UnaryExpr, *ast.BinaryExpr:
+		if value, ok := staticArithmeticNumberValue(e); ok {
+			return formatStaticArithmeticNumber(value), true
+		}
+	}
+	return "", false
 }
 
 func (g *Generator) genStaticNullishCoalesce(e *ast.BinaryExpr, targetType *ast.Type) (string, bool, error) {

@@ -800,10 +800,11 @@ for (f in files) {
 	assertContains(t, out, `continue`)
 }
 
-func TestCodegen_ProcessEnvUsesUnsetOnlyNullishSentinel(t *testing.T) {
+func TestCodegen_ProcessEnvNullishDefaultUsesUnsetOnlyParameterExpansion(t *testing.T) {
 	out := compile(t, `let home = process.env.HOME ?? "fallback"`)
-	assertContains(t, out, `${HOME+x}`)
-	assertContains(t, out, `_BESHT_NULLISH_SENTINEL`)
+	assertContains(t, out, `home="${HOME-fallback}"`)
+	assertNotContains(t, out, `${HOME+x}`)
+	assertNotContains(t, out, `_BESHT_NULLISH_SENTINEL`)
 	assertNotContains(t, out, `${HOME:-`)
 }
 
@@ -829,8 +830,27 @@ func TestCodegen_ProcessEnvDirect(t *testing.T) {
 
 func TestCodegen_ProcessEnvWithDefault(t *testing.T) {
 	out := compile(t, `let port: string = process.env.PORT ?? "8080"`)
-	assertContains(t, out, `${PORT+x}`)
-	assertContains(t, out, `8080`)
+	assertContains(t, out, `port="${PORT-8080}"`)
+	assertNotContains(t, out, `${PORT+x}`)
+	assertNotContains(t, out, `_BESHT_NULLISH_SENTINEL`)
+}
+
+func TestCodegen_ProcessEnvDefaultConsoleArg(t *testing.T) {
+	out := compile(t, `console.log(process.env.PATH ?? "missing path")`)
+	assertContains(t, out, `printf '%s\n' "${PATH-missing path}"`)
+	assertNotContains(t, out, `_bst_l=$(if [ -n "${PATH+x}" ]`)
+	assertNotContains(t, out, `_BESHT_NULLISH_SENTINEL`)
+}
+
+func TestCodegen_ProcessEnvDefaultKeepsSentinelPathForDynamicOrUnsafeFallback(t *testing.T) {
+	out := compile(t, `let fallback = "missing"
+let dynamic = process.env.HOME ?? fallback
+let unsafe = process.env.SHELL ?? "can't"`)
+	assertContains(t, out, `_bst_l=$(if [ -n "${HOME+x}" ]`)
+	assertContains(t, out, `_bst_l=$(if [ -n "${SHELL+x}" ]`)
+	assertContains(t, out, `_BESHT_NULLISH_SENTINEL`)
+	assertNotContains(t, out, `${HOME-`)
+	assertNotContains(t, out, `${SHELL-can't}`)
 }
 
 func TestCodegen_StaticNullishCoalescing(t *testing.T) {
