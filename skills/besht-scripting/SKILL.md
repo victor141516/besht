@@ -410,7 +410,7 @@ let red = Number.parseInt(hexByte, 16)
 
 Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants. Dynamic arithmetic and variables assigned inside control flow keep shell arithmetic or POSIX `awk`.
 
-Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal or static numeric variable `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 
 ## Command Execution
 

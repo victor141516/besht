@@ -1525,6 +1525,23 @@ console.log(e)`)
 	}
 }
 
+func TestIntegration_StaticNumericToStringReceiversRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let rounded = Math.round(2.7).toString()
+let parsed = Number.parseInt("42").toString()
+let hex = Number.parseInt("ff", 16).toString()
+let maxed = Math.max(4, 2).toString()
+let arithmetic = (2 + 3).toString()
+console.log(rounded)
+console.log(parsed)
+console.log(hex)
+console.log(maxed)
+console.log(arithmetic)`)
+	want := "3\n42\n255\n4\n5\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PrimitiveToStringAndParseIntRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let s: string = "x"
 console.log(s.toString())

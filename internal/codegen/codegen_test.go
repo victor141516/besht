@@ -567,6 +567,31 @@ let e = (2 + 3).toString()`)
 	assertNotContains(t, out, `printf '%s' 5`)
 }
 
+func TestCodegen_StaticNumericToStringReceivers(t *testing.T) {
+	out := compile(t, `let rounded = Math.round(2.7).toString()
+let parsed = Number.parseInt("42").toString()
+let hex = Number.parseInt("ff", 16).toString()
+let maxed = Math.max(4, 2).toString()
+let arithmetic = (2 + 3).toString()`)
+	assertContains(t, out, `rounded='3'`)
+	assertContains(t, out, `parsed='42'`)
+	assertContains(t, out, `hex='255'`)
+	assertContains(t, out, `maxed='4'`)
+	assertContains(t, out, `arithmetic='5'`)
+	assertNotContains(t, out, `printf '%s' 3`)
+	assertNotContains(t, out, `printf '%s' 42`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticNumericToStringReceiversKeepDynamicFallback(t *testing.T) {
+	out := compile(t, `function show(raw: string, n: number) {
+    let parsed = Number.parseInt(raw).toString()
+    let rounded = Math.round(n).toString()
+}`)
+	assertContains(t, out, `_show_parsed=$(printf '%s' $(awk -v _s="$_show_raw"`)
+	assertContains(t, out, `_show_rounded=$(printf '%s' $(awk -v _x=$_show_n`)
+}
+
 func TestCodegen_StaticToStringConcatFragments(t *testing.T) {
 	out := compile(t, `let a = "count=" + (2 + 3).toString()
 let b = "flag=" + true.toString()
