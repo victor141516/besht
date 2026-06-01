@@ -1291,6 +1291,22 @@ func TestIntegration_TernaryString(t *testing.T) {
 	assertContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
 }
 
+func TestIntegration_StaticBooleanConditions(t *testing.T) {
+	output := runCompiledShell(t, `let label = true ? "yes" : "no"
+let both = true && false ? "bad" : "ok"
+console.log(label)
+console.log(both)
+if (false) {
+    console.log("bad")
+} else {
+    console.log("fallback")
+}
+`)
+	if output != "yes\nok\nfallback\n" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestIntegration_NumberMethods(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", "let n = 42\nlet ns = n.toString()\nlet pi = 3.14159\nlet fixed = pi.toFixed(2)\nconsole.log(ns)\nconsole.log(fixed)\n")

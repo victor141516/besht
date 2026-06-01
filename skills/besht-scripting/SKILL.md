@@ -499,6 +499,8 @@ if (count < 0) return "negative"
 else console.log("non-negative")
 ```
 
+Static boolean conditions such as `if (true)` and `true ? a : b` compile to only the selected branch or value. Dynamic conditions keep normal POSIX shell tests.
+
 **While:**
 
 ```ts
