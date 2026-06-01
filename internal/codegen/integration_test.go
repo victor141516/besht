@@ -1765,30 +1765,34 @@ $("echo", user).run()
 	assertContains(t, out, `whoami`)
 }
 
-func TestIntegration_RuntimeCheckInOutput(t *testing.T) {
+func TestIntegration_RuntimeCheckOmittedForSimpleOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `console.log("hello")
+`)
+	out := compileFile(t, path)
+	assertNotContains(t, out, `goodbye:world`)
+	assertNotContains(t, out, `grep -F`)
+	assertNotContains(t, out, `sed 's/hello/goodbye/'`)
+	assertNotContains(t, out, `BESHT_SKIP_CHECK`)
+}
+
+func TestIntegration_RuntimeCheckEmittedForGeneratedSedPath(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let values = ["a", "b"]
+let i = 1
+console.log(values[i])
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `goodbye:world`)
 	assertContains(t, out, `grep -F`)
 	assertContains(t, out, `sed`)
-	assertNotContains(t, out, `BESHT_SKIP_CHECK`)
-}
-
-func TestIntegration_RuntimeCheckBeforeCode(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `let x: string = "hello"
-console.log(x)
-`)
-	out := compileFile(t, path)
 	checkIdx := strings.Index(out, "goodbye:world")
-	codeIdx := strings.Index(out, `x='hello'`)
+	codeIdx := strings.Index(out, `values='a`)
 	if checkIdx < 0 {
 		t.Fatal("check block not found")
 	}
 	if codeIdx < 0 {
-		t.Fatal("x=... not found")
+		t.Fatal("values=... not found")
 	}
 	if checkIdx > codeIdx {
 		t.Error("check block should appear before compiled code")
@@ -1797,7 +1801,9 @@ console.log(x)
 
 func TestIntegration_NoCheckFlagOmitsCheckBlock(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `console.log("hello")
+	path := writeFile(t, dir, "main.bsh", `let values = ["a", "b"]
+let i = 1
+console.log(values[i])
 `)
 	out, err := codegen.CompileFile(path, codegen.Options{NoCheck: true})
 	if err != nil {
@@ -1805,6 +1811,7 @@ func TestIntegration_NoCheckFlagOmitsCheckBlock(t *testing.T) {
 	}
 	assertNotContains(t, out, `goodbye:world`)
 	assertNotContains(t, out, `grep -F`)
+	assertContains(t, out, `sed -n`)
 	assertNotContains(t, out, `_bst_starts_with()`)
 	assertNotContains(t, out, `_bst_ends_with()`)
 	assertNotContains(t, out, `_bst_includes()`)
@@ -1849,7 +1856,7 @@ console.log(hasNeedle("needle haystack"))
 	}
 	mainOut := string(mainBytes)
 	libOut := string(libBytes)
-	assertContains(t, mainOut, `goodbye:world`)
+	assertNotContains(t, mainOut, `goodbye:world`)
 	assertNotContains(t, mainOut, `_bst_includes()`)
 	assertContains(t, libOut, `_bst_includes()`)
 	assertNotContains(t, libOut, `goodbye:world`)
