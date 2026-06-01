@@ -1998,6 +1998,17 @@ func TestIntegration_MultilineStrictEqualityRuntime(t *testing.T) {
 	}
 }
 
+func TestIntegration_StaticComparisonsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log("a" === "a")
+console.log("a" !== "b")
+console.log(2 < 3)
+console.log(3 >= 3)
+if ("x" == "x") console.log("same")`)
+	if out != "true\ntrue\ntrue\ntrue\nsame\n" {
+		t.Fatalf("output: got %q", out)
+	}
+}
+
 func TestIntegration_MathTruncAndSignRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(Math.trunc(3.7))
 console.log(Math.trunc(-3.7))

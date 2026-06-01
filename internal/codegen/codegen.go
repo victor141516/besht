@@ -4023,6 +4023,13 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		return formatStaticArithmeticNumber(value), nil
 	}
 
+	if result, ok := staticComparisonResult(e); ok {
+		if result {
+			return "1", nil
+		}
+		return "0", nil
+	}
+
 	leftStr, err := g.genExprValue(e.Left)
 	if err != nil {
 		return "", err
@@ -7007,6 +7014,12 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 			}
 			return truthyCondition(val), nil
 		}
+		if result, ok := staticComparisonResult(e); ok {
+			if result {
+				return "true", nil
+			}
+			return "false", nil
+		}
 		return g.genBinaryCondition(e)
 	case *ast.UnaryExpr:
 		if e.Op == "!" {
@@ -7255,6 +7268,66 @@ func (g *Generator) genBinaryCondition(e *ast.BinaryExpr) (string, error) {
 
 func binaryStringTest(left, op, right string) string {
 	return fmt.Sprintf("{ _bst_left=%s; _bst_right=%s; [ -n \"${%s+x}\" ] && [ \"$_bst_left\" = \"$%s\" ] && _bst_left=; [ -n \"${%s+x}\" ] && [ \"$_bst_right\" = \"$%s\" ] && _bst_right=; [ \"$_bst_left\" %s \"$_bst_right\" ]; }", left, right, nullishSentinelVar, nullishSentinelVar, nullishSentinelVar, nullishSentinelVar, op)
+}
+
+func staticComparisonResult(e *ast.BinaryExpr) (bool, bool) {
+	switch e.Op {
+	case "==", "===", "!=", "!==":
+		left, leftOK := staticScalarComparisonValue(e.Left)
+		right, rightOK := staticScalarComparisonValue(e.Right)
+		if !leftOK || !rightOK {
+			return false, false
+		}
+		equal := left == right
+		if e.Op == "!=" || e.Op == "!==" {
+			return !equal, true
+		}
+		return equal, true
+	case ">", "<", ">=", "<=":
+		left, leftOK := staticNumberValue(e.Left)
+		right, rightOK := staticNumberValue(e.Right)
+		if !leftOK || !rightOK {
+			return false, false
+		}
+		switch e.Op {
+		case ">":
+			return left > right, true
+		case "<":
+			return left < right, true
+		case ">=":
+			return left >= right, true
+		case "<=":
+			return left <= right, true
+		}
+	}
+	return false, false
+}
+
+func staticScalarComparisonValue(expr ast.Expression) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return staticScalarComparisonValue(e.Expr)
+	case *ast.StringLit:
+		return e.Value, true
+	case *ast.RawStringLit:
+		return e.Value, true
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return strings.Join(e.Parts, ""), true
+		}
+	case *ast.IntLit:
+		return strconv.FormatInt(e.Value, 10), true
+	case *ast.FloatLit:
+		return e.Value, true
+	case *ast.BoolLit:
+		if e.Value {
+			return "1", true
+		}
+		return "0", true
+	case *ast.UndefinedLit, *ast.NullLit:
+		return "", true
+	}
+	return "", false
 }
 
 func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) {
