@@ -733,7 +733,8 @@ func TestCodegen_BuiltinContainsCondition(t *testing.T) {
 if (files.includes("a")) {
     $("echo", "found").run()
 }`)
-	assertContains(t, out, `grep -qxF`)
+	assertContains(t, out, `echo found`)
+	assertNotContains(t, out, `grep -qxF`)
 }
 
 func TestCodegen_ExitZero(t *testing.T) {
@@ -1669,6 +1670,45 @@ let s: string = l.toString()`)
 	assertNotContains(t, out, `[[`)
 }
 
+func TestCodegen_StaticListVariableMethods(t *testing.T) {
+	out := compile(t, `let files = ["a", "b", "c"]
+let text = files.join("|")
+let comma = files.toString()
+let has = files.includes("b")
+let first = files.indexOf("c")
+let last = files.lastIndexOf("a")
+let nums = Array.from({ length: 3 })
+let numsText = nums.join(",")
+let parts = "x:y:z".split(":")
+let partsText = parts.join("+")
+console.log(files.includes("b"))`)
+	assertContains(t, out, `text='a|b|c'`)
+	assertContains(t, out, `comma='a,b,c'`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=0`)
+	assertContains(t, out, `numsText='0,1,2'`)
+	assertContains(t, out, `partsText='x+y+z'`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `grep -qxF 'b'`)
+	assertNotContains(t, out, `awk -v _needle`)
+	assertNotContains(t, out, `awk -v s=`)
+}
+
+func TestCodegen_StaticListVariableMethodsFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let files = ["a", "b"]
+while (true) {
+    files = ["c", "d"]
+    break
+}
+let text = files.join("|")
+let has = files.includes("b")`)
+	assertContains(t, out, `awk -v s='|'`)
+	assertContains(t, out, `grep -qxF 'b'`)
+	assertNotContains(t, out, `text='a|b'`)
+	assertNotContains(t, out, `has=1`)
+}
+
 func TestCodegen_ListLength(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 let n: number = l.length`)
@@ -1726,7 +1766,7 @@ let s: list<string> = l.slice(1, 3)`)
 func TestCodegen_ListIncludesCondition(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
 if (l.includes("a")) { $("echo", "yes") }`)
-	assertContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `grep -qxF`)
 	assertNotContains(t, out, `_bst_includes()`)
 }
 
@@ -1761,7 +1801,7 @@ let combined: list<string> = files.concat(other)`)
 	assertContains(t, out, "rest='b\nc'")
 	assertContains(t, out, "appended='a\nb\nc\nx'")
 	assertContains(t, out, "combined='a\nb\nc\nd'")
-	assertContains(t, out, `grep -qxF`)
+	assertNotContains(t, out, `grep -qxF`)
 	assertNotContains(t, out, `wc -l`)
 	assertNotContains(t, out, `tail -n +$(( 1 + 1 ))`)
 	assertNotContains(t, out, `printf '%s\n%s'`)
@@ -2591,6 +2631,7 @@ func TestCodegen_ListLastIndexOf(t *testing.T) {
 let i: number = l.lastIndexOf("a")`)
 	assertContains(t, out, `i=2`)
 	assertNotContains(t, out, `awk -v _needle`)
+	assertNotContains(t, out, `awk`)
 }
 
 func TestCodegen_ListUnshift(t *testing.T) {
@@ -2845,10 +2886,11 @@ func TestCodegen_StringEndsWithInCondition(t *testing.T) {
 
 func TestCodegen_ListIncludesInCondition(t *testing.T) {
 	out := compile(t, `let l: list<string> = ["a", "b"]
-if (l.includes("a")) {
-    $("echo", "yes").run()
-}`)
-	assertContains(t, out, `grep -qxF`)
+	if (l.includes("a")) {
+	    $("echo", "yes").run()
+	}`)
+	assertContains(t, out, `echo yes`)
+	assertNotContains(t, out, `grep -qxF`)
 	assertNotContains(t, out, `_bst_includes()`)
 }
 
