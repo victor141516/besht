@@ -2009,6 +2009,24 @@ if ("x" == "x") console.log("same")`)
 	}
 }
 
+func TestIntegration_StaticBooleanBindingsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let ready = true
+let same = "a" === "a"
+let named = "x"
+let truthy = Boolean(named)
+let label = same ? "yes" : "no"
+console.log(ready)
+console.log(same)
+console.log(truthy)
+console.log(`+"`same=${same}`"+`)
+console.log(label)
+if (same) console.log("same")`)
+	want := "true\ntrue\ntrue\nsame=true\nyes\nsame\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_MathTruncAndSignRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(Math.trunc(3.7))
 console.log(Math.trunc(-3.7))

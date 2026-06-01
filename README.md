@@ -88,11 +88,11 @@ Files use the `.bsh` extension.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
-- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; dynamic booleans keep the general formatting path.
+- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, `!false`, and variables bound to static boolean expressions render directly as `true`/`false`; dynamic and control-flow-assigned booleans keep the general formatting path.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - Static scalar equality comparisons and static numeric relational comparisons compile to constants; dynamic comparisons keep the multiline-safe shell/`awk` path.
 - String equality preserves spaces and newlines, including multiline template literals.
-- Static boolean `if` conditions and ternary expressions fold to the selected branch or value; dynamic conditions keep normal shell tests.
+- Static boolean `if` conditions and ternary expressions, including variables bound to static boolean expressions, fold to the selected branch or value; dynamic and control-flow-assigned conditions keep normal shell tests.
 - Static ASCII string literal `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments compile to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
 - Static ASCII string literal `.split()` calls with static separators compile to quoted newline-backed list strings and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls keep the shell arithmetic path.

@@ -503,7 +503,7 @@ if (count < 0) return "negative"
 else console.log("non-negative")
 ```
 
-Static boolean conditions such as `if (true)` and `true ? a : b` compile to only the selected branch or value. Dynamic conditions keep normal POSIX shell tests.
+Static boolean conditions such as `if (true)`, `true ? a : b`, and conditions using variables bound to static boolean expressions compile to only the selected branch or value. Dynamic conditions and variables assigned inside control flow keep normal POSIX shell tests.
 
 **While:**
 
@@ -750,7 +750,7 @@ Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known lists
 ```
 
-Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`.
+Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, `!false`, and variables bound to static boolean expressions render directly without a shell `if`.
 
 ## Operators
 
