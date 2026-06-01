@@ -6373,6 +6373,9 @@ func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {
 	if err != nil {
 		return err
 	}
+	if values, ok := g.staticScalarListValuesWithoutNewlines(e.Receiver); ok && staticForEachScalarValues(values) {
+		return g.genStaticListForEachStmt(e, arrow, values)
+	}
 	recv, err := g.genExprValue(e.Receiver)
 	if err != nil {
 		return err
@@ -6447,6 +6450,83 @@ func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {
 	g.pop()
 	g.line("fi")
 	return err
+}
+
+func staticForEachScalarValues(values []string) bool {
+	for _, value := range values {
+		if strings.Contains(value, "\037") {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *Generator) genStaticListForEachStmt(e *ast.MethodCallExpr, arrow *ast.ArrowExpr, values []string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	words := make([]string, 0, len(values))
+	for _, value := range values {
+		words = append(words, shellQuote(value))
+	}
+	idxVar := fmt.Sprintf("_foreach_idx_%d_%d", e.Pos.Line, e.Pos.Column)
+	return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+		var oldElemType *ast.Type
+		hadOldElemType := false
+		if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeList && recvType.Elem != nil && len(arrow.Params) > 0 {
+			oldElemType, hadOldElemType = g.fnParamTypes[arrow.Params[0].Name]
+			g.fnParamTypes[arrow.Params[0].Name] = recvType.Elem
+			defer func() {
+				if hadOldElemType {
+					g.fnParamTypes[arrow.Params[0].Name] = oldElemType
+				} else {
+					delete(g.fnParamTypes, arrow.Params[0].Name)
+				}
+			}()
+		}
+		var oldIndexType *ast.Type
+		hadOldIndexType := false
+		if len(arrow.Params) > 1 {
+			oldIndexType, hadOldIndexType = g.fnParamTypes[arrow.Params[1].Name]
+			g.fnParamTypes[arrow.Params[1].Name] = typeNumber
+			defer func() {
+				if hadOldIndexType {
+					g.fnParamTypes[arrow.Params[1].Name] = oldIndexType
+				} else {
+					delete(g.fnParamTypes, arrow.Params[1].Name)
+				}
+			}()
+		}
+
+		param := ctx.ParamVars[0]
+		indexVar := ""
+		if len(ctx.ParamVars) > 1 {
+			indexVar = ctx.ParamVars[1]
+			g.line(fmt.Sprintf("%s=0", idxVar))
+		}
+		g.line(fmt.Sprintf("for %s in %s; do", param, strings.Join(words, " ")))
+		g.push()
+		if indexVar != "" {
+			g.line(fmt.Sprintf("%s=$%s", indexVar, idxVar))
+		}
+		if arrow.BlockBody != nil {
+			for _, stmt := range arrow.BlockBody.Statements {
+				if err := g.genForEachCallbackStmt(stmt); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := g.genExprStmt(&ast.ExprStmt{Pos: arrow.Pos, Expr: arrow.Body}); err != nil {
+				return err
+			}
+		}
+		if indexVar != "" {
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		}
+		g.pop()
+		g.line("done")
+		return nil
+	})
 }
 
 func (g *Generator) genForEachCallbackStmt(stmt ast.Statement) error {

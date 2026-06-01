@@ -2459,10 +2459,28 @@ for (key of Object.keys({ name: "Ada", active: true })) {
 func TestCodegen_ListForEach(t *testing.T) {
 	out := compile(t, `let names: string[] = ["alice", "bob"]
 names.forEach((name, index) => console.log(index.toString() + ":" + name))`)
+	assertContains(t, out, `for _cb_2_15_name in 'alice' 'bob'; do`)
+	assertContains(t, out, `_foreach_idx_2_6=0`)
+	assertContains(t, out, `_cb_2_16_index=$_foreach_idx_2_6`)
+	assertNotContains(t, out, `while IFS= read -r _cb_`)
+	assertNotContains(t, out, `done <<__BESHT_FOREACH_`)
+}
+
+func TestCodegen_ListForEachNewlineElementFallback(t *testing.T) {
+	out := compile(t, `let names: string[] = ["a\nb"]
+names.forEach(name => console.log(name))`)
 	assertContains(t, out, `_foreach_`)
 	assertContains(t, out, `while IFS= read -r _cb_`)
 	assertContains(t, out, `done <<__BESHT_FOREACH_`)
-	assertNotContains(t, out, `| while IFS= read -r _cb_`)
+}
+
+func TestCodegen_ListForEachPackedEntriesFallback(t *testing.T) {
+	out := compile(t, `Object.entries({ first: "A", second: "B" }).forEach((entry, index) => {
+    console.log(index.toString() + ": " + entry[0] + "=" + entry[1])
+})`)
+	assertContains(t, out, `while IFS= read -r _cb_`)
+	assertContains(t, out, `tr '\037' '\n'`)
+	assertContains(t, out, `done <<__BESHT_FOREACH_`)
 }
 
 func TestCodegen_ListForEachLiteralReceiver(t *testing.T) {
