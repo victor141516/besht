@@ -3296,6 +3296,11 @@ func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 		if len(e.Args) == 1 && g.isListArg(e.Args[0]) {
 			return g.genConsoleList(e.Args[0], "stdout")
 		}
+		if len(e.Args) == 1 {
+			if line, ok, err := g.genConsoleBoolean(e.Args[0], "stdout"); ok || err != nil {
+				return line, err
+			}
+		}
 		parts, err := g.genArgs(e.Args)
 		if err != nil {
 			return "", err
@@ -3308,6 +3313,11 @@ func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 		if len(e.Args) == 1 && g.isListArg(e.Args[0]) {
 			return g.genConsoleList(e.Args[0], "stderr")
 		}
+		if len(e.Args) == 1 {
+			if line, ok, err := g.genConsoleBoolean(e.Args[0], "stderr"); ok || err != nil {
+				return line, err
+			}
+		}
 		parts, err := g.genArgs(e.Args)
 		if err != nil {
 			return "", err
@@ -3315,6 +3325,24 @@ func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 		return fmt.Sprintf("printf '%%s\\n' %s >&2", strings.Join(parts, " ")), nil
 	}
 	return "", nil
+}
+
+func (g *Generator) genConsoleBoolean(expr ast.Expression, dest string) (string, bool, error) {
+	if !g.isBooleanExpr(expr) {
+		return "", false, nil
+	}
+	redirect := ""
+	if dest == "stderr" {
+		redirect = " >&2"
+	}
+	if val, ok := g.genStaticBooleanArg(expr); ok {
+		return fmt.Sprintf("printf '%%s\\n' %s%s", val, redirect), true, nil
+	}
+	cond, err := g.genCondition(expr)
+	if err != nil {
+		return "", true, err
+	}
+	return fmt.Sprintf("if %s; then printf '%%s\\n' true%s; else printf '%%s\\n' false%s; fi", cond, redirect, redirect), true, nil
 }
 
 func (g *Generator) isObjectArg(expr ast.Expression) bool {
@@ -4517,17 +4545,28 @@ func (g *Generator) genArgs(args []ast.Expression) ([]string, error) {
 				out = append(out, val)
 				continue
 			}
+			val, err := g.genBooleanArg(arg)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ensureArgSafe(val))
+			continue
 		}
 		val, err := g.genExprValue(arg)
 		if err != nil {
 			return nil, err
 		}
-		if g.isBooleanExpr(arg) {
-			val = fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val))
-		}
 		out = append(out, ensureArgSafe(val))
 	}
 	return out, nil
+}
+
+func (g *Generator) genBooleanArg(expr ast.Expression) (string, error) {
+	cond, err := g.genCondition(expr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("$(if %s; then printf true; else printf false; fi)", cond), nil
 }
 
 func (g *Generator) genStaticBooleanArg(expr ast.Expression) (string, bool) {

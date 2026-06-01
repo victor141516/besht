@@ -933,7 +933,7 @@ console.log(nope ?? true)`)
 	assertContains(t, out, `printf '%s\n' 'direct'`)
 	assertContains(t, out, `printf '%s\n' "$empty"`)
 	assertContains(t, out, `printf '%s\n' "$zero"`)
-	assertContains(t, out, `if [ $nope = 1 ]`)
+	assertContains(t, out, `if (_bst_cond="$nope"; [ -n "$_bst_cond" ] && [ "$_bst_cond" != 0 ]); then printf '%s\n' true; else printf '%s\n' false; fi`)
 	assertNotContains(t, out, `_BESHT_NULLISH_SENTINEL=`)
 	assertNotContains(t, out, `_bst_l=`)
 }
@@ -1013,6 +1013,18 @@ console.error(true && false)`)
 	assertContains(t, out, `printf '%s\n' false >&2`)
 	assertNotContains(t, out, `$(if [ 0 = 1 ]; then printf true; else printf false; fi)`)
 	assertNotContains(t, out, `$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+}
+
+func TestCodegen_DynamicBooleanConsoleArgsUseConditions(t *testing.T) {
+	out := compile(t, `let n = 3
+console.log(n > 0)
+console.error(n == 3)
+console.log("positive?", n > 0)`)
+	assertContains(t, out, `if [ "$n" -gt 0 ]; then printf '%s\n' true; else printf '%s\n' false; fi`)
+	assertContains(t, out, `if { _bst_left="$n"; _bst_right=3;`)
+	assertContains(t, out, `then printf '%s\n' true >&2; else printf '%s\n' false >&2; fi`)
+	assertContains(t, out, `printf '%s\n' 'positive?' "$(if [ "$n" -gt 0 ]; then printf true; else printf false; fi)"`)
+	assertNotContains(t, out, `if [ $(if [ "$n" -gt 0 ]; then printf 1; else printf 0; fi) = 1 ]`)
 }
 
 func TestCodegen_StaticBooleanBranchesAndTernaries(t *testing.T) {

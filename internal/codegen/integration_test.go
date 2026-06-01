@@ -2091,6 +2091,17 @@ if ("x" == "x") console.log("same")`)
 	}
 }
 
+func TestIntegration_DynamicBooleanConsoleRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let n = 3
+console.log(n > 0)
+console.log(n < 0)
+console.log("same?", n == 3)
+`)
+	if out != "true\nfalse\nsame?\ntrue\n" {
+		t.Fatalf("output: got %q", out)
+	}
+}
+
 func TestIntegration_MathTruncAndSignRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(Math.trunc(3.7))
 console.log(Math.trunc(-3.7))
