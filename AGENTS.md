@@ -156,6 +156,8 @@ Pass via `codegen.Options{NoCheck: true, NoSourceMap: true, ResolveTsImports: tr
 
 Generated shell emits inline `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions. Class declarations skip the generic statement-boundary comment so synthetic property accessors and implicit default constructors do not receive source comments.
 
+When no runtime helpers, args snapshot, or POSIX self-check are emitted, generated entry scripts keep exactly one blank separator between the header and the first body line. Do not reintroduce a double-empty preamble gap.
+
 ## Architecture
 
 ```

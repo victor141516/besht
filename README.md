@@ -131,6 +131,7 @@ Files use the `.bsh` extension.
 - `new Set<T>()` supports `.add(value)` and `.has(value)` with no runtime type checking; straight-line static adds and membership checks compile to constants.
 - Nested lists such as `string[][]` preserve row structure for `.map()`, nested indexing, and row `.length`.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
+- When the runtime preamble is empty, generated shell uses a single blank separator between the header and the first statement.
 - Semicolons are optional (only required inside `for` headers).
 - `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.of(...)` creates a list from the given values; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
 - `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use compiler-managed object key metadata and do not emit runtime helpers.

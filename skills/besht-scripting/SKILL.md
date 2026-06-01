@@ -31,7 +31,7 @@ besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh import
 besht script.bsh --opt-use-jq                  # enable jq-backed JSON.stringify() codegen
 ```
 
-Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits the runtime `printf`/`grep`/`sed` self-check only when generated output uses the compiler's `grep`/`sed` paths or the args runtime; simple direct-output scripts skip it.
+Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits runtime self-checks only when generated output needs the corresponding utilities; simple direct-output scripts skip them. When options leave the runtime preamble empty, generated entry scripts keep a single blank separator between the header and the first shell statement.
 
 ## Variable Declarations
 
