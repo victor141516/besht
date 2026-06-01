@@ -1,0 +1,7 @@
+// besht-compile-flags: --opt-use-jq
+function encode(obj: object): string {
+  return JSON.stringify(obj)
+}
+
+let user = { name: "Ada", role: "engineer" }
+console.log(encode(user))

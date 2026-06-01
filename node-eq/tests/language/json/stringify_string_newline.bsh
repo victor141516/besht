@@ -1,0 +1,3 @@
+// besht-compile-flags: --opt-use-jq
+let text: string = "line one\nline two"
+console.log(JSON.stringify(text))

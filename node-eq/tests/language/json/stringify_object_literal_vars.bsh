@@ -1,0 +1,5 @@
+// besht-compile-flags: --opt-use-jq
+let id: number = 7
+let name: string = "Ada"
+let active: boolean = id > 3
+console.log(JSON.stringify({ id: id, name: name, active: active }))

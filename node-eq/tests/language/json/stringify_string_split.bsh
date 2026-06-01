@@ -1,0 +1,3 @@
+// besht-compile-flags: --opt-use-jq
+let parts: string[] = "red,green,blue".split(",")
+console.log(JSON.stringify(parts))

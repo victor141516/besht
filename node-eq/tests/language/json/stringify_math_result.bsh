@@ -1,0 +1,3 @@
+// besht-compile-flags: --opt-use-jq
+let rounded: number = Math.round(2.6)
+console.log(JSON.stringify(rounded))

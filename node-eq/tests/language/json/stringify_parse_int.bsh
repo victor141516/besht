@@ -1,0 +1,2 @@
+// besht-compile-flags: --opt-use-jq
+console.log(JSON.stringify(Number.parseInt("2a", 10)))

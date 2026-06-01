@@ -1,0 +1,3 @@
+// besht-compile-flags: --opt-use-jq
+let values: string[] = ["a b", "quote \"x\"", "dollar $HOME"]
+console.log(JSON.stringify(values))

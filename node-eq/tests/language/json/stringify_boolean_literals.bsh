@@ -1,0 +1,3 @@
+// besht-compile-flags: --opt-use-jq
+console.log(JSON.stringify(true))
+console.log(JSON.stringify(false))

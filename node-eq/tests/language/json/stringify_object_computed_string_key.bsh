@@ -1,0 +1,5 @@
+// besht-compile-flags: --opt-use-jq
+let user = { name: "Ada" }
+let key: string = "role"
+user[key] = "admin"
+console.log(JSON.stringify(user))

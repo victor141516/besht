@@ -376,7 +376,7 @@ internal/codegen/codegen_test.go   # Unit: AST → sh output patterns (uses Gene
 internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh output
 ```
 
-`node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Fixtures that need non-default compiler flags may include a top-of-file `// besht-compile-flags: ...` directive; the compare runner applies those flags only to that fixture. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.
+`node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Focused API fixtures live under their language subdirectories, including `node-eq/tests/language/json/` for `JSON.stringify()` parity coverage. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Fixtures that need non-default compiler flags may include a top-of-file `// besht-compile-flags: ...` directive; the compare runner applies those flags only to that fixture. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.
 
 Tests use `go test ./...`. Coverage target: `make cover`. Current coverage: ~75%.
 

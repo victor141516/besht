@@ -1,0 +1,4 @@
+// besht-compile-flags: --opt-use-jq
+let first: string[] = ["a", "b"]
+let second: string[] = ["c"]
+console.log(JSON.stringify(first.concat(second)))

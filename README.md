@@ -841,6 +841,12 @@ JSON helper:
 
 `JSON.stringify()` intentionally requires the `--opt-use-jq` compiler flag. With that flag, generated JSON code invokes `jq` and the runtime self-check verifies `jq` is available whenever JSON code is emitted. Without the flag, compiling a program that calls `JSON.stringify()` is an error. `JSON.parse()` is not implemented.
 
+```ts
+console.log(JSON.stringify({ id: 7, name: "Ada", active: true }))
+console.log(JSON.stringify(["Ada", "Grace"]))
+console.log(JSON.stringify(Number.parseInt("2a", 10)))
+```
+
 ### Type conversion
 
 Use JS-style conversion APIs for new code:
@@ -1029,6 +1035,9 @@ make test
 
 # Run node-eq parity fixtures
 bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)
+
+# Run only JSON.stringify parity fixtures
+bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests/language/json | sort)
 
 # Run with coverage report (terminal)
 make cover

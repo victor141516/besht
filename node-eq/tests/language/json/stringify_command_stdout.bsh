@@ -1,0 +1,3 @@
+// besht-compile-flags: --opt-use-jq
+let out: string = $("printf", "json-ready").run().readStdout()
+console.log(JSON.stringify(out))

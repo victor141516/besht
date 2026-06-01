@@ -331,7 +331,15 @@ function showKeys(obj: object): string[] {
 
 `Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. Unmutated named object key lists, static-scalar value and entry lists, static-key `Object.hasOwn()` calls, and safe direct reads of scalar properties from static object literal bindings compile to constants. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct shell tests. Non-boolean property conditions keep JavaScript-style truthiness. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current list representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. These helpers do not add a runtime helper library. `process.env` is not enumerable; read individual variables with `process.env.NAME`.
 
-`JSON.stringify(value)` encodes strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when the program is compiled with `--opt-use-jq`. Generated JSON code invokes `jq`, and the runtime self-check verifies `jq` exists only when JSON code is emitted. `JSON.parse()` is not supported.
+`JSON.stringify(value)` encodes strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when the program is compiled with `--opt-use-jq`. Generated JSON code invokes `jq`, and the runtime self-check verifies `jq` exists only when JSON code is emitted.
+
+```ts
+console.log(JSON.stringify({ id: 7, name: "Ada", active: true }))
+console.log(JSON.stringify(["Ada", "Grace"]))
+console.log(JSON.stringify(Number.parseInt("2a", 10)))
+```
+
+`JSON.parse()` is not supported.
 
 ## Classes
 

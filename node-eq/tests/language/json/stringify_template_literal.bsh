@@ -1,0 +1,4 @@
+// besht-compile-flags: --opt-use-jq
+let name: string = "Ada"
+let count: number = 3
+console.log(JSON.stringify(`${name}:${count}`))

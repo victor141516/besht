@@ -1,0 +1,3 @@
+// besht-compile-flags: --opt-use-jq
+let names: string[] = ["zero", "one", "two"]
+console.log(JSON.stringify(names.slice(1)))

@@ -1,0 +1,7 @@
+// besht-compile-flags: --opt-use-jq
+let format: string = "json"
+if (format === "json") {
+  console.log(JSON.stringify({ mode: format }))
+} else {
+  console.log("plain")
+}

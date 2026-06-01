@@ -1,0 +1,4 @@
+// besht-compile-flags: --opt-use-jq
+let values: number[] = [1, 2, 3]
+let ok: boolean = values.includes(2)
+console.log(JSON.stringify(ok))
