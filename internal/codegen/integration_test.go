@@ -2889,3 +2889,17 @@ console.log(sentinelText ?? "fallback")`)
 		t.Fatalf("hostile nullish fallback created marker %s", marker)
 	}
 }
+
+func TestIntegration_JSONStringifyCheckRequiresJQOptIn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.bsh")
+	if err := os.WriteFile(path, []byte(`let json: string = JSON.stringify({ id: 1 })`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := codegen.CheckFile(path, codegen.Options{}); err == nil || !strings.Contains(err.Error(), "JSON.stringify() requires --opt-use-jq") {
+		t.Fatalf("CheckFile error = %v, want --opt-use-jq requirement", err)
+	}
+	if err := codegen.CheckFile(path, codegen.Options{UseJQ: true}); err != nil {
+		t.Fatalf("CheckFile with UseJQ: %v", err)
+	}
+}

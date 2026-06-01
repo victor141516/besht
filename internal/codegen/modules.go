@@ -98,6 +98,9 @@ func CheckFile(entryPath string, opts Options) error {
 		if err := checker.ValidateForEachSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
 			return err
 		}
+		if !opts.UseJQ && statementsUseJSONStringify(mod.Prog.Statements) {
+			return fmt.Errorf("JSON.stringify() requires --opt-use-jq")
+		}
 		analysis := AnalyzeProgram(mod.Prog.Statements)
 		for _, w := range analysis.Warnings {
 			fmt.Fprintf(os.Stderr, "besht: warning: %s: %s\n", w.Pos, w.Message)
@@ -275,6 +278,7 @@ func (c *Compiler) emit() (string, error) {
 		g := newModuleGenerator(mod.ModName, importMap, importVarMap, importVarTypes)
 		g.NoCheck = c.opts.NoCheck
 		g.NoSourceMap = c.opts.NoSourceMap
+		g.UseJQ = c.opts.UseJQ
 		g.cmdAnalysis = analysis
 		g.argsOptions = cloneBoolMap(argsOptions)
 		g.argsFlags = cloneBoolMap(argsFlags)
@@ -299,6 +303,9 @@ func (c *Compiler) emit() (string, error) {
 	}
 	if !c.opts.NoCheck {
 		sb.WriteString(beshtCheckBlock)
+		if neededHelpers["jq"] {
+			sb.WriteString(beshtJQCheckBlock)
+		}
 	}
 	sb.WriteString("\n")
 	sb.WriteString(body.String())
@@ -354,6 +361,7 @@ func (c *Compiler) emitSplit(outDir string) error {
 		g := newModuleGenerator(mod.ModName, importMap, importVarMap, importVarTypes)
 		g.NoCheck = c.opts.NoCheck
 		g.NoSourceMap = c.opts.NoSourceMap
+		g.UseJQ = c.opts.UseJQ
 		g.cmdAnalysis = analysis
 		g.argsOptions = cloneBoolMap(argsOptions)
 		g.argsFlags = cloneBoolMap(argsFlags)
@@ -382,6 +390,9 @@ func (c *Compiler) emitSplit(outDir string) error {
 			}
 			if !c.opts.NoCheck {
 				sb.WriteString(beshtCheckBlock)
+				if entryHelpers["jq"] {
+					sb.WriteString(beshtJQCheckBlock)
+				}
 			}
 			sb.WriteString("\n")
 			sb.WriteString(`_BESHT_ROOT="$(cd "$(dirname "$0")" && pwd)"`)
@@ -749,6 +760,8 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}}
 		case "Object.hasOwn", "Boolean", "Array.isArray", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
 			return &ast.Type{Kind: ast.TypeBoolean}
+		case "JSON.stringify":
+			return &ast.Type{Kind: ast.TypeString}
 		}
 	case *ast.AsExpr:
 		return inferExportValueType(e.Expr)
@@ -1036,7 +1049,7 @@ func qualifyClassIdent(ident *ast.IdentExpr, importMap map[string]string, qualif
 		ident.Name = qualName
 		return
 	}
-	if ident.Name == "" || ident.Name == "Besht" || ident.Name == "Boolean" || ident.Name == "Math" || ident.Name == "Number" || ident.Name == "Object" || ident.Name == "String" || ident.Name == "Set" || ident.Name == "console" || strings.Contains(ident.Name, "__") || ident.Name[0] < 'A' || ident.Name[0] > 'Z' {
+	if ident.Name == "" || ident.Name == "Besht" || ident.Name == "Boolean" || ident.Name == "JSON" || ident.Name == "Math" || ident.Name == "Number" || ident.Name == "Object" || ident.Name == "String" || ident.Name == "Set" || ident.Name == "console" || strings.Contains(ident.Name, "__") || ident.Name[0] < 'A' || ident.Name[0] > 'Z' {
 		return
 	}
 	ident.Name = qualify(ident.Name)

@@ -1285,6 +1285,26 @@ func (c *Checker) checkBuiltinCall(e *ast.BuiltinCallExpr) (*ast.Type, error) {
 		}
 		return &ast.Type{Kind: ast.TypeNumber}, nil
 
+	case "JSON.stringify":
+		if len(e.Args) != 1 {
+			return nil, &CheckError{Pos: e.Pos, Message: "JSON.stringify() takes 1 argument"}
+		}
+		argType, err := c.checkExpr(e.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		if !isJSONStringifyType(argType) {
+			return nil, &CheckError{Pos: e.Pos, Message: fmt.Sprintf("JSON.stringify() cannot encode %s", argType)}
+		}
+		if obj, ok := unwrapAsExpr(e.Args[0]).(*ast.ObjectLit); ok {
+			for _, field := range obj.Fields {
+				if unsupportedObjectValueType(field.Value.GetType()) {
+					return nil, &CheckError{Pos: e.Pos, Message: "JSON.stringify() only supports scalar object values"}
+				}
+			}
+		}
+		return &ast.Type{Kind: ast.TypeString}, nil
+
 	case "Array.from":
 		if len(e.Args) != 1 {
 			return nil, &CheckError{Pos: e.Pos, Message: "Array.from() takes 1 argument"}
@@ -1529,6 +1549,22 @@ func (c *Checker) checkProcessMethod(e *ast.MethodCallExpr) (*ast.Type, error) {
 		}
 	}
 	return &ast.Type{Kind: ast.TypeVoid}, nil
+}
+
+func isJSONStringifyType(t *ast.Type) bool {
+	if t == nil {
+		return true
+	}
+	switch t.Kind {
+	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean, ast.TypeObject:
+		return true
+	case ast.TypeList:
+		if t.Elem == nil {
+			return true
+		}
+		return t.Elem.Kind == ast.TypeString || t.Elem.Kind == ast.TypeNumber || t.Elem.Kind == ast.TypeBoolean
+	}
+	return false
 }
 
 func isObjectKeyCompatibleType(typ *ast.Type) bool {

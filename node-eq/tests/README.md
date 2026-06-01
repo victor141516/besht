@@ -15,3 +15,11 @@ bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)
 ```
 
 Keep import fixtures and their dependencies in the same directory unless the import paths are updated with the move.
+
+Fixtures that require non-default compiler options can put a directive in the first few lines:
+
+```ts
+// besht-compile-flags: --opt-use-jq
+```
+
+The compare runner passes those flags only for that fixture.

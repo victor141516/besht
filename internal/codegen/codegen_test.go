@@ -1916,3 +1916,42 @@ let values = ["x"].map(x => {
 		t.Fatalf("error: got %q", err)
 	}
 }
+
+func compileWithOptions(t *testing.T, src string, opts codegen.Options) string {
+	t.Helper()
+	prog, err := parser.Parse(src, "test.bsh")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	chk := checker.New()
+	if err := chk.Check(prog); err != nil {
+		t.Fatalf("type error: %v", err)
+	}
+	out, err := codegen.GenerateWithOptions(prog, opts)
+	if err != nil {
+		t.Fatalf("codegen error: %v", err)
+	}
+	return out
+}
+
+func TestCodegen_JSONStringifyRequiresJQOptIn(t *testing.T) {
+	err := compileError(t, `let json: string = JSON.stringify({ id: 1 })`)
+	if err == nil || !strings.Contains(err.Error(), "JSON.stringify() requires --opt-use-jq") {
+		t.Fatalf("error = %v, want --opt-use-jq requirement", err)
+	}
+}
+
+func TestCodegen_JSONStringifyWithJQ(t *testing.T) {
+	out := compileWithOptions(t, `let user = { id: 1, name: "Victor", active: true }
+let json: string = JSON.stringify(user)
+let list: string = JSON.stringify(["a", "b"])
+let ok: string = JSON.stringify(true)`, codegen.Options{UseJQ: true})
+	assertContains(t, out, `command -v jq`)
+	assertContains(t, out, `json=$(jq -cn`)
+	assertContains(t, out, `--argjson _v0 "$`)
+	assertContains(t, out, `--arg _v1 "$`)
+	assertContains(t, out, `--argjson _v2 "$(if [ $_obj_user_active = 1 ]; then printf true; else printf false; fi)"`)
+	assertContains(t, out, `list=$(_bst_json_list_`)
+	assertContains(t, out, `jq -Rsc 'split("\n")`)
+	assertContains(t, out, `ok=$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+}

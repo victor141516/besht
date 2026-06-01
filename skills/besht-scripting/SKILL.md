@@ -7,7 +7,7 @@ description: >
   variables, constants, raw strings r"...", String.raw, $() command expressions,
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
-  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, args.argv()/positional()/option()/flag(), string
+  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), JSON.stringify(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, args.argv()/positional()/option()/flag(), string
   concatenation, process.env.NAME, process.exit(), env(), console.log(), value.toString(), Boolean(value), Number.parseInt(), to_str(), String(), to_int(), Besht.conditions.* wrappers, or
   fetch(url).text(), built-in functions like file_exists, len, and range.
 ---
@@ -29,6 +29,7 @@ besht script.bsh --opt-no-add-binaries-check  # omit runtime self-check
 besht script.bsh --opt-no-source-map            # omit source comments from compiled output
 besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to fall back to .ts
 besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
+besht script.bsh --opt-use-jq                  # enable jq-backed JSON.stringify() codegen
 ```
 
 ## Variable Declarations
@@ -296,6 +297,7 @@ let keys: string[] = Object.keys(user)
 let values: string[] = Object.values(user)
 let entries: string[][] = Object.entries(user)
 let hasName: boolean = Object.hasOwn(user, "name")
+let json: string = JSON.stringify(user) // compile with --opt-use-jq
 
 // Computed property access with dynamic keys
 let key: string = "name"
@@ -316,6 +318,8 @@ function showKeys(obj: object): string[] {
 ```
 
 `Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current list representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. These helpers do not add a runtime helper library. `process.env` is not enumerable; read individual variables with `process.env.NAME`.
+
+`JSON.stringify(value)` encodes strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when the program is compiled with `--opt-use-jq`. Generated JSON code invokes `jq`, and the runtime self-check verifies `jq` exists only when JSON code is emitted. `JSON.parse()` is not supported.
 
 ## Classes
 
