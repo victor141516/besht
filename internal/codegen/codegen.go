@@ -5090,6 +5090,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if val, ok, err := g.genStaticNumberMethod(e); ok || err != nil {
 		return val, err
 	}
+	if val, ok, err := g.genStaticNumericToStringMethod(e); ok || err != nil {
+		return val, err
+	}
 	if val, ok, err := g.genStaticStringSplitMethod(e); ok || err != nil {
 		return val, err
 	}
@@ -5270,6 +5273,53 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 	default:
 		return "", false, nil
 	}
+}
+
+func (g *Generator) genStaticNumericToStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
+	if e.Method != "toString" {
+		return "", false, nil
+	}
+	if len(e.Args) != 0 {
+		return "", true, fmt.Errorf("toString() takes no arguments")
+	}
+	value, ok, err := g.staticNumericStringValue(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return shellQuote(value), true, nil
+}
+
+func (g *Generator) staticNumericStringValue(expr ast.Expression) (string, bool, error) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticNumericStringValue(e.Expr)
+	case *ast.BuiltinCallExpr:
+		if e.Name != "Number.parseInt" || len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", false, nil
+		}
+		value, ok := staticStringText(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		var radixArg *int
+		if len(e.Args) == 2 {
+			radix, ok := staticIntLiteral(e.Args[1])
+			if !ok {
+				return "", false, nil
+			}
+			radixArg = &radix
+		}
+		parsed, ok := staticParseIntValue(value, radixArg)
+		return parsed, ok, nil
+	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+			return g.genStaticMathMethod(e)
+		}
+	}
+	if value, ok := staticArithmeticNumberValue(expr); ok {
+		return formatStaticNumber(value), true, nil
+	}
+	return "", false, nil
 }
 
 func (g *Generator) genFetchCall(e *ast.BuiltinCallExpr) (string, error) {

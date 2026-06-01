@@ -285,6 +285,8 @@ The compiler assigns each `$()` call a unique identity during the semantic analy
 
 Static primitive `.toString()` fragments inside string concatenation and template interpolation compile to constants; dynamic receivers keep runtime formatting.
 
+Static numeric API receivers of `.toString()`, such as `Math.round(2.7).toString()` and `Number.parseInt("42").toString()`, compile to quoted constants; dynamic receivers keep runtime formatting.
+
 
 Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static `!`/`&&`/`||` expressions render directly as `true`/`false`; dynamic boolean expressions keep the general formatting path.
 
