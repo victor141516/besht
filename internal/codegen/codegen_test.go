@@ -260,6 +260,25 @@ if ("a" === "a") {
 	assertNotContains(t, out, `awk -v _a=2 -v _b=3`)
 }
 
+func TestCodegen_StaticStringVariableComparisons(t *testing.T) {
+	out := compile(t, `let mode = "prod"
+let same = mode == "prod"
+let diff = mode !== "test"
+let msg = mode == "prod" ? "live" : "dev"
+if (mode == "prod") {
+    console.log(msg)
+}
+console.log(mode !== "test")`)
+	assertContains(t, out, `same=1`)
+	assertContains(t, out, `diff=1`)
+	assertContains(t, out, `msg='live'`)
+	assertContains(t, out, `printf '%s\n' "$msg"`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `_bst_left="$mode"`)
+	assertNotContains(t, out, `_bst_right='prod'`)
+	assertNotContains(t, out, `$(if { _bst_left`)
+}
+
 func TestCodegen_StaticComparisonsKeepDynamicFallback(t *testing.T) {
 	out := compile(t, `let a = "a"
 if (false) {
@@ -275,6 +294,16 @@ let less = n < 3`)
 	assertContains(t, out, `_bst_right='a'`)
 	assertContains(t, out, `less=$(if [ "$n" -lt 3 ]; then printf 1; else printf 0; fi)`)
 	assertNotContains(t, out, `awk -v _a=$n -v _b=3`)
+}
+
+func TestCodegen_StaticStringComparisonsFallbackForFunctionInputs(t *testing.T) {
+	out := compile(t, `function compare(a: string, n: number) {
+    let same = a === "a"
+    let less = n < 3
+}`)
+	assertContains(t, out, `_bst_left="$_compare_a"`)
+	assertContains(t, out, `_bst_right='a'`)
+	assertContains(t, out, `awk -v _a=$_compare_n -v _b=3`)
 }
 
 func TestCodegen_WhileLoop(t *testing.T) {

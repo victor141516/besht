@@ -2271,8 +2271,13 @@ func TestIntegration_StaticComparisonsRuntime(t *testing.T) {
 console.log("a" !== "b")
 console.log(2 < 3)
 console.log(3 >= 3)
-if ("x" == "x") console.log("same")`)
-	if out != "true\ntrue\ntrue\ntrue\nsame\n" {
+if ("x" == "x") console.log("same")
+let mode = "prod"
+console.log(mode == "prod")
+console.log(mode !== "test")
+let msg = mode == "prod" ? "live" : "dev"
+if (mode == "prod") console.log(msg)`)
+	if out != "true\ntrue\ntrue\ntrue\nsame\ntrue\ntrue\nlive\n" {
 		t.Fatalf("output: got %q", out)
 	}
 }
