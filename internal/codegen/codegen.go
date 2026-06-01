@@ -3892,6 +3892,10 @@ func (g *Generator) staticNullishState(expr ast.Expression) staticNullishState {
 			case staticNonNullishValue:
 				return staticNonNullishValue
 			}
+		case "&&", "||":
+			if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+				return g.staticNullishState(selected)
+			}
 		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
 			if _, ok := g.staticBooleanValue(e); ok {
 				return staticNonNullishValue
@@ -4190,6 +4194,9 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 			return formatStaticNumber(value), true, nil
 		}
 	case *ast.BinaryExpr:
+		if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+			return g.staticStringFragment(selected)
+		}
 		if value, ok := staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
@@ -4240,6 +4247,9 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 		}
 	case *ast.BinaryExpr:
+		if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+			return g.staticBooleanValue(selected)
+		}
 		if e.Op == "??" {
 			switch g.staticNullishState(e.Left) {
 			case staticNullishValue:
@@ -4307,6 +4317,26 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 	return false, false
 }
 
+func (g *Generator) staticLogicalSelectedExpr(e *ast.BinaryExpr) (ast.Expression, bool) {
+	if e.Op != "&&" && e.Op != "||" {
+		return nil, false
+	}
+	leftTruthy, ok := g.staticTruthyValue(e.Left)
+	if !ok {
+		return nil, false
+	}
+	if e.Op == "||" {
+		if leftTruthy {
+			return e.Left, true
+		}
+		return e.Right, true
+	}
+	if leftTruthy {
+		return e.Right, true
+	}
+	return e.Left, true
+}
+
 func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
@@ -4333,6 +4363,19 @@ func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 		return f != 0, true
 	case *ast.ListLit, *ast.ObjectLit, *ast.NewExpr:
 		return true, true
+	case *ast.BinaryExpr:
+		if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+			return g.staticTruthyValue(selected)
+		}
+		if value, ok := staticComparisonResult(e); ok {
+			return value, true
+		}
+		if value, ok := staticArithmeticNumberValue(e); ok {
+			return value != 0, true
+		}
+		if value, ok := g.staticBooleanValue(e); ok {
+			return value, true
+		}
 	case *ast.BuiltinCallExpr:
 		return g.staticBooleanValue(e)
 	}
@@ -4365,6 +4408,11 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 
 	if e.Op == "??" {
 		if value, ok, err := g.genStaticNullishCoalesce(e, targetType); ok || err != nil {
+			return value, err
+		}
+	}
+	if e.Op == "&&" || e.Op == "||" {
+		if value, ok, err := g.genStaticLogicalValue(e, targetType); ok || err != nil {
 			return value, err
 		}
 	}
@@ -4505,6 +4553,18 @@ func (g *Generator) genStaticNullishCoalesce(e *ast.BinaryExpr, targetType *ast.
 	default:
 		return "", false, nil
 	}
+}
+
+func (g *Generator) genStaticLogicalValue(e *ast.BinaryExpr, targetType *ast.Type) (string, bool, error) {
+	selected, ok := g.staticLogicalSelectedExpr(e)
+	if !ok {
+		return "", false, nil
+	}
+	value, err := g.genExprRHS(selected, targetType)
+	if err != nil {
+		return "", true, err
+	}
+	return value, true, nil
 }
 
 func (g *Generator) genUpdateRHS(e *ast.UpdateExpr) string {
@@ -5162,7 +5222,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 				return lt
 			}
 			return g.inferReceiverType(e.Right)
-		case "==", "!=", "===", "!==", ">", "<", ">=", "<=", "&&", "||":
+		case "&&", "||":
+			return g.inferLogicalReceiverType(e)
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
 			return &ast.Type{Kind: ast.TypeBoolean}
 		}
 		if e.Op == "+" {
@@ -5265,6 +5327,24 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 	return nil
 }
 
+func (g *Generator) inferLogicalReceiverType(e *ast.BinaryExpr) *ast.Type {
+	if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+		return g.inferReceiverType(selected)
+	}
+	leftType := g.inferReceiverType(e.Left)
+	rightType := g.inferReceiverType(e.Right)
+	if leftType != nil && rightType != nil && leftType.Kind == rightType.Kind {
+		return leftType
+	}
+	if leftType == nil && rightType != nil && rightType.Kind != ast.TypeBoolean {
+		return rightType
+	}
+	if rightType == nil && leftType != nil && leftType.Kind != ast.TypeBoolean {
+		return leftType
+	}
+	return nil
+}
+
 func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 	switch e := expr.(type) {
 	case *ast.BoolLit:
@@ -5281,7 +5361,12 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 			if t := g.inferReceiverType(e); t != nil {
 				return t.Kind == ast.TypeBoolean
 			}
-		case "==", "!=", "===", "!==", ">", "<", ">=", "<=", "&&", "||":
+		case "&&", "||":
+			if selected, ok := g.staticLogicalSelectedExpr(e); ok {
+				return g.isBooleanExpr(selected)
+			}
+			return g.isBooleanExpr(e.Left) && g.isBooleanExpr(e.Right)
+		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
 			return true
 		}
 	case *ast.PropertyExpr:

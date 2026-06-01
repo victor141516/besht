@@ -3339,3 +3339,22 @@ console.log(false ?? true)`)
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
 }
+
+func TestIntegration_StaticLogicalValueExpressionsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log("left" || "fallback")
+console.log("" || "fallback")
+console.log("left" && "right")
+console.log("" && "right")
+console.log(0 || 42)
+console.log(7 && 42)
+console.log(false || true)
+console.log(false && true)
+console.log("" || true)
+console.log("left" || false)
+console.log(true && "value")
+console.log("left" && false)`)
+	want := "left\nfallback\nright\n\n42\n42\ntrue\nfalse\ntrue\nleft\nvalue\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}

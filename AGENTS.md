@@ -287,7 +287,9 @@ Static primitive `.toString()` fragments inside string concatenation and templat
 
 Static `??` expressions compile to the selected side when the left operand is provably nullish or non-nullish. Preserve `""`, `0`, and `false` as non-nullish; control-flow assigned variables and optional/dynamic nullish sources must keep the sentinel path.
 
-Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static `!`/`&&`/`||` expressions render directly as `true`/`false`; dynamic boolean expressions keep the general formatting path.
+Static value-position `||` and `&&` expressions compile to the selected side when the left operand's truthiness is known. Preserve JavaScript value semantics: static string/number results stay strings/numbers, while selected boolean results still render as `true`/`false` for console output.
+
+Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static boolean `!`/`&&`/`||` expressions render directly as `true`/`false`; dynamic boolean expressions keep the general formatting path.
 
 Variables bound to static string literals may fold `.length` to a numeric constant. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
 
@@ -980,7 +982,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`fnParamTypes` tracks function parameter types during codegen.** Set in `genFnDecl`/`genModuleFnDecl` from `param.Type` annotations. Used by `inferReceiverType` to determine that a function parameter like `scores: number[]` is a list, enabling `scores.length` and `scores[i]` to work correctly.
 
-**`||` and `&&` in value position return actual values (JS semantics), not booleans.** `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. This is different from condition position (used in `if`/`while`) which returns 1/0. The implementation uses a subshell with `_l=temp` capture to test the left side, then returns the appropriate value.
+**`||` and `&&` in value position return actual values (JS semantics), not booleans.** `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. This is different from condition position (used in `if`/`while`) which returns 1/0. Static value-position logicals with known left truthiness compile directly to the selected side; dynamic value-position logicals use a subshell with `_l=temp` capture to test the left side, then return the appropriate value.
 
 **`??` uses an internal nullish sentinel, not shell default expansion.** Do not lower it to `${var:-fallback}` because empty string, `0`, and `false` must be preserved. Only `null`, `undefined`, missing `args` values, missing `process.env.NAME` variables, and missing indexes in nullish-left position should trigger the fallback. Static nullish coalescing may bypass the sentinel branch only when the left side is provably nullish or provably non-nullish; variables assigned in control flow and optional/dynamic nullish sources must keep the runtime sentinel comparison.
 

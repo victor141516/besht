@@ -88,6 +88,7 @@ Files use the `.bsh` extension.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
+- Static value-position `||` and `&&` expressions compile to the selected side when the left operand's truthiness is known.
 - Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; dynamic booleans keep the general formatting path.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - Static scalar equality comparisons and static numeric relational comparisons compile to constants; dynamic comparisons keep the multiline-safe shell/`awk` path.
@@ -408,7 +409,8 @@ let diff = x !== y             // strict inequality (same as !=)
 let sameTree = draw() === `*
 #`                              // multiline strings compare safely
 
-// || and && in value position return actual values (JS semantics)
+// || and && in value position return actual values (JS semantics).
+// Static known-left cases compile directly to the selected value.
 let count = acc[word] || 0     // returns acc[word] if truthy, else 0
 
 // ?? falls back only for null/undefined, preserving empty string, 0, and false
