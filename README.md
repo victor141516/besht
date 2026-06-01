@@ -92,6 +92,7 @@ Files use the `.bsh` extension.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static ASCII string literal `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments compile to constants; dynamic and non-ASCII string searches keep the helper/`awk` path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls keep the shell arithmetic path.
+- Static numeric literal `.toString()`/`.toFixed()` calls and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
 - Static ASCII string literal transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments compile to constants; dynamic and non-ASCII transforms keep the POSIX tool path.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
@@ -479,7 +480,7 @@ Math.pow(2, 8); // 256
 Math.sqrt(16); // 4
 ```
 
-All `Math` methods are compiled to `awk` arithmetic and support decimal numbers. POSIX `$((...))` is integer-only, so besht uses `awk` wherever a float operand is present.
+Literal-argument `Math` calls compile to constants. Dynamic `Math` methods compile to `awk` arithmetic and support decimal numbers. POSIX `$((...))` is integer-only, so besht uses `awk` wherever a dynamic float operand is present.
 
 When a variable is reassigned, besht updates its float-tracking metadata from the new right-hand side: float-producing expressions keep later arithmetic on `awk`, while integer/non-float reassignment clears the float marker so later integer arithmetic can use shell integer lowering again.
 

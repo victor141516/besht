@@ -1299,6 +1299,25 @@ func TestIntegration_NumberMethods(t *testing.T) {
 	assertContains(t, out, `printf "%.*f", _n, _x`)
 }
 
+func TestIntegration_StaticNumberMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log((42).toString())
+console.log((3.14159).toFixed(2))
+console.log(Math.min(4, 2))
+console.log(Math.max(4, 2))
+console.log(Math.round(2.7))
+console.log(Math.floor(2.7))
+console.log(Math.ceil(2.1))
+console.log(Math.trunc(-3.7))
+console.log(Math.sign(-3))
+console.log(Math.abs(-3))
+console.log(Math.pow(2, 3))
+console.log(Math.sqrt(9))`)
+	want := "42\n3.14\n2\n4\n3\n2\n3\n-3\n-1\n3\n8\n3\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_PrimitiveToStringAndParseIntRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let s: string = "x"
 console.log(s.toString())
