@@ -90,6 +90,7 @@ Files use the `.bsh` extension.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
+- Static value-position `||` and `&&` expressions compile to the selected side when the left operand's truthiness is known.
 - Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, `!false`, static comparisons, and variables bound to static boolean expressions render directly as `true`/`false`; `Besht.fs.*` and `Besht.strings.*` predicates also print readable `true`/`false` in console calls. Dynamic boolean console arguments reuse the same shell condition once and print `true`/`false` from it.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - Static scalar equality comparisons and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, and parseable `Number.parseInt()`/`Number.parseFloat()` calls. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
@@ -418,7 +419,8 @@ let diff = x !== y             // strict inequality (same as !=)
 let sameTree = draw() === `*
 #`                              // multiline strings compare safely
 
-// || and && in value position return actual values (JS semantics)
+// || and && in value position return actual values (JS semantics).
+// Static known-left cases compile directly to the selected value.
 let count = acc[word] || 0     // returns acc[word] if truthy, else 0
 
 // ?? falls back only for null/undefined, preserving empty string, 0, and false

@@ -1179,6 +1179,45 @@ if (ready) console.log("ready")`)
 	assertContains(t, out, `if [ "$ready" = 1 ]; then`)
 }
 
+func TestCodegen_StaticLogicalValueExpressions(t *testing.T) {
+	out := compile(t, `console.log("left" || "fallback")
+console.log("" || "fallback")
+console.log("left" && "right")
+console.log("" && "right")
+console.log(0 || 42)
+console.log(7 && 42)
+console.log(false || true)
+console.log(false && true)
+console.log("" || true)
+console.log("left" || false)
+console.log(true && "value")
+console.log("left" && false)`)
+	for _, want := range []string{
+		`printf '%s\n' 'left'`,
+		`printf '%s\n' 'fallback'`,
+		`printf '%s\n' 'right'`,
+		`printf '%s\n' ''`,
+		`printf '%s\n' 42`,
+		`printf '%s\n' true`,
+		`printf '%s\n' false`,
+		`printf '%s\n' 'value'`,
+	} {
+		assertContains(t, out, want)
+	}
+	assertNotContains(t, out, `if [ $( _l=`)
+	assertNotContains(t, out, `_l='left'`)
+}
+
+func TestCodegen_DynamicLogicalValueExpressionIsNotBooleanWrapped(t *testing.T) {
+	out := compile(t, `function pick(): string {
+    return "value"
+}
+console.log(pick() || "fallback")`)
+	assertContains(t, out, `printf '%s\n' "$( _l=$(pick);`)
+	assertNotContains(t, out, `if [ $( _l=$(pick)`)
+	assertNotContains(t, out, `then printf true; else printf false`)
+}
+
 func TestCodegen_IndexExpr(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
 let first: string = files[0]`)
