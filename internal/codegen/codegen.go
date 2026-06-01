@@ -15,47 +15,50 @@ import (
 const nullishSentinelVar = "_BESHT_NULLISH_SENTINEL"
 
 type Generator struct {
-	sb               strings.Builder
-	indent           int
-	currentFn        string
-	fnReturnMap      map[string]*ast.Type
-	varTypeMap       map[string]*ast.Type // codegen-level var → inferred type (list detection)
-	inFunction       bool
-	inLoop           bool
-	topLevel         bool
-	paramMap         map[string]string // besht param name → mangled shell var name
-	globalVarMap     map[string]string // top-level/imported besht name → shell var name
-	objAliasMap      map[string]objectRef
-	objFieldsMap     map[string][]string  // object var name → list of field names
-	objPropTypeMap   map[string]*ast.Type // "varName.propName" → property type
-	staticObjectMap  map[string][]string
-	staticNullishMap map[string]bool
-	stringConstMap   map[string]string
-	boolConstMap     map[string]bool
-	staticListMap    map[string][]string
-	staticListValues map[string][]string
-	staticSetMap     map[string][]string
-	controlAssigned  map[string]bool
-	fnParamTypes     map[string]*ast.Type // current fn param name → type annotation
-	fnParamNames     map[string][]string  // function name → param names (in order)
-	classMap         map[string]*ast.ClassDecl
-	varClassMap      map[string]string
-	currentClass     string
-	currentThisVar   string
-	floatVars        map[string]bool
-	intVars          map[string]bool
-	listLenMap       map[string]string
-	runtimeHelpers   map[string]bool
-	argsOptions      map[string]bool
-	argsFlags        map[string]bool
-	NoCheck          bool
-	NoSourceMap      bool
-	cmdAnalysis      *CmdAnalysis
-	cmdScope         *cmdScope
-	cmdChains        map[string]ast.Expression
-	reduceReturns    []reduceReturnContext
-	mapReturns       []mapReturnContext
-	UseJQ            bool
+	sb                   strings.Builder
+	indent               int
+	currentFn            string
+	fnReturnMap          map[string]*ast.Type
+	varTypeMap           map[string]*ast.Type // codegen-level var -> inferred type (list detection)
+	inFunction           bool
+	inLoop               bool
+	topLevel             bool
+	paramMap             map[string]string // besht param name -> mangled shell var name
+	globalVarMap         map[string]string // top-level/imported besht name -> shell var name
+	objAliasMap          map[string]objectRef
+	objFieldsMap         map[string][]string  // object var name -> list of field names
+	objPropTypeMap       map[string]*ast.Type // "varName.propName" -> property type
+	staticObjectMap      map[string][]string
+	staticObjectEntryMap map[string][]string
+	staticNullishMap     map[string]bool
+	stringConstMap       map[string]string
+	boolConstMap         map[string]bool
+	staticListMap        map[string][]string
+	staticListValues     map[string][]string
+	staticEntryListMap   map[string][]string
+	staticEntryLoopMap   map[string]staticEntryLoopFields
+	staticSetMap         map[string][]string
+	controlAssigned      map[string]bool
+	fnParamTypes         map[string]*ast.Type // current fn param name -> type annotation
+	fnParamNames         map[string][]string  // function name -> param names (in order)
+	classMap             map[string]*ast.ClassDecl
+	varClassMap          map[string]string
+	currentClass         string
+	currentThisVar       string
+	floatVars            map[string]bool
+	intVars              map[string]bool
+	listLenMap           map[string]string
+	runtimeHelpers       map[string]bool
+	argsOptions          map[string]bool
+	argsFlags            map[string]bool
+	NoCheck              bool
+	NoSourceMap          bool
+	cmdAnalysis          *CmdAnalysis
+	cmdScope             *cmdScope
+	cmdChains            map[string]ast.Expression
+	reduceReturns        []reduceReturnContext
+	mapReturns           []mapReturnContext
+	UseJQ                bool
 }
 
 type reduceReturnContext struct {
@@ -66,6 +69,11 @@ type reduceReturnContext struct {
 
 type mapReturnContext struct {
 	indexVar string
+}
+
+type staticEntryLoopFields struct {
+	keyVar   string
+	valueVar string
 }
 
 type objectRef struct {
@@ -130,34 +138,37 @@ type Options struct {
 
 func New() *Generator {
 	return &Generator{
-		fnReturnMap:      make(map[string]*ast.Type),
-		varTypeMap:       make(map[string]*ast.Type),
-		paramMap:         make(map[string]string),
-		globalVarMap:     make(map[string]string),
-		objAliasMap:      make(map[string]objectRef),
-		objFieldsMap:     make(map[string][]string),
-		objPropTypeMap:   make(map[string]*ast.Type),
-		staticObjectMap:  make(map[string][]string),
-		staticNullishMap: make(map[string]bool),
-		stringConstMap:   make(map[string]string),
-		boolConstMap:     make(map[string]bool),
-		staticListMap:    make(map[string][]string),
-		staticListValues: make(map[string][]string),
-		staticSetMap:     make(map[string][]string),
-		controlAssigned:  make(map[string]bool),
-		fnParamTypes:     make(map[string]*ast.Type),
-		fnParamNames:     make(map[string][]string),
-		classMap:         make(map[string]*ast.ClassDecl),
-		varClassMap:      make(map[string]string),
-		floatVars:        make(map[string]bool),
-		intVars:          make(map[string]bool),
-		listLenMap:       make(map[string]string),
-		runtimeHelpers:   make(map[string]bool),
-		argsOptions:      make(map[string]bool),
-		argsFlags:        make(map[string]bool),
-		cmdScope:         newCmdScope(nil),
-		cmdChains:        make(map[string]ast.Expression),
-		topLevel:         true,
+		fnReturnMap:          make(map[string]*ast.Type),
+		varTypeMap:           make(map[string]*ast.Type),
+		paramMap:             make(map[string]string),
+		globalVarMap:         make(map[string]string),
+		objAliasMap:          make(map[string]objectRef),
+		objFieldsMap:         make(map[string][]string),
+		objPropTypeMap:       make(map[string]*ast.Type),
+		staticObjectMap:      make(map[string][]string),
+		staticObjectEntryMap: make(map[string][]string),
+		staticNullishMap:     make(map[string]bool),
+		stringConstMap:       make(map[string]string),
+		boolConstMap:         make(map[string]bool),
+		staticListMap:        make(map[string][]string),
+		staticListValues:     make(map[string][]string),
+		staticEntryListMap:   make(map[string][]string),
+		staticEntryLoopMap:   make(map[string]staticEntryLoopFields),
+		staticSetMap:         make(map[string][]string),
+		controlAssigned:      make(map[string]bool),
+		fnParamTypes:         make(map[string]*ast.Type),
+		fnParamNames:         make(map[string][]string),
+		classMap:             make(map[string]*ast.ClassDecl),
+		varClassMap:          make(map[string]string),
+		floatVars:            make(map[string]bool),
+		intVars:              make(map[string]bool),
+		listLenMap:           make(map[string]string),
+		runtimeHelpers:       make(map[string]bool),
+		argsOptions:          make(map[string]bool),
+		argsFlags:            make(map[string]bool),
+		cmdScope:             newCmdScope(nil),
+		cmdChains:            make(map[string]ast.Expression),
+		topLevel:             true,
 	}
 }
 
@@ -1321,6 +1332,11 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		g.objFieldsMap[varName] = fields
 		g.staticObjectMap[varName] = uniqueStrings(fields)
 		g.staticNullishMap[varName] = false
+		if entries, ok := staticObjectLiteralEntries(obj); ok {
+			g.staticObjectEntryMap[varName] = entries
+		} else {
+			delete(g.staticObjectEntryMap, varName)
+		}
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
 		delete(g.objAliasMap, s.Name)
 		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
@@ -1454,6 +1470,10 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		g.listLenMap[varName] = g.argsArgcExpr()
 	} else if n, ok := staticListBindingLength(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
+	} else if values, ok := g.staticObjectKeysBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if entries, ok := g.staticObjectEntriesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(entries))
 	} else {
 		delete(g.listLenMap, varName)
 	}
@@ -1924,6 +1944,7 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 func (g *Generator) genAssignment(s *ast.Assignment) error {
 	varName := g.resolveVarName(s.Name)
 	delete(g.staticObjectMap, varName)
+	delete(g.staticObjectEntryMap, varName)
 	delete(g.staticNullishMap, varName)
 	delete(g.staticSetMap, varName)
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
@@ -1939,6 +1960,10 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	}
 	if n, ok := staticListBindingLength(s.Value); ok {
 		g.listLenMap[varName] = strconv.Itoa(n)
+	} else if values, ok := g.staticObjectKeysBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(values))
+	} else if entries, ok := g.staticObjectEntriesBuiltinValues(s.Value); ok {
+		g.listLenMap[varName] = strconv.Itoa(len(entries))
 	} else {
 		delete(g.listLenMap, varName)
 	}
@@ -2032,6 +2057,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
+	prevStaticObjectEntryMap := g.staticObjectEntryMap
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
@@ -2044,6 +2070,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
@@ -2078,6 +2105,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
+	g.staticObjectEntryMap = prevStaticObjectEntryMap
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
@@ -2183,6 +2211,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevObjFieldsMap := g.objFieldsMap
 	prevObjPropTypeMap := g.objPropTypeMap
 	prevStaticObjectMap := g.staticObjectMap
+	prevStaticObjectEntryMap := g.staticObjectEntryMap
 	prevStaticNullishMap := g.staticNullishMap
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
@@ -2197,6 +2226,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
 	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
 	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
 	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
@@ -2240,6 +2270,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.objFieldsMap = prevObjFieldsMap
 	g.objPropTypeMap = prevObjPropTypeMap
 	g.staticObjectMap = prevStaticObjectMap
+	g.staticObjectEntryMap = prevStaticObjectEntryMap
 	g.staticNullishMap = prevStaticNullishMap
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
@@ -2388,10 +2419,19 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 		if iter.Name == "Besht.iter.range" {
 			return g.genForRange(s, iter)
 		}
+		if entries, ok := g.staticObjectEntriesBuiltinValues(iter); ok {
+			return g.genForStaticEntryList(s, entries)
+		}
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
+		if words, ok := staticForListWordsExpr(iter); ok {
+			return g.genForStaticList(s, words)
+		}
 	case *ast.IdentExpr:
+		if entries, ok := g.staticEntryListMap[g.resolveVarName(iter.Name)]; ok {
+			return g.genForStaticEntryList(s, entries)
+		}
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
@@ -2666,6 +2706,9 @@ func (g *Generator) staticScalarListValues(expr ast.Expression) ([]string, bool)
 		if values, ok := g.staticObjectKeysBuiltinValues(e); ok {
 			return values, true
 		}
+		if entries, ok := g.staticObjectEntriesBuiltinValues(e); ok {
+			return entries, true
+		}
 	case *ast.MethodCallExpr:
 		return g.staticScalarListMethodValues(e)
 	}
@@ -2807,18 +2850,30 @@ func (g *Generator) updateStaticListBinding(varName string, expr ast.Expression)
 	if g.staticListValues == nil {
 		g.staticListValues = make(map[string][]string)
 	}
+	if g.staticEntryListMap == nil {
+		g.staticEntryListMap = make(map[string][]string)
+	}
+	if entries, ok := g.staticObjectEntriesBuiltinValues(expr); ok {
+		g.staticListMap[varName] = staticWordsFromValues(entries)
+		g.staticListValues[varName] = append([]string(nil), entries...)
+		g.staticEntryListMap[varName] = append([]string(nil), entries...)
+		return
+	}
 	if values, ok := g.staticScalarListValuesWithoutNewlines(expr); ok {
 		g.staticListMap[varName] = staticWordsFromValues(values)
 		g.staticListValues[varName] = append([]string(nil), values...)
+		delete(g.staticEntryListMap, varName)
 		return
 	}
 	if values, ok := staticListValuesWithoutNewlinesExpr(expr); ok {
 		g.staticListMap[varName] = staticWordsFromValues(values)
 		g.staticListValues[varName] = append([]string(nil), values...)
+		delete(g.staticEntryListMap, varName)
 		return
 	}
 	delete(g.staticListMap, varName)
 	delete(g.staticListValues, varName)
+	delete(g.staticEntryListMap, varName)
 }
 
 func (g *Generator) setStaticSetValues(varName string, values []string) {
@@ -3355,6 +3410,44 @@ func (g *Generator) genForStaticList(s *ast.ForStmt, words []string) error {
 	}
 	g.pop()
 	g.line("done")
+	g.undeclareLoopVar(s.VarName)
+	return nil
+}
+
+func (g *Generator) genForStaticEntryList(s *ast.ForStmt, entries []string) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	iVar := g.declareLoopVar(s.VarName)
+	rowVar := fmt.Sprintf("_forentry_%d_%d", s.Pos.Line, s.Pos.Column)
+	keyVar := iVar + "_0"
+	valueVar := iVar + "_1"
+	prevType, hadType := g.varTypeMap[iVar]
+	prevFields, hadFields := g.staticEntryLoopMap[iVar]
+	g.varTypeMap[iVar] = &ast.Type{Kind: ast.TypeList, Elem: typeString}
+	g.staticEntryLoopMap[iVar] = staticEntryLoopFields{keyVar: keyVar, valueVar: valueVar}
+	g.line(fmt.Sprintf("for %s in %s; do", rowVar, strings.Join(staticWordsFromValues(entries), " ")))
+	g.push()
+	g.line(fmt.Sprintf("%s=${%s%%%%\037*}", keyVar, rowVar))
+	g.line(fmt.Sprintf("%s=${%s#*\037}", valueVar, rowVar))
+	g.line(fmt.Sprintf("%s=$(printf '%%s\\n%%s' \"$%s\" \"$%s\")", iVar, keyVar, valueVar))
+	for _, stmt := range s.Body.Statements {
+		if err := g.genStmt(stmt); err != nil {
+			return err
+		}
+	}
+	g.pop()
+	g.line("done")
+	if hadType {
+		g.varTypeMap[iVar] = prevType
+	} else {
+		delete(g.varTypeMap, iVar)
+	}
+	if hadFields {
+		g.staticEntryLoopMap[iVar] = prevFields
+	} else {
+		delete(g.staticEntryLoopMap, iVar)
+	}
 	g.undeclareLoopVar(s.VarName)
 	return nil
 }
@@ -4258,10 +4351,12 @@ func (g *Generator) updateObjectAliasRef(name string, ref objectRef) {
 func (g *Generator) invalidateStaticObjectRef(ref objectRef) {
 	if ref.StaticName != "" {
 		delete(g.staticObjectMap, ref.StaticName)
+		delete(g.staticObjectEntryMap, ref.StaticName)
 	}
 	if ref.RootName != "" {
 		if rootRef, ok := g.objAliasMap[ref.RootName]; ok && rootRef.StaticName != "" {
 			delete(g.staticObjectMap, rootRef.StaticName)
+			delete(g.staticObjectEntryMap, rootRef.StaticName)
 		}
 	}
 }
@@ -4331,12 +4426,38 @@ func (g *Generator) staticNamedObjectKeys(expr ast.Expression) ([]string, bool) 
 	return append([]string(nil), keys...), true
 }
 
+func (g *Generator) staticNamedObjectEntries(expr ast.Expression) ([]string, bool) {
+	if as, ok := expr.(*ast.AsExpr); ok {
+		return g.staticNamedObjectEntries(as.Expr)
+	}
+	if obj, ok := expr.(*ast.ObjectLit); ok {
+		return staticObjectLiteralEntries(obj)
+	}
+	ref, ok := g.resolveObjectRef(expr)
+	if !ok || ref.StaticName == "" {
+		return nil, false
+	}
+	entries, ok := g.staticObjectEntryMap[ref.StaticName]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), entries...), true
+}
+
 func (g *Generator) staticObjectKeysBuiltinValues(expr ast.Expression) ([]string, bool) {
 	builtin, ok := expr.(*ast.BuiltinCallExpr)
 	if !ok || builtin.Name != "Object.keys" || len(builtin.Args) != 1 {
 		return nil, false
 	}
 	return g.staticNamedObjectKeys(builtin.Args[0])
+}
+
+func (g *Generator) staticObjectEntriesBuiltinValues(expr ast.Expression) ([]string, bool) {
+	builtin, ok := expr.(*ast.BuiltinCallExpr)
+	if !ok || builtin.Name != "Object.entries" || len(builtin.Args) != 1 {
+		return nil, false
+	}
+	return g.staticNamedObjectEntries(builtin.Args[0])
 }
 
 func staticWordsFromValues(values []string) []string {
@@ -4636,6 +4757,9 @@ func (g *Generator) genObjectEntries(expr ast.Expression) (string, error) {
 			return "", err
 		}
 		return g.genObjectLiteralEntries(obj)
+	}
+	if entries, ok := g.staticNamedObjectEntries(expr); ok {
+		return shellQuote(strings.Join(entries, "\n")), nil
 	}
 	if ref, ok := g.resolveObjectRef(expr); ok {
 		if err := g.validateObjectRefScalarValues("Object.entries", ref); err != nil {
@@ -6234,6 +6358,9 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 	if e.Property == "length" {
 		if values, ok := g.staticObjectKeysBuiltinValues(e.Receiver); ok {
 			return strconv.Itoa(len(values)), nil
+		}
+		if entries, ok := g.staticObjectEntriesBuiltinValues(e.Receiver); ok {
+			return strconv.Itoa(len(entries)), nil
 		}
 		if values, ok := g.staticScalarListValues(e.Receiver); ok {
 			return strconv.Itoa(len(values)), nil
@@ -8858,6 +8985,18 @@ func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, b
 }
 
 func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
+	if ident, ok := e.Expr.(*ast.IdentExpr); ok {
+		if fields, ok := g.staticEntryLoopMap[g.resolveVarName(ident.Name)]; ok {
+			if index, indexOK := staticIntLiteral(e.Index); indexOK {
+				switch index {
+				case 0:
+					return fmt.Sprintf("\"$%s\"", fields.keyVar), nil
+				case 1:
+					return fmt.Sprintf("\"$%s\"", fields.valueVar), nil
+				}
+			}
+		}
+	}
 	if prop, ok := e.Expr.(*ast.PropertyExpr); ok {
 		if ident, ok := prop.Receiver.(*ast.IdentExpr); ok {
 			if classDecl := g.classMap[g.resolveClassName(ident.Name)]; classDecl != nil {

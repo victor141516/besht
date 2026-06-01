@@ -2793,6 +2793,41 @@ let hasActive = Object.hasOwn(user, "active")`)
 	assertNotContains(t, out, `hasActive=1`)
 }
 
+func TestCodegen_StaticNamedObjectEntries(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
+let entries = Object.entries(user)
+let count = Object.entries(user).length
+for (entry of Object.entries(user)) {
+    console.log(entry[0] + "=" + entry[1])
+}
+for (entry of entries) {
+    console.log(entry[0] + "=" + entry[1])
+}`)
+	assertContains(t, out, "entries='id\0371\nname\037Ada\nactive\037true'")
+	assertContains(t, out, `count=3`)
+	assertContains(t, out, `for _forentry_`)
+	assertContains(t, out, "entry_0=${_forentry_")
+	assertContains(t, out, "%%\037*}")
+	assertContains(t, out, "entry_1=${_forentry_")
+	assertContains(t, out, "#*\037}")
+	assertContains(t, out, `printf '%s\n' "${entry_0}=${entry_1}"`)
+	assertNotContains(t, out, `eval "_bst_obj_value=`)
+	assertNotContains(t, out, `grep -q '[^A-Za-z0-9_]'`)
+	assertNotContains(t, out, `wc -l`)
+	assertNotContains(t, out, `while IFS= read -r entry`)
+}
+
+func TestCodegen_StaticNamedObjectEntriesFallbackAfterMutation(t *testing.T) {
+	out := compile(t, `let user = { id: 1, name: "Ada" }
+user.active = true
+let entries = Object.entries(user)`)
+	assertContains(t, out, `case " $_objkeys_user " in *" active "*)`)
+	assertContains(t, out, `entries=$(for _bst_obj_key in $_objkeys_user`)
+	assertContains(t, out, `eval "_bst_obj_value=`)
+	assertContains(t, out, `if [ "$_bst_obj_key" = 'active' ]`)
+	assertNotContains(t, out, "entries='id\0371\nname\037Ada\nactive\037true'")
+}
+
 func TestCodegen_BooleanPropertyCondition(t *testing.T) {
 	out := compile(t, `let user = { name: "Ada", active: true }
 if (user.active) {
