@@ -182,17 +182,19 @@ if (n > 10) {
 }
 
 func TestCodegen_IfBoolCondition(t *testing.T) {
-	out := compile(t, `let flag: boolean = true
+	out := compile(t, `function show(flag: boolean) {
 if (flag) {
     $("echo", "yes").run()
+}
 }`)
-	assertContains(t, out, `[ "$flag" = 1 ]`)
+	assertContains(t, out, `[ "$_show_flag" = 1 ]`)
 }
 
 func TestCodegen_IfNegation(t *testing.T) {
-	out := compile(t, `let b: boolean = true
+	out := compile(t, `function show(b: boolean) {
 if (!b) {
     $("echo", "no").run()
+}
 }`)
 	assertContains(t, out, `! [`)
 }
@@ -249,7 +251,8 @@ if ("a" === "a") {
 	assertContains(t, out, `diff=1`)
 	assertContains(t, out, `less=1`)
 	assertContains(t, out, `atLeast=1`)
-	assertContains(t, out, `if true; then`)
+	assertContains(t, out, `echo same`)
+	assertNotContains(t, out, `if true; then`)
 	assertNotContains(t, out, `_bst_left='a'`)
 	assertNotContains(t, out, `awk -v _a=2 -v _b=3`)
 }
@@ -867,6 +870,39 @@ console.error(true && false)`)
 	assertContains(t, out, `printf '%s\n' false >&2`)
 	assertNotContains(t, out, `$(if [ 0 = 1 ]; then printf true; else printf false; fi)`)
 	assertNotContains(t, out, `$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+}
+
+func TestCodegen_StaticBooleanBindings(t *testing.T) {
+	out := compile(t, `let ready = true
+let same = "a" === "a"
+let label = same ? "yes" : "no"
+console.log(ready)
+console.log(same)
+console.log(`+"`same=${same}`"+`)
+if (same) console.log("same")`)
+	assertContains(t, out, `ready=1`)
+	assertContains(t, out, `same=1`)
+	assertContains(t, out, `label='yes'`)
+	if count := strings.Count(out, `printf '%s\n' true`); count < 2 {
+		t.Fatalf("expected direct true prints, got %d\n\n%s", count, out)
+	}
+	assertContains(t, out, `printf '%s\n' "same=true"`)
+	assertContains(t, out, `printf '%s\n' 'same'`)
+	assertNotContains(t, out, `$(if [ $ready = 1 ]; then printf true; else printf false; fi)`)
+	assertNotContains(t, out, `$(if [ $same = 1 ]; then printf true; else printf false; fi)`)
+	assertNotContains(t, out, `if [ "$same" = 1 ]; then`)
+}
+
+func TestCodegen_StaticBooleanBindingsKeepControlFlowFallback(t *testing.T) {
+	out := compile(t, `let ready = true
+if (false) {
+    ready = false
+}
+console.log(ready)
+if (ready) console.log("ready")`)
+	assertContains(t, out, `ready=1`)
+	assertContains(t, out, `$(if [ $ready = 1 ]; then printf true; else printf false; fi)`)
+	assertContains(t, out, `if [ "$ready" = 1 ]; then`)
 }
 
 func TestCodegen_IndexExpr(t *testing.T) {
