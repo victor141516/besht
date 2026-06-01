@@ -305,6 +305,8 @@ Variables bound to static string literals may fold `.length` to a numeric consta
 
 Static scalar equality comparisons and static numeric relational comparisons compile to constants, including comparisons whose operands are themselves static folded arithmetic, string methods/transforms, `Math.*`, or parseable `Number.parseInt()`/`Number.parseFloat()` calls. Dynamic relational comparisons over compiler-known integer expressions compile to POSIX `[ "$n" -lt 3 ]` style tests; floats, function results, command output, annotations-only numbers, and unknown values keep the `awk` path. Dynamic equality must keep the `_bst_left`/`_bst_right` binding block because direct `[ $(fn) = value ]` breaks POSIX argument parsing for spaces and newlines.
 
+Variables bound to static numeric expressions may fold in arithmetic, numeric comparisons, unary numeric expressions, numeric `.toString()`/`.toFixed()`, and static `Math.*` calls. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
+
 ### Variable Name Mangling
 
 ### Variable Name Mangling

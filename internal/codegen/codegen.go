@@ -33,6 +33,7 @@ type Generator struct {
 	staticObjectValueMap map[string][]string
 	staticNullishMap     map[string]bool
 	stringConstMap       map[string]string
+	numConstMap          map[string]float64
 	boolConstMap         map[string]bool
 	staticListMap        map[string][]string
 	staticListValues     map[string][]string
@@ -116,6 +117,14 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
+func cloneNumberMap(in map[string]float64) map[string]float64 {
+	out := make(map[string]float64, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 type callbackLoopCtx struct {
 	ParamVars   []string
 	ParamByName map[string]string
@@ -151,6 +160,7 @@ func New() *Generator {
 		staticObjectValueMap: make(map[string][]string),
 		staticNullishMap:     make(map[string]bool),
 		stringConstMap:       make(map[string]string),
+		numConstMap:          make(map[string]float64),
 		boolConstMap:         make(map[string]bool),
 		staticListMap:        make(map[string][]string),
 		staticListValues:     make(map[string][]string),
@@ -380,6 +390,7 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 	assigned := make(map[string]bool)
 	var walkStmt func(ast.Statement, bool)
 	var walkBlock func(*ast.Block, bool)
+	var walkExpr func(ast.Expression, bool)
 	walkBlock = func(block *ast.Block, inControl bool) {
 		if block == nil {
 			return
@@ -388,18 +399,106 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 			walkStmt(stmt, inControl)
 		}
 	}
+	walkExpr = func(expr ast.Expression, inControl bool) {
+		if expr == nil {
+			return
+		}
+		switch e := expr.(type) {
+		case *ast.UpdateExpr:
+			if inControl {
+				assigned[e.Name] = true
+			}
+		case *ast.TemplateLit:
+			for _, expr := range e.Exprs {
+				walkExpr(expr, inControl)
+			}
+		case *ast.MethodCallExpr:
+			walkExpr(e.Receiver, inControl)
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.BinaryExpr:
+			walkExpr(e.Left, inControl)
+			walkExpr(e.Right, inControl)
+		case *ast.PipeExpr:
+			walkExpr(e.Left, inControl)
+			walkExpr(e.Right, inControl)
+		case *ast.UnaryExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.TernaryExpr:
+			walkExpr(e.Condition, inControl)
+			walkExpr(e.Then, inControl)
+			walkExpr(e.Else, inControl)
+		case *ast.FnCallExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.BuiltinCallExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.RangeExpr:
+			walkExpr(e.Start, inControl)
+			walkExpr(e.End, inControl)
+		case *ast.CmdExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		case *ast.PropagateExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.ListLit:
+			for _, elem := range e.Elements {
+				walkExpr(elem, inControl)
+			}
+		case *ast.ObjectLit:
+			for _, field := range e.Fields {
+				walkExpr(field.Value, inControl)
+			}
+		case *ast.ArrowExpr:
+			// Callback bodies may run zero or many times, so assignments inside
+			// them cannot keep top-level constant metadata.
+			walkExpr(e.Body, true)
+			walkBlock(e.BlockBody, true)
+		case *ast.IndexExpr:
+			walkExpr(e.Expr, inControl)
+			walkExpr(e.Index, inControl)
+		case *ast.PropertyExpr:
+			walkExpr(e.Receiver, inControl)
+		case *ast.AsExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.SpreadExpr:
+			walkExpr(e.Expr, inControl)
+		case *ast.NewExpr:
+			for _, arg := range e.Args {
+				walkExpr(arg, inControl)
+			}
+		}
+	}
 	walkStmt = func(stmt ast.Statement, inControl bool) {
 		switch s := stmt.(type) {
+		case nil:
+			return
+		case *ast.LetDecl:
+			walkExpr(s.Value, inControl)
 		case *ast.Assignment:
 			if inControl {
 				assigned[s.Name] = true
 			}
+			walkExpr(s.Value, inControl)
 		case *ast.IndexAssignStmt:
 			if inControl {
 				assigned[s.Name] = true
 			}
+			walkExpr(s.Index, inControl)
+			walkExpr(s.Value, inControl)
+		case *ast.PropertyAssignStmt:
+			walkExpr(s.Value, inControl)
 		case *ast.ExprStmt:
 			markControlFlowMutations(s.Expr, inControl, assigned)
+		case *ast.ReturnStmt:
+			walkExpr(s.Value, inControl)
+		case *ast.ExitStmt:
+			walkExpr(s.Code, inControl)
 		case *ast.Block:
 			walkBlock(s, inControl)
 		case *ast.IfStmt:
@@ -1470,6 +1569,7 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	}
 	g.updateStaticNullishBinding(varName, s.Value)
 	g.updateStaticBoolBinding(varName, s.Value)
+	g.updateStaticNumberBinding(varName, s.Value)
 	if g.listLenMap == nil {
 		g.listLenMap = make(map[string]string)
 	}
@@ -2008,6 +2108,7 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	}
 	g.updateStaticNullishBinding(varName, s.Value)
 	g.updateStaticBoolBinding(varName, s.Value)
+	g.updateStaticNumberBinding(varName, s.Value)
 	g.updateStaticListBinding(varName, s.Value)
 	g.updateStaticSetBinding(varName, s.Value)
 	g.line(fmt.Sprintf("%s=%s", varName, val))
@@ -2083,6 +2184,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
 	prevBoolConstMap := g.boolConstMap
+	prevNumConstMap := g.numConstMap
 	g.currentFn = s.Name
 	g.inFunction = true
 	g.paramMap = make(map[string]string)
@@ -2097,6 +2199,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
 	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
+	g.numConstMap = cloneNumberMap(prevNumConstMap)
 
 	for i, param := range s.Params {
 		varName := fnParamVar(s.Name, param.Name)
@@ -2133,6 +2236,7 @@ func (g *Generator) genFnDecl(s *ast.FnDecl) error {
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
 	g.boolConstMap = prevBoolConstMap
+	g.numConstMap = prevNumConstMap
 	g.pop()
 	g.line("}")
 	g.line("")
@@ -2240,6 +2344,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	prevStringConstMap := g.stringConstMap
 	prevStaticSetMap := g.staticSetMap
 	prevBoolConstMap := g.boolConstMap
+	prevNumConstMap := g.numConstMap
 	prevClass := g.currentClass
 	prevThis := g.currentThisVar
 	g.currentFn = fnName
@@ -2256,6 +2361,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.stringConstMap = cloneStringMap(prevStringConstMap)
 	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
 	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
+	g.numConstMap = cloneNumberMap(prevNumConstMap)
 	g.currentClass = c.Name
 	g.currentThisVar = ""
 	argOffset := 1
@@ -2301,6 +2407,7 @@ func (g *Generator) genClassMethodDecl(c *ast.ClassDecl, method *ast.ClassMethod
 	g.stringConstMap = prevStringConstMap
 	g.staticSetMap = prevStaticSetMap
 	g.boolConstMap = prevBoolConstMap
+	g.numConstMap = prevNumConstMap
 	g.currentClass = prevClass
 	g.currentThisVar = prevThis
 	g.pop()
@@ -3004,6 +3111,17 @@ func (g *Generator) updateStaticBoolBinding(varName string, expr ast.Expression)
 	delete(g.boolConstMap, varName)
 }
 
+func (g *Generator) updateStaticNumberBinding(varName string, expr ast.Expression) {
+	if g.numConstMap == nil {
+		g.numConstMap = make(map[string]float64)
+	}
+	if value, ok := g.staticArithmeticNumberValue(expr); ok {
+		g.numConstMap[varName] = value
+		return
+	}
+	delete(g.numConstMap, varName)
+}
+
 func staticListLiteralValue(list *ast.ListLit) (string, bool) {
 	values, ok := staticScalarListValuesWithoutNewlines(list)
 	if !ok {
@@ -3377,8 +3495,32 @@ func staticNumberValue(expr ast.Expression) (float64, bool) {
 	return 0, false
 }
 
-func staticIntNumberValue(expr ast.Expression) (int, bool) {
-	v, ok := staticNumberValue(expr)
+func (g *Generator) staticNumberValue(expr ast.Expression) (float64, bool) {
+	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return 0, false
+		}
+		value, ok := g.numConstMap[g.resolveVarName(e.Name)]
+		return value, ok
+	case *ast.IntLit, *ast.FloatLit:
+		return staticNumberValue(expr)
+	case *ast.UnaryExpr:
+		v, ok := g.staticNumberValue(e.Expr)
+		if !ok {
+			return 0, false
+		}
+		if e.Op == "-" {
+			return -v, true
+		}
+	case *ast.AsExpr:
+		return g.staticNumberValue(e.Expr)
+	}
+	return 0, false
+}
+
+func (g *Generator) staticIntNumberValue(expr ast.Expression) (int, bool) {
+	v, ok := g.staticNumberValue(expr)
 	if !ok {
 		return 0, false
 	}
@@ -3395,6 +3537,41 @@ func staticArithmeticNumberValue(expr ast.Expression) (float64, bool) {
 	}
 	left, leftOK := staticArithmeticNumberValue(e.Left)
 	right, rightOK := staticArithmeticNumberValue(e.Right)
+	if !leftOK || !rightOK {
+		return 0, false
+	}
+	switch e.Op {
+	case "+":
+		return left + right, true
+	case "-":
+		return left - right, true
+	case "*":
+		return left * right, true
+	case "/":
+		if right == 0 {
+			return 0, false
+		}
+		return left / right, true
+	case "%":
+		if right == 0 {
+			return 0, false
+		}
+		return math.Mod(left, right), true
+	default:
+		return 0, false
+	}
+}
+
+func (g *Generator) staticArithmeticNumberValue(expr ast.Expression) (float64, bool) {
+	if value, ok := g.staticNumberValue(expr); ok {
+		return value, true
+	}
+	e, ok := expr.(*ast.BinaryExpr)
+	if !ok {
+		return 0, false
+	}
+	left, leftOK := g.staticArithmeticNumberValue(e.Left)
+	right, rightOK := g.staticArithmeticNumberValue(e.Right)
 	if !leftOK || !rightOK {
 		return 0, false
 	}
@@ -5229,7 +5406,7 @@ func (g *Generator) staticNullishState(expr ast.Expression) staticNullishState {
 				return staticNonNullishValue
 			}
 		}
-		if _, ok := staticArithmeticNumberValue(e); ok {
+		if _, ok := g.staticArithmeticNumberValue(e); ok {
 			return staticNonNullishValue
 		}
 	case *ast.UnaryExpr:
@@ -5551,14 +5728,14 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 				return "false", true, nil
 			}
 		}
-		if value, ok := staticArithmeticNumberValue(e); ok {
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
 	case *ast.BinaryExpr:
 		if selected, ok := g.staticLogicalSelectedExpr(e); ok {
 			return g.staticStringFragment(selected)
 		}
-		if value, ok := staticArithmeticNumberValue(e); ok {
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
 		if value, ok, err := g.staticComparisonResult(e); err != nil {
@@ -5778,6 +5955,9 @@ func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 		if value, ok := g.stringConstMap[varName]; ok {
 			return value != "", true
 		}
+		if value, ok := g.numConstMap[varName]; ok {
+			return value != 0, true
+		}
 	case *ast.BoolLit:
 		return e.Value, true
 	case *ast.UndefinedLit, *ast.NullLit:
@@ -5807,7 +5987,7 @@ func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 		if value, ok, err := g.staticComparisonResult(e); err == nil && ok {
 			return value, true
 		}
-		if value, ok := staticArithmeticNumberValue(e); ok {
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
 			return value != 0, true
 		}
 		if value, ok := g.staticBooleanValue(e); ok {
@@ -5832,7 +6012,7 @@ func (g *Generator) genFnArgs(args []ast.Expression) ([]string, error) {
 }
 
 func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (string, error) {
-	if value, ok := staticArithmeticNumberValue(e); ok {
+	if value, ok := g.staticArithmeticNumberValue(e); ok {
 		return formatStaticArithmeticNumber(value), nil
 	}
 
@@ -6065,7 +6245,7 @@ func (g *Generator) genUpdateRHS(e *ast.UpdateExpr) string {
 
 func (g *Generator) genUnaryRHS(e *ast.UnaryExpr) (string, error) {
 	if e.Op == "-" {
-		if value, ok := staticNumberValue(e); ok {
+		if value, ok := g.staticNumberValue(e); ok {
 			return formatStaticArithmeticNumber(value), nil
 		}
 	}
@@ -7290,7 +7470,7 @@ func (g *Generator) genFetchResponseMethod(e *ast.MethodCallExpr) (string, error
 }
 
 func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	value, ok := staticNumberValue(e.Receiver)
+	value, ok := g.staticNumberValue(e.Receiver)
 	if !ok {
 		return "", false, nil
 	}
@@ -7307,7 +7487,7 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 		}
 		if len(e.Args) == 1 {
 			var ok bool
-			digits, ok = staticIntNumberValue(e.Args[0])
+			digits, ok = g.staticIntNumberValue(e.Args[0])
 			if !ok || digits < 0 {
 				return "", false, nil
 			}
@@ -8385,7 +8565,7 @@ func (g *Generator) genStaticMathMethod(e *ast.MethodCallExpr) (string, bool, er
 		if i >= len(e.Args) {
 			return 0, false, fmt.Errorf("Math.%s requires at least %d argument(s)", e.Method, i+1)
 		}
-		v, ok := staticNumberValue(e.Args[i])
+		v, ok := g.staticNumberValue(e.Args[i])
 		return v, ok, nil
 	}
 	switch e.Method {
@@ -9852,6 +10032,17 @@ func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bo
 		return value, true, nil
 	}
 	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return "", false, nil
+		}
+		varName := g.resolveVarName(e.Name)
+		if value, ok := g.stringConstMap[varName]; ok {
+			return value, true, nil
+		}
+		if value, ok := g.numConstMap[varName]; ok {
+			return formatStaticNumber(value), true, nil
+		}
 	case *ast.AsExpr:
 		return g.staticScalarComparisonValue(e.Expr)
 	case *ast.UnaryExpr:
@@ -9860,11 +10051,11 @@ func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bo
 				return staticBoolComparisonValue(value), true, nil
 			}
 		}
-		if value, ok := staticArithmeticNumberValue(e); ok {
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
 	case *ast.BinaryExpr:
-		if value, ok := staticArithmeticNumberValue(e); ok {
+		if value, ok := g.staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
 		if value, ok, err := g.staticComparisonResult(e); err != nil {
@@ -9915,7 +10106,7 @@ func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bo
 }
 
 func (g *Generator) staticNumericComparisonValue(expr ast.Expression) (float64, bool, error) {
-	if value, ok := staticArithmeticNumberValue(expr); ok {
+	if value, ok := g.staticArithmeticNumberValue(expr); ok {
 		return value, true, nil
 	}
 	switch e := expr.(type) {

@@ -145,42 +145,41 @@ let r: string = shout("hello")`)
 }
 
 func TestCodegen_IfSimple(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n > 0) {
     $("echo", "pos").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -gt 0 ]; then`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `echo pos`)
 	assertContains(t, out, `fi`)
 }
 
 func TestCodegen_IfElse(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n > 0) {
     $("echo", "pos").run()
 } else {
     $("echo", "neg").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -gt 0 ]; then`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `fi`)
 }
 
 func TestCodegen_IfElseIf(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n > 10) {
     $("echo", "big").run()
 } else if (n > 0) {
     $("echo", "small").run()
 } else {
     $("echo", "zero").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -gt 10 ]; then`)
-	assertContains(t, out, `elif [ "$n" -gt 0 ]; then`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=10`)
-	assertNotContains(t, out, `awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=10`)
+	assertContains(t, out, `awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `fi`)
 }
@@ -204,42 +203,42 @@ if (!b) {
 }
 
 func TestCodegen_IfAndCondition(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 2
+	out := compile(t, `function check(a: number, b: number) {
 if (a > 0 && b > 0) {
     $("echo", "both").run()
+}
 }`)
 	assertContains(t, out, `&&`)
 }
 
 func TestCodegen_IfOrCondition(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 2
+	out := compile(t, `function check(a: number, b: number) {
 if (a > 0 || b > 0) {
     $("echo", "either").run()
+}
 }`)
 	assertContains(t, out, `||`)
 }
 
 func TestCodegen_IfStringEquality(t *testing.T) {
-	out := compile(t, `let s: string = "hello"
-let t: string = "world"
+	out := compile(t, `function check(s: string, t: string) {
 if (s == t) {
     $("echo", "same").run()
+}
 }`)
-	assertContains(t, out, `_bst_left="$s"`)
-	assertContains(t, out, `_bst_right="$t"`)
+	assertContains(t, out, `_bst_left="$_check_s"`)
+	assertContains(t, out, `_bst_right="$_check_t"`)
 	assertContains(t, out, `[ "$_bst_left" = "$_bst_right" ]`)
 }
 
 func TestCodegen_IfIntEquality(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 1
+	out := compile(t, `function check(a: number, b: number) {
 if (a == b) {
     $("echo", "equal").run()
+}
 }`)
-	assertContains(t, out, `_bst_left="$a"`)
-	assertContains(t, out, `_bst_right="$b"`)
+	assertContains(t, out, `_bst_left="$_check_a"`)
+	assertContains(t, out, `_bst_right="$_check_b"`)
 	assertContains(t, out, `[ "$_bst_left" = "$_bst_right" ]`)
 }
 
@@ -263,8 +262,14 @@ if ("a" === "a") {
 
 func TestCodegen_StaticComparisonsKeepDynamicFallback(t *testing.T) {
 	out := compile(t, `let a = "a"
+if (false) {
+    a = "b"
+}
 let same = a === "a"
 let n = 2
+if (false) {
+    n = 4
+}
 let less = n < 3`)
 	assertContains(t, out, `_bst_left="$a"`)
 	assertContains(t, out, `_bst_right='a'`)
@@ -273,12 +278,12 @@ let less = n < 3`)
 }
 
 func TestCodegen_WhileLoop(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 while (n > 0) {
     $("echo", "${n}").run()
+}
 }`)
-	assertContains(t, out, `while [ "$n" -gt 0 ]; do`)
-	assertNotContains(t, out, `while awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `while awk -v _a=$_check_n -v _b=0`)
 	assertContains(t, out, `done`)
 }
 
@@ -365,7 +370,7 @@ for (let f of files) {
 func TestCodegen_CompoundAssignment(t *testing.T) {
 	out := compile(t, `let count: number = 1
 count += 2`)
-	assertContains(t, out, `count=$(( $count + 2 ))`)
+	assertContains(t, out, `count=3`)
 }
 
 func TestCodegen_StaticArithmetic(t *testing.T) {
@@ -415,11 +420,43 @@ console.log(value === "hi")`)
 }
 
 func TestCodegen_StaticArithmeticKeepsDynamicFallback(t *testing.T) {
-	out := compile(t, `let a = 2
+	out := compile(t, `function calc(a: number) {
 let sum = a + 3
+}
 let divZero = 1 / 0`)
-	assertContains(t, out, `sum=$(( $a + 3 ))`)
+	assertContains(t, out, `sum=$(( $_calc_a + 3 ))`)
 	assertContains(t, out, `divZero=$(awk -v _a=1 -v _b=0`)
+}
+
+func TestCodegen_StaticNumberBindings(t *testing.T) {
+	out := compile(t, `let start = 2
+let step = 3
+let total = start + step * 4
+let fixed = total.toFixed(1)
+let max = Math.max(total, 10)
+if (total > 10) {
+    $("echo", "big").run()
+}`)
+	assertContains(t, out, `start=2`)
+	assertContains(t, out, `step=3`)
+	assertContains(t, out, `total=14`)
+	assertContains(t, out, `fixed='14.0'`)
+	assertContains(t, out, `max=14`)
+	assertContains(t, out, `echo big`)
+	assertNotContains(t, out, `$(( $start +`)
+	assertNotContains(t, out, `awk -v _a=$total -v _b=10`)
+	assertNotContains(t, out, `if true; then`)
+}
+
+func TestCodegen_StaticNumberBindingsKeepControlFlowFallback(t *testing.T) {
+	out := compile(t, `let start = 2
+if (false) {
+    start = 9
+}
+let total = start + 3
+let bigger = total > 10`)
+	assertContains(t, out, `total=$(( $start + 3 ))`)
+	assertContains(t, out, `bigger=$(if [ "$total" -gt 10 ]; then printf 1; else printf 0; fi)`)
 }
 
 func TestCodegen_TemplateLiteralExpression(t *testing.T) {
@@ -431,14 +468,14 @@ func TestCodegen_TernaryNumber(t *testing.T) {
 	out := compile(t, `let x: number = 10
 let y: number = 3
 let bigger: number = x > y ? x : y`)
-	assertContains(t, out, `bigger=$(if [ "$x" -gt "$y" ]; then printf '%s' "$x"; else printf '%s' "$y"; fi)`)
+	assertContains(t, out, `bigger="$x"`)
 	assertNotContains(t, out, `awk -v _a=$x -v _b=$y`)
 }
 
 func TestCodegen_TernaryString(t *testing.T) {
 	out := compile(t, `let x: number = 10
 let label: string = x > 5 ? "big" : "small"`)
-	assertContains(t, out, `label=$(if [ "$x" -gt 5 ]; then printf '%s' 'big'; else printf '%s' 'small'; fi)`)
+	assertContains(t, out, `label='big'`)
 	assertNotContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
 }
 
@@ -474,9 +511,10 @@ if (false) {
 }
 
 func TestCodegen_NumberToString(t *testing.T) {
-	out := compile(t, `let n: number = 42
-let s: string = n.toString()`)
-	assertContains(t, out, `printf '%s' "$n"`)
+	out := compile(t, `function show(n: number) {
+let s: string = n.toString()
+}`)
+	assertContains(t, out, `printf '%s' "$_show_n"`)
 }
 
 func TestCodegen_PrimitiveToString(t *testing.T) {
@@ -498,9 +536,10 @@ try {
 }
 
 func TestCodegen_NumberToFixed(t *testing.T) {
-	out := compile(t, `let pi: number = 3.14159
-let s: string = pi.toFixed(2)`)
-	assertContains(t, out, `awk -v _x="$pi" -v _n=2 'BEGIN{OFMT="%.17g";printf "%.*f", _n, _x}'`)
+	out := compile(t, `function show(pi: number) {
+let s: string = pi.toFixed(2)
+}`)
+	assertContains(t, out, `awk -v _x="$_show_pi" -v _n=2 'BEGIN{OFMT="%.17g";printf "%.*f", _n, _x}'`)
 }
 
 func TestCodegen_StaticNumberMethods(t *testing.T) {
@@ -750,38 +789,38 @@ process.exit(code)`)
 }
 
 func TestCodegen_ArithmeticAdd(t *testing.T) {
-	out := compile(t, `let a: number = 3
-let b: number = 4
-let c: number = a + b`)
-	assertContains(t, out, `$(( $a + $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a + b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a + $_calc_b ))`)
 }
 
 func TestCodegen_ArithmeticSub(t *testing.T) {
-	out := compile(t, `let a: number = 10
-let b: number = 3
-let c: number = a - b`)
-	assertContains(t, out, `$(( $a - $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a - b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a - $_calc_b ))`)
 }
 
 func TestCodegen_ArithmeticMul(t *testing.T) {
-	out := compile(t, `let a: number = 3
-let b: number = 4
-let c: number = a * b`)
-	assertContains(t, out, `$(( $a * $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a * b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a * $_calc_b ))`)
 }
 
 func TestCodegen_ArithmeticDiv(t *testing.T) {
-	out := compile(t, `let a: number = 10
-let b: number = 2
-let c: number = a / b`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a / b
+}`)
 	assertContains(t, out, `awk -v _a=`)
 }
 
 func TestCodegen_ArithmeticMod(t *testing.T) {
-	out := compile(t, `let a: number = 10
-let b: number = 3
-let c: number = a % b`)
-	assertContains(t, out, `$(( $a % $b ))`)
+	out := compile(t, `function calc(a: number, b: number) {
+let c: number = a % b
+}`)
+	assertContains(t, out, `c=$(( $_calc_a % $_calc_b ))`)
 }
 
 func TestCodegen_PipeMethod(t *testing.T) {
@@ -822,30 +861,30 @@ func TestCodegen_FnReturnStringViaPrintf(t *testing.T) {
 }
 
 func TestCodegen_ComparisonLt(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n < 10) {
     $("echo", "small").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -lt 10 ]; then`)
-	assertNotContains(t, out, `exit !(_a < _b)`)
+	assertContains(t, out, `exit !(_a < _b)`)
 }
 
 func TestCodegen_ComparisonGte(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n >= 5) {
     $("echo", "ok").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -ge 5 ]; then`)
-	assertNotContains(t, out, `exit !(_a >= _b)`)
+	assertContains(t, out, `exit !(_a >= _b)`)
 }
 
 func TestCodegen_ComparisonLte(t *testing.T) {
-	out := compile(t, `let n: number = 5
+	out := compile(t, `function check(n: number) {
 if (n <= 10) {
     $("echo", "ok").run()
+}
 }`)
-	assertContains(t, out, `if [ "$n" -le 10 ]; then`)
-	assertNotContains(t, out, `exit !(_a <= _b)`)
+	assertContains(t, out, `exit !(_a <= _b)`)
 }
 
 func TestCodegen_ComparisonFloatFallback(t *testing.T) {
@@ -853,8 +892,8 @@ func TestCodegen_ComparisonFloatFallback(t *testing.T) {
 if (n < 3) {
     $("echo", "small").run()
 }`)
-	assertContains(t, out, `awk -v _a=$n -v _b=3`)
-	assertContains(t, out, `exit !(_a < _b)`)
+	assertContains(t, out, `echo small`)
+	assertNotContains(t, out, `awk -v _a=$n -v _b=3`)
 }
 
 func TestCodegen_ComparisonIntegerBindingInvalidatedByFloatAssignment(t *testing.T) {
@@ -868,13 +907,13 @@ if (n < 3) {
 }
 
 func TestCodegen_ComparisonNeqInt(t *testing.T) {
-	out := compile(t, `let a: number = 1
-let b: number = 2
+	out := compile(t, `function check(a: number, b: number) {
 if (a != b) {
     $("echo", "diff").run()
+}
 }`)
-	assertContains(t, out, `_bst_left="$a"`)
-	assertContains(t, out, `_bst_right="$b"`)
+	assertContains(t, out, `_bst_left="$_check_a"`)
+	assertContains(t, out, `_bst_right="$_check_b"`)
 	assertContains(t, out, `[ "$_bst_left" != "$_bst_right" ]`)
 }
 
@@ -886,9 +925,10 @@ $("ls", path).run()`)
 }
 
 func TestCodegen_IntLiteralInShellArith(t *testing.T) {
-	out := compile(t, `let n: number = 5
-let m: number = n + 1`)
-	assertContains(t, out, `$(( $n + 1 ))`)
+	out := compile(t, `function calc(n: number) {
+let m: number = n + 1
+}`)
+	assertContains(t, out, `m=$(( $_calc_n + 1 ))`)
 }
 
 func TestCodegen_StringConcatMethod(t *testing.T) {
@@ -1073,15 +1113,16 @@ console.error(true && false)`)
 }
 
 func TestCodegen_DynamicBooleanConsoleArgsUseConditions(t *testing.T) {
-	out := compile(t, `let n = 3
+	out := compile(t, `function show(n: number) {
 console.log(n > 0)
 console.error(n == 3)
-console.log("positive?", n > 0)`)
-	assertContains(t, out, `if [ "$n" -gt 0 ]; then printf '%s\n' true; else printf '%s\n' false; fi`)
-	assertContains(t, out, `if { _bst_left="$n"; _bst_right=3;`)
+console.log("positive?", n > 0)
+}`)
+	assertContains(t, out, `if awk -v _a=$_show_n -v _b=0`)
+	assertContains(t, out, `if { _bst_left="$_show_n"; _bst_right=3;`)
 	assertContains(t, out, `then printf '%s\n' true >&2; else printf '%s\n' false >&2; fi`)
-	assertContains(t, out, `printf '%s\n' 'positive?' "$(if [ "$n" -gt 0 ]; then printf true; else printf false; fi)"`)
-	assertNotContains(t, out, `if [ $(if [ "$n" -gt 0 ]; then printf 1; else printf 0; fi) = 1 ]`)
+	assertContains(t, out, `printf '%s\n' 'positive?' "$(if awk -v _a=$_show_n -v _b=0`)
+	assertNotContains(t, out, `if [ $(if awk`)
 }
 
 func TestCodegen_StaticBooleanBranchesAndTernaries(t *testing.T) {
@@ -2623,15 +2664,17 @@ func TestCodegen_StringLastIndexOfSafeAwkArgs(t *testing.T) {
 }
 
 func TestCodegen_MathTrunc(t *testing.T) {
-	out := compile(t, `let x = -3.7
-let n: number = Math.trunc(x)`)
+	out := compile(t, `function calc(x: number) {
+let n: number = Math.trunc(x)
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `int(`)
 }
 
 func TestCodegen_MathSign(t *testing.T) {
-	out := compile(t, `let x = -3
-let n: number = Math.sign(x)`)
+	out := compile(t, `function calc(x: number) {
+let n: number = Math.sign(x)
+}`)
 	assertContains(t, out, `awk`)
 	assertContains(t, out, `-1`)
 	assertContains(t, out, `1`)
@@ -2662,18 +2705,21 @@ let sqrtValue = Math.sqrt(9)`)
 }
 
 func TestCodegen_FloatTrackingClearedOnIntegerReassignment(t *testing.T) {
-	out := compile(t, `let r = Math.round(2.7)
-r = 4
-let sum = r + 2`)
-	assertContains(t, out, `sum=$(( $r + 2 ))`)
-	assertNotContains(t, out, `awk -v _a=$r -v _b=2`)
+	out := compile(t, `function calc(n: number) {
+let r = Math.round(2.7)
+r = n
+let sum = r + 2
+}`)
+	assertContains(t, out, `sum=$(( $_calc_r + 2 ))`)
+	assertNotContains(t, out, `awk -v _a=$_calc_r -v _b=2`)
 }
 
 func TestCodegen_FloatTrackingSetOnFloatReassignment(t *testing.T) {
-	out := compile(t, `let r = 1
-r = Math.sqrt(4)
-let sum = r + 2`)
-	assertContains(t, out, `sum=$(awk -v _a=$r -v _b=2`)
+	out := compile(t, `function calc(r: number) {
+r = Math.sqrt(r)
+let sum = r + 2
+}`)
+	assertContains(t, out, `sum=$(awk -v _a=$_calc_r -v _b=2`)
 }
 
 func TestCodegen_StringCharAt(t *testing.T) {

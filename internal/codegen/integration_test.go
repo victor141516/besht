@@ -647,16 +647,17 @@ let result: number = double(5)
 
 func TestIntegration_ControlFlowIfElse(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "ctrl.bsh", `let n: number = 10
+	path := writeFile(t, dir, "ctrl.bsh", `function check(n: number) {
 if (n > 5) {
     $("echo", "big").run()
 } else {
     $("echo", "small").run()
 }
+}
+check(10)
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `if [ "$n" -gt 5 ]; then`)
-	assertNotContains(t, out, `if awk -v _a=$n -v _b=5`)
+	assertContains(t, out, `if awk -v _a=$_ctrl__check_n -v _b=5`)
 	assertContains(t, out, `echo big`)
 	assertContains(t, out, `else`)
 	assertContains(t, out, `echo small`)
@@ -1196,14 +1197,15 @@ func TestIntegration_LocalVarMangledInsideFn(t *testing.T) {
 
 func TestIntegration_WhileLoop(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `let n: number = 3
+	path := writeFile(t, dir, "main.bsh", `function count(n: number) {
 while (n > 0) {
     $("echo", "${n}").run()
 }
+}
+count(3)
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `while [ "$n" -gt 0 ]; do`)
-	assertNotContains(t, out, `while awk -v _a=$n -v _b=0`)
+	assertContains(t, out, `while awk -v _a=$_main__count_n -v _b=0`)
 	assertContains(t, out, `done`)
 }
 
@@ -1394,18 +1396,16 @@ console.log(msg)
 
 func TestIntegration_TernaryNumber(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", "let x = 10\nlet y = 3\nlet bigger = x > y ? x : y\nconsole.log(`bigger=${bigger}`)\n")
+	path := writeFile(t, dir, "main.bsh", "function show(x: number, y: number) {\nlet bigger = x > y ? x : y\nconsole.log(`bigger=${bigger}`)\n}\nshow(10, 3)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `bigger=$(if [ "$x" -gt "$y" ]; then printf '%s' "$x"; else printf '%s' "$y"; fi)`)
-	assertNotContains(t, out, `bigger=$(if awk -v _a=$x -v _b=$y`)
+	assertContains(t, out, `bigger=$(if awk -v _a=$_main__show_x -v _b=$_main__show_y`)
 }
 
 func TestIntegration_TernaryString(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", "let x = 10\nlet label = x > 5 ? \"big\" : \"small\"\nconsole.log(label)\n")
+	path := writeFile(t, dir, "main.bsh", "function show(x: number) {\nlet label = x > 5 ? \"big\" : \"small\"\nconsole.log(label)\n}\nshow(10)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `label=$(if [ "$x" -gt 5 ]; then printf '%s' 'big'; else printf '%s' 'small'; fi)`)
-	assertNotContains(t, out, `label=$(if awk -v _a=$x -v _b=5`)
+	assertContains(t, out, `label=$(if awk -v _a=$_main__show_x -v _b=5`)
 }
 
 func TestIntegration_StaticBooleanConditions(t *testing.T) {
@@ -1454,11 +1454,25 @@ console.log("hi".toUpperCase() !== "HI")`)
 	}
 }
 
+func TestIntegration_StaticNumberBindingsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let start = 2
+let step = 3
+let total = start + step * 4
+console.log(total)
+if (total > 10) console.log("big")
+console.log(total.toFixed(1))
+console.log(Math.max(total, 10))`)
+	want := "14\nbig\n14.0\n14\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_NumberMethods(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", "let n = 42\nlet ns = n.toString()\nlet pi = 3.14159\nlet fixed = pi.toFixed(2)\nconsole.log(ns)\nconsole.log(fixed)\n")
+	path := writeFile(t, dir, "main.bsh", "function show(n: number, pi: number) {\nlet ns = n.toString()\nlet fixed = pi.toFixed(2)\nconsole.log(ns)\nconsole.log(fixed)\n}\nshow(42, 3.14159)\n")
 	out := compileFile(t, path)
-	assertContains(t, out, `printf '%s' "$n"`)
+	assertContains(t, out, `printf '%s' "$_main__show_n"`)
 	assertContains(t, out, `printf "%.*f", _n, _x`)
 }
 

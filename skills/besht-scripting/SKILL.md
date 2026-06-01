@@ -408,9 +408,9 @@ let lines10 = Number.parseInt(raw, 10)
 let red = Number.parseInt(hexByte, 16)
 ```
 
-Static numeric arithmetic over literal numbers compiles to constants. Dynamic arithmetic keeps shell arithmetic or POSIX `awk`.
+Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants. Dynamic arithmetic and variables assigned inside control flow keep shell arithmetic or POSIX `awk`.
 
-Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal or static numeric variable `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 
 ## Command Execution
 
@@ -720,7 +720,7 @@ Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Defau
 
 ## Float Literals and Math
 
-Float (decimal) literals are supported. `Math.*` methods support decimals. Literal-argument `Math.*` calls compile to constants; dynamic calls use POSIX `awk`.
+Float (decimal) literals are supported. `Math.*` methods support decimals. Literal-argument `Math.*` calls, including arguments from variables bound to static numeric expressions, compile to constants; dynamic calls use POSIX `awk`.
 
 If you reassign a variable, besht updates its float-tracking metadata from the new right-hand side: float-producing expressions keep later arithmetic on `awk`, while integer or non-float reassignment clears the float marker so later integer arithmetic can use shell integer lowering again.
 
