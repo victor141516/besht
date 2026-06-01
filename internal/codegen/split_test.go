@@ -58,6 +58,27 @@ console.log("Hello, " + name)
 	assertContains(t, main, `name='world'`)
 	assertNotContains(t, main, `. "$_BESHT_ROOT`)
 	assertNotContains(t, main, `_BESHT_LOADED_`)
+	assertNotContains(t, main, `goodbye:world`)
+	assertNotContains(t, main, `grep -F`)
+}
+
+func TestSplit_RuntimeCheckCoversImportedGeneratedSedPath(t *testing.T) {
+	files := compileSplit(t, map[string]string{
+		"lib.bsh": `export function pick(i: number): string {
+    let values = ["a", "b"]
+    return values[i]
+}
+`,
+		"main.bsh": `import { pick } from "./lib"
+console.log(pick(1))
+`,
+	}, "main.bsh")
+
+	main := files["main.sh"]
+	lib := files["lib.sh"]
+	assertContains(t, lib, `sed -n`)
+	assertContains(t, main, `goodbye:world`)
+	assertContains(t, main, `grep -F`)
 }
 
 func TestSplit_EntryStdlibDeclarationAutoLoadedWithoutOutput(t *testing.T) {

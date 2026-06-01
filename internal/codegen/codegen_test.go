@@ -2092,13 +2092,15 @@ func TestCodegen_CmdWorkdirDisablesCDPATHAndNormalizesHyphen(t *testing.T) {
 func TestCodegen_StringPadStart(t *testing.T) {
 	out := compile(t, `let s: string = "hi"
 let p: string = s.padStart(10, "-")`)
-	assertContains(t, out, `printf`)
+	assertContains(t, out, `p='--------hi'`)
+	assertNotContains(t, out, `awk`)
 }
 
 func TestCodegen_StringPadEnd(t *testing.T) {
 	out := compile(t, `let s: string = "hi"
 let p: string = s.padEnd(10, ".")`)
-	assertContains(t, out, `printf`)
+	assertContains(t, out, `p='hi........'`)
+	assertNotContains(t, out, `awk`)
 }
 
 func TestCodegen_StringAt(t *testing.T) {

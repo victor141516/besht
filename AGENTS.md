@@ -111,7 +111,7 @@ go run ./cmd/besht/ --check <file.bsh>
 # Split mode — one .sh per .bsh, imports become source calls
 go run ./cmd/besht/ <file.bsh> --split -o <outdir/>
 
-# Omit the runtime POSIX self-check from compiled output
+# Omit the conditional runtime POSIX self-check from compiled output
 go run ./cmd/besht/ <file.bsh> --opt-no-add-binaries-check
 
 # Opt in to extensionless .ts import fallback when .bsh is absent
@@ -130,7 +130,7 @@ go run ./cmd/besht/ <file.bsh> --opt-allow-external-shell-imports
 | `init --force`                | Overwrite a different existing `./stdlib.d.bsh`                       |
 | `--split`                     | Compile each `.bsh` to its own `.sh`; imports become `. source` calls |
 | `--check`                     | Validate imports, command usage, and unsupported fetch APIs, no output |
-| `--opt-no-add-binaries-check` | Omit the runtime POSIX utility self-check block                       |
+| `--opt-no-add-binaries-check` | Omit the conditional runtime POSIX utility self-check block           |
 | `--opt-no-source-map`          | Omit `# besht:file:line:col` source comments from compiled output        |
 | `--opt-resolve-ts-imports`     | Let extensionless imports fall back to `.ts` only when `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Allow explicit `.sh` imports outside the compiler root          |
@@ -142,7 +142,7 @@ All flags that change how code is transformed or what is emitted share the `--op
 
 | Flag                          | Effect                                                                          |
 | ----------------------------- | ------------------------------------------------------------------------------- |
-| `--opt-no-add-binaries-check` | Do not emit the `_r=$(printf ...)` runtime check at the top of compiled scripts |
+| `--opt-no-add-binaries-check` | Do not emit the `_r=$(printf ...)` runtime check when it would otherwise be needed |
 | `--opt-no-source-map`          | Do not emit `# besht:file:line:col` source comments in compiled output         |
 | `--opt-resolve-ts-imports`     | Resolve extensionless imports to `.bsh` first, then `.ts` if `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Permit explicit `.sh` imports outside the compiler root; `.bsh` imports remain root-confined |
@@ -903,7 +903,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Compile-time warning for `-`-prefixed string literals in `$()` args.** If a string literal starting with `-` containing special characters (`$`, `^`, `[`, `]`, etc.) is passed as a `$()` argument, the compiler warns and suggests `r"..."` or adding `-e`/`--` before it. Suppressed when the preceding argument is `-e` or `--`.
 
-**Runtime POSIX self-check.** Every compiled script emits a `_r=$(printf 'hello:world' | grep -F 'hello' | sed ...)` pipeline at the top of the preamble that verifies `grep`, `sed`, and `printf` work correctly end-to-end. If the result is wrong the script exits immediately. Omit with `--opt-no-add-binaries-check` at compile time.
+**Runtime POSIX self-check.** Compiled scripts emit a `_r=$(printf 'hello:world' | grep -F 'hello' | sed ...)` pipeline at the top of the preamble only when generated shell uses Besht's `grep`/`sed`-based paths or the args runtime. Simple scripts that only need shell builtins and direct `printf` output skip it. In split output, the entry script emits the check if any generated module needs it. If the result is wrong the script exits immediately. Omit with `--opt-no-add-binaries-check` at compile time.
 
 **`string.repeat(n)` uses awk.** The old `printf '%0.s'` approach emitted nothing. The correct implementation loops in awk: `awk -v _s=STR -v _n=N 'BEGIN{r=""; for(i=0;i<_n;i++) r=r _s; printf "%s",r}'`.
 
@@ -971,7 +971,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Optional chaining uses flags on existing postfix AST nodes.** `IndexExpr`, `PropertyExpr`, and `MethodCallExpr` have `Optional bool`; keep all AST walkers descending into their receivers, indexes, and arguments. Codegen emits POSIX shell that stores the receiver once, compares it with `_BESHT_NULLISH_SENTINEL`, and returns that same sentinel on short-circuit so `??` can distinguish nullish from `""`, `0`, and `false`. Optional chaining guards nullish receivers only; do not add runtime shape/type checks. General `fn?.()`, `obj.method?.()`, and optional assignment targets remain unsupported.
 
-**String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the entry-file POSIX self-check block behavior. List `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
+**String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the conditional entry-file POSIX self-check behavior. List `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
 
 **`list.join(sep)` and scalar `list.toString()` use awk, not `paste -sd`.** Multi-character separators for `join` require awk since `paste -sd` only uses the first character of the delimiter. Scalar list `toString()` reuses the same join lowering with `,` as the separator and does not implement JavaScript nested-array flattening for `string[][]` or packed rows. The generated join shape is: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
 

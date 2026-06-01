@@ -983,13 +983,15 @@ besht init --force                  Overwrite ./stdlib.d.bsh declarations
 besht <file.bsh> -o <out.sh>        Compile to a single bundled file
 besht <file.bsh> --split -o <dir/>  Compile each file separately into <dir/>
 besht --check <file.bsh>            Validate imports, command usage, and unsupported fetch APIs (no output)
-besht <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-check
+besht <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-check when present
 besht <file.bsh> --opt-no-source-map            Omit source comments from compiled output
 besht <file.bsh> --opt-resolve-ts-imports       Resolve extensionless imports to .ts only when .bsh is absent
 besht <file.bsh> --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
 besht --version                     Show version
 besht --help                        Show usage
 ```
+
+Besht emits the runtime `printf`/`grep`/`sed` self-check only when generated output uses the compiler's `grep`/`sed` paths or the args runtime. Simple scripts that only need direct `printf` output skip it.
 
 ---
 

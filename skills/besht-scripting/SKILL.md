@@ -24,13 +24,13 @@ besht script.bsh -o out.sh          # write to file
 besht --check script.bsh            # validate imports, commands, and unsupported fetch APIs
 besht script.bsh | sh               # compile and run
 besht script.bsh --split -o build/  # compile each file to its own .sh
-besht script.bsh --opt-no-add-binaries-check  # omit runtime self-check
+besht script.bsh --opt-no-add-binaries-check  # omit runtime self-check when present
 besht script.bsh --opt-no-source-map            # omit source comments from compiled output
 besht script.bsh --opt-resolve-ts-imports       # allow extensionless imports to fall back to .ts
 besht script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
 ```
 
-Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators.
+Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits the runtime `printf`/`grep`/`sed` self-check only when generated output uses the compiler's `grep`/`sed` paths or the args runtime; simple direct-output scripts skip it.
 
 ## Variable Declarations
 

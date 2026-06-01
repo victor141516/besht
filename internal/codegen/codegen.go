@@ -741,6 +741,39 @@ const beshtCheckBlock = `_r=$(printf 'hello:world' | grep -F 'hello' | sed 's/he
 unset _r
 `
 
+func shouldEmitCheckBlock(body string, helpers map[string]bool) bool {
+	if helpers["args"] {
+		return true
+	}
+	return bodyUsesCheckedUtility(body)
+}
+
+func bodyUsesCheckedUtility(body string) bool {
+	return shellBodyUsesCommand(body, "grep") || shellBodyUsesCommand(body, "sed")
+}
+
+func shellBodyUsesCommand(body, name string) bool {
+	needles := []string{
+		"\n" + name + " ",
+		" " + name + " ",
+		"| " + name + " ",
+		"; " + name + " ",
+		"$(" + name + " ",
+	}
+	for _, needle := range needles {
+		if strings.Contains(body, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeCheckBlockIfNeeded(out *strings.Builder, noCheck bool, helpers map[string]bool, body string) {
+	if !noCheck && shouldEmitCheckBlock(body, helpers) {
+		out.WriteString(beshtCheckBlock)
+	}
+}
+
 func (g *Generator) generate(prog *ast.Program) (string, error) {
 	g.cmdAnalysis = AnalyzeProgram(prog.Statements)
 	for _, w := range g.cmdAnalysis.Warnings {
@@ -787,9 +820,7 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 	if g.runtimeHelpers["args"] {
 		out.WriteString(beshtRuntimeArgsSnapshot)
 	}
-	if !g.NoCheck {
-		out.WriteString(beshtCheckBlock)
-	}
+	writeCheckBlockIfNeeded(&out, g.NoCheck, g.runtimeHelpers, body)
 	out.WriteString("\n")
 	out.WriteString(body)
 	return out.String(), nil
