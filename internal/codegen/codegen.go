@@ -776,35 +776,8 @@ const (
 `
 	beshtRuntimeHelperIncludes = `_bst_includes()    { case "$1" in *"$2"*) return 0;; *) return 1;; esac; }
 `
-	beshtRuntimeHelperParseInt = `_bst_parse_int() {
-  awk -v _s="$1" -v _radix="${2-}" -v _start="${3-}" -v _end="${4-}" '
-BEGIN {
-  if (_start != "") {
-    _len = length(_s); _a = int(_start); _b = (_end == "" ? _len : int(_end));
-    if (_a < 0) _a = _len + _a; if (_b < 0) _b = _len + _b;
-    if (_a < 0) _a = 0; if (_a > _len) _a = _len;
-    if (_b < 0) _b = 0; if (_b > _len) _b = _len;
-    if (_b < _a) _b = _a;
-    _s = substr(_s, _a + 1, _b - _a);
-  }
-  sub(/^[[:space:]]+/, "", _s);
-  _sign = 1;
-  if (substr(_s, 1, 1) == "+") _s = substr(_s, 2);
-  else if (substr(_s, 1, 1) == "-") { _sign = -1; _s = substr(_s, 2); }
-  _r = (_radix == "" ? 10 : int(_radix));
-  if (_r == 0) _r = 10;
-  if (_r == 16 && (substr(_s, 1, 2) == "0x" || substr(_s, 1, 2) == "0X")) _s = substr(_s, 3);
-  else if (_radix == "" && (substr(_s, 1, 2) == "0x" || substr(_s, 1, 2) == "0X")) { _r = 16; _s = substr(_s, 3); }
-  if (_r < 2 || _r > 36) { printf "0"; exit; }
-  _digits = "0123456789abcdefghijklmnopqrstuvwxyz";
-  _value = 0; _seen = 0;
-  for (_i = 1; _i <= length(_s); _i++) {
-    _d = index(_digits, tolower(substr(_s, _i, 1))) - 1;
-    if (_d < 0 || _d >= _r) break;
-    _value = _value * _r + _d; _seen++;
-  }
-  printf "%d", (_seen ? _sign * _value : 0);
-}'
+	beshtRuntimeHelperHexByte = `_bst_hex_byte() {
+  awk -v _s="$1" -v _i="$2" 'BEGIN{_s=substr(_s,_i+1,2);sub(/^[[:space:]]+/,"",_s);_sign=1;if(substr(_s,1,1)=="+")_s=substr(_s,2);else if(substr(_s,1,1)=="-"){_sign=-1;_s=substr(_s,2)}if(substr(_s,1,2)=="0x"||substr(_s,1,2)=="0X")_s=substr(_s,3);_digits="0123456789abcdef";for(_j=1;_j<=length(_s);_j++){_d=index(_digits,tolower(substr(_s,_j,1)))-1;if(_d<0)break;_value=_value*16+_d;_seen++}printf "%d",(_seen?_sign*_value:0)}'
 }
 `
 	beshtRuntimeHelperNullish = `_BESHT_NULLISH_SENTINEL=__BESHT_NULLISH_$$
@@ -917,8 +890,8 @@ func runtimeHelpersSource(helpers map[string]bool) string {
 	if helpers["includes"] {
 		sb.WriteString(beshtRuntimeHelperIncludes)
 	}
-	if helpers["parseInt"] {
-		sb.WriteString(beshtRuntimeHelperParseInt)
+	if helpers["hexByte"] {
+		sb.WriteString(beshtRuntimeHelperHexByte)
 	}
 	if helpers["nullish"] || helpers["args"] {
 		sb.WriteString(beshtRuntimeHelperNullish)
@@ -5320,53 +5293,131 @@ func arrayFromLengthArg(e *ast.BuiltinCallExpr) (ast.Expression, bool) {
 	return obj.Fields[0].Value, true
 }
 
+type parseIntInput struct {
+	value       string
+	hasSlice    bool
+	start       string
+	end         string
+	startStatic int
+	endStatic   int
+	hasStart    bool
+	hasEnd      bool
+}
+
 func (g *Generator) genDynamicParseInt(e *ast.BuiltinCallExpr) (string, error) {
-	g.requireRuntimeHelper("parseInt")
-	radix := ""
+	var radixExpr string
+	var radixStatic *int
 	if len(e.Args) == 2 {
 		radixStr, err := g.genExprValue(e.Args[1])
 		if err != nil {
 			return "", err
 		}
-		radix = ensureArgSafe(radixStr)
+		radixExpr = radixStr
+		if radix, ok := staticIntLiteral(e.Args[1]); ok {
+			radixStatic = &radix
+		}
 	}
 
-	if slice, ok := unwrapAsExpr(e.Args[0]).(*ast.MethodCallExpr); ok && slice.Method == "slice" && len(slice.Args) >= 1 && len(slice.Args) <= 2 {
-		if recvType := g.inferReceiverType(slice.Receiver); recvType != nil && recvType.Kind != ast.TypeString {
-			goto genericDynamicParseInt
-		}
-		recv, err := g.genExprValue(slice.Receiver)
-		if err != nil {
-			return "", err
-		}
-		start, err := g.genExprValue(slice.Args[0])
-		if err != nil {
-			return "", err
-		}
-		if radix == "" {
-			radix = "''"
-		}
-		parts := []string{ensureArgSafe(recv), radix, ensureArgSafe(start)}
-		if len(slice.Args) == 2 {
-			end, err := g.genExprValue(slice.Args[1])
-			if err != nil {
-				return "", err
-			}
-			parts = append(parts, ensureArgSafe(end))
-		}
-		return fmt.Sprintf("$(_bst_parse_int %s)", strings.Join(parts, " ")), nil
-	}
-
-genericDynamicParseInt:
-	argStr, err := g.genExprValue(e.Args[0])
+	input, err := g.parseIntInput(e.Args[0])
 	if err != nil {
 		return "", err
 	}
-	parts := []string{ensureArgSafe(argStr)}
-	if radix != "" {
-		parts = append(parts, radix)
+	if canUseHexByteParse(input, radixStatic) {
+		g.requireRuntimeHelper("hexByte")
+		return fmt.Sprintf("$(_bst_hex_byte %s %d)", ensureArgSafe(input.value), input.startStatic), nil
 	}
-	return fmt.Sprintf("$(_bst_parse_int %s)", strings.Join(parts, " ")), nil
+	return parseIntAwkExpr(input, radixExpr, radixStatic), nil
+}
+
+func (g *Generator) parseIntInput(expr ast.Expression) (parseIntInput, error) {
+	if slice, ok := unwrapAsExpr(expr).(*ast.MethodCallExpr); ok && slice.Method == "slice" && len(slice.Args) >= 1 && len(slice.Args) <= 2 {
+		if recvType := g.inferReceiverType(slice.Receiver); recvType != nil && recvType.Kind != ast.TypeString {
+			goto genericInput
+		}
+		recv, err := g.genExprValue(slice.Receiver)
+		if err != nil {
+			return parseIntInput{}, err
+		}
+		start, err := g.genExprValue(slice.Args[0])
+		if err != nil {
+			return parseIntInput{}, err
+		}
+		input := parseIntInput{value: recv, hasSlice: true, start: start}
+		if startStatic, ok := staticIntLiteral(slice.Args[0]); ok {
+			input.startStatic = startStatic
+			input.hasStart = true
+		}
+		if len(slice.Args) == 2 {
+			end, err := g.genExprValue(slice.Args[1])
+			if err != nil {
+				return parseIntInput{}, err
+			}
+			input.end = end
+			if endStatic, ok := staticIntLiteral(slice.Args[1]); ok {
+				input.endStatic = endStatic
+				input.hasEnd = true
+			}
+		}
+		return input, nil
+	}
+
+genericInput:
+	argStr, err := g.genExprValue(expr)
+	if err != nil {
+		return parseIntInput{}, err
+	}
+	return parseIntInput{value: argStr}, nil
+}
+
+func canUseHexByteParse(input parseIntInput, radixStatic *int) bool {
+	return radixStatic != nil &&
+		*radixStatic == 16 &&
+		input.hasSlice &&
+		input.hasStart &&
+		input.hasEnd &&
+		input.endStatic-input.startStatic == 2
+}
+
+func parseIntAwkExpr(input parseIntInput, radixExpr string, radixStatic *int) string {
+	args := []string{awkArg("_s", input.value)}
+	if input.hasSlice {
+		args = append(args, awkArg("_start", input.start))
+		if input.end != "" {
+			args = append(args, awkArg("_end", input.end))
+		}
+	}
+	if radixStatic != nil {
+		return parseIntStaticRadixAwkExpr(args, input.hasSlice, input.end != "", *radixStatic)
+	}
+	if radixExpr != "" {
+		args = append(args, awkArg("_radix", radixExpr))
+	} else {
+		args = append(args, "-v _radix=")
+	}
+	return fmt.Sprintf("$(awk %s 'BEGIN{%s%s}')", strings.Join(args, " "), awkSlicePrefix(input.hasSlice, input.end != ""), `_radix_given=(_radix!="");sub(/^[[:space:]]+/,"",_s);_sign=1;if(substr(_s,1,1)=="+")_s=substr(_s,2);else if(substr(_s,1,1)=="-"){_sign=-1;_s=substr(_s,2)}_r=(_radix==""?10:int(_radix));if(_r==0)_r=10;if(_r==16&&(substr(_s,1,2)=="0x"||substr(_s,1,2)=="0X"))_s=substr(_s,3);else if(!_radix_given&&(substr(_s,1,2)=="0x"||substr(_s,1,2)=="0X")){_r=16;_s=substr(_s,3)}if(_r<2||_r>36){printf "0";exit}_digits="0123456789abcdefghijklmnopqrstuvwxyz";for(_i=1;_i<=length(_s);_i++){_d=index(_digits,tolower(substr(_s,_i,1)))-1;if(_d<0||_d>=_r)break;_value=_value*_r+_d;_seen++}printf "%d",(_seen?_sign*_value:0)`)
+}
+
+func parseIntStaticRadixAwkExpr(args []string, hasSlice, hasEnd bool, radix int) string {
+	if radix < 2 || radix > 36 {
+		return "0"
+	}
+	stripPrefix := ""
+	if radix == 16 {
+		stripPrefix = `if(substr(_s,1,2)=="0x"||substr(_s,1,2)=="0X")_s=substr(_s,3);`
+	}
+	prog := fmt.Sprintf(`%ssub(/^[[:space:]]+/,"",_s);_sign=1;if(substr(_s,1,1)=="+")_s=substr(_s,2);else if(substr(_s,1,1)=="-"){_sign=-1;_s=substr(_s,2)}%s_digits="0123456789abcdefghijklmnopqrstuvwxyz";for(_i=1;_i<=length(_s);_i++){_d=index(_digits,tolower(substr(_s,_i,1)))-1;if(_d<0||_d>=%d)break;_value=_value*%d+_d;_seen++}printf "%%d",(_seen?_sign*_value:0)`, awkSlicePrefix(hasSlice, hasEnd), stripPrefix, radix, radix)
+	return fmt.Sprintf("$(awk %s 'BEGIN{%s}')", strings.Join(args, " "), prog)
+}
+
+func awkSlicePrefix(hasSlice, hasEnd bool) string {
+	if !hasSlice {
+		return ""
+	}
+	endExpr := "length(_s)"
+	if hasEnd {
+		endExpr = "_end"
+	}
+	return fmt.Sprintf(`_len=length(_s);_a=int(_start);_b=int(%s);if(_a<0)_a=_len+_a;if(_b<0)_b=_len+_b;if(_a<0)_a=0;if(_a>_len)_a=_len;if(_b<0)_b=0;if(_b>_len)_b=_len;if(_b<_a)_b=_a;_s=substr(_s,_a+1,_b-_a);`, endExpr)
 }
 
 func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
@@ -8301,7 +8352,63 @@ func computedKeyValidation(varName string) string {
 	return "if [ -z \"$" + varName + "\" ] || printf '%s\\n' \"$" + varName + "\" | grep -q '[^A-Za-z0-9_]'; then printf '[besht] invalid object key: %s\\n' \"$" + varName + "\" >&2; exit 1; fi"
 }
 
+func (g *Generator) genPrefixStripTernary(e *ast.TernaryExpr) (string, bool) {
+	cond, ok := unwrapAsExpr(e.Condition).(*ast.MethodCallExpr)
+	if !ok || cond.Method != "startsWith" || len(cond.Args) != 1 {
+		return "", false
+	}
+	recv, ok := unwrapAsExpr(cond.Receiver).(*ast.IdentExpr)
+	if !ok {
+		return "", false
+	}
+	prefix, ok := staticStringText(cond.Args[0])
+	if !ok || prefix == "" {
+		return "", false
+	}
+	thenCall, ok := unwrapAsExpr(e.Then).(*ast.MethodCallExpr)
+	if !ok || thenCall.Method != "slice" || len(thenCall.Args) != 1 {
+		return "", false
+	}
+	thenRecv, ok := unwrapAsExpr(thenCall.Receiver).(*ast.IdentExpr)
+	if !ok || thenRecv.Name != recv.Name {
+		return "", false
+	}
+	start, ok := staticIntLiteral(thenCall.Args[0])
+	if !ok || start != len(prefix) {
+		return "", false
+	}
+	elseRecv, ok := unwrapAsExpr(e.Else).(*ast.IdentExpr)
+	if !ok || elseRecv.Name != recv.Name {
+		return "", false
+	}
+	pattern, ok := shellParamPrefixPattern(prefix)
+	if !ok {
+		return "", false
+	}
+	varName := g.resolveVarName(recv.Name)
+	return fmt.Sprintf("\"${%s#%s}\"", varName, pattern), true
+}
+
+func shellParamPrefixPattern(prefix string) (string, bool) {
+	var b strings.Builder
+	for _, r := range prefix {
+		switch r {
+		case '*', '?', '[', ']', '#', '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '$', '`', '"', '\'', '\n', '\r':
+			return "", false
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String(), true
+}
+
 func (g *Generator) genTernaryRHS(e *ast.TernaryExpr, targetType *ast.Type) (string, error) {
+	if value, ok := g.genPrefixStripTernary(e); ok {
+		return value, nil
+	}
 	if value, ok := g.staticBooleanValue(e.Condition); ok {
 		if value {
 			return g.genExprRHS(e.Then, targetType)

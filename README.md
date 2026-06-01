@@ -100,6 +100,7 @@ Files use the `.bsh` extension.
 - Static numeric literal `.toString()`/`.toFixed()` calls and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
 - Static primitive `.toString()` fragments inside string concatenation and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 - Static ASCII string literals, variables bound to static ASCII string literals, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `at()`, and indexing use AWK substring extraction.
+- Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
 - Static scalar list literals and list-returning method chains over static scalar lists (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the `printf` builder.
@@ -459,6 +460,8 @@ s.length; // int (character count)
 One-argument string `includes()`, `startsWith()`, and `endsWith()` use tiny POSIX helper functions that are emitted only when the generated shell calls them. Two-argument string search methods use inline `awk` instead. Static ASCII string literal searches and searches on variables bound to static ASCII string literals compile to constants when arguments are static.
 
 Static ASCII string literal transforms, transforms on variables bound to static ASCII string literals, and chained static ASCII transforms compile to constants when arguments are static. Dynamic and non-ASCII transforms use POSIX tools such as `sed`, `tr`, and `awk`; dynamic string `slice()`, `at()`, and indexing use AWK substring extraction.
+
+Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 
 Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools such as `tr` and `awk`.
 

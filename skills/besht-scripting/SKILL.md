@@ -278,6 +278,8 @@ Strings support `includes()`, `startsWith()`, and `endsWith()`, including option
 
 Static ASCII string literals, variables bound to them, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, and `.padStart()`/`.padEnd()` with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools; dynamic string `slice()`, `at()`, and indexing support normal substring extraction.
 
+Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile compactly while keeping the same Besht behavior.
+
 Static ASCII string literal `.split()` calls with static separators compile to constants when the resulting list elements contain no newlines. Dynamic and non-ASCII splits use POSIX tools.
 
 ## Sets and Nested Lists
