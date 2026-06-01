@@ -1145,6 +1145,18 @@ let ended: string = "hi".padEnd(5, ".")`)
 	assertNotContains(t, out, `awk`)
 }
 
+func TestCodegen_StaticBuiltStringTransforms(t *testing.T) {
+	out := compile(t, `let upper: string = ("he" + "llo").toUpperCase()
+let trimmed: string = `+"`  ${\"hi\" + \"!\"}  `"+`.trim()
+let padded: string = ("a" + "b").padStart(5, "0" + "1")`)
+	assertContains(t, out, `upper='HELLO'`)
+	assertContains(t, out, `trimmed='hi!'`)
+	assertContains(t, out, `padded='010ab'`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `sed 's/^[[:space:]]`)
+	assertNotContains(t, out, `awk`)
+}
+
 func TestCodegen_StringLength(t *testing.T) {
 	out := compile(t, `let s: string = "hello"
 let n: number = s.length`)
@@ -1846,6 +1858,26 @@ let pos: number = "hello hello".indexOf("lo", 4)`)
 	assertNotContains(t, out, `_bst_includes`)
 	assertNotContains(t, out, `_bst_starts_with`)
 	assertNotContains(t, out, `_bst_ends_with`)
+	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_StaticBuiltStringSearchMethods(t *testing.T) {
+	out := compile(t, `let has: boolean = ("ab" + "cd").includes("b" + "c")
+let sw: boolean = `+"`${\"he\"}llo`"+`.startsWith("h" + "e")
+let ew: boolean = ("hel" + "lo").endsWith("l" + "o")
+let first: number = ("he" + "llo").indexOf("l")
+let last: number = ("he" + "llo").lastIndexOf("l")
+console.log(("abc" + "def").includes("cd"))`)
+	assertContains(t, out, `has=1`)
+	assertContains(t, out, `sw=1`)
+	assertContains(t, out, `ew=1`)
+	assertContains(t, out, `first=2`)
+	assertContains(t, out, `last=3`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertNotContains(t, out, `_bst_includes`)
+	assertNotContains(t, out, `_bst_starts_with`)
+	assertNotContains(t, out, `_bst_ends_with`)
+	assertNotContains(t, out, `if [ 1 = 1 ]; then printf true`)
 	assertNotContains(t, out, `awk`)
 }
 

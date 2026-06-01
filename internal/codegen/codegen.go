@@ -3930,9 +3930,18 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 	case *ast.RawStringLit:
 		return e.Value, true, nil
 	case *ast.TemplateLit:
-		if len(e.Exprs) == 0 {
-			return strings.Join(e.Parts, ""), true, nil
+		var b strings.Builder
+		for i, part := range e.Parts {
+			b.WriteString(part)
+			if i < len(e.Exprs) {
+				value, ok, err := g.staticStringFragment(e.Exprs[i])
+				if err != nil || !ok {
+					return "", ok, err
+				}
+				b.WriteString(value)
+			}
 		}
+		return b.String(), true, nil
 	case *ast.IntLit:
 		return strconv.FormatInt(e.Value, 10), true, nil
 	case *ast.FloatLit:
@@ -3970,6 +3979,19 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 			}
 			return "false", true, nil
 		}
+		if e.Op == "+" {
+			left, leftOK, err := g.staticStringFragment(e.Left)
+			if err != nil {
+				return "", true, err
+			}
+			right, rightOK, err := g.staticStringFragment(e.Right)
+			if err != nil {
+				return "", true, err
+			}
+			if leftOK && rightOK {
+				return left + right, true, nil
+			}
+		}
 	case *ast.BuiltinCallExpr:
 		if value, ok := g.staticBooleanValue(e); ok {
 			if value {
@@ -3989,6 +4011,19 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 		}
 	}
 	return "", false, nil
+}
+
+func (g *Generator) staticASCIIStringFragment(expr ast.Expression) (string, bool, error) {
+	value, ok, err := g.staticStringFragment(expr)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			return "", false, nil
+		}
+	}
+	return value, true, nil
 }
 
 func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
@@ -4039,6 +4074,15 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 			return false, true
+		}
+	case *ast.MethodCallExpr:
+		switch e.Method {
+		case "includes", "startsWith", "endsWith":
+			value, ok, err := g.genStaticStringMethod(e)
+			if err != nil || !ok {
+				return false, false
+			}
+			return value == "1", true
 		}
 	}
 	return false, false
@@ -6536,17 +6580,16 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 }
 
 func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := staticASCIIStringValue(e.Receiver)
-	if !ok {
-		return "", false, nil
+	recv, ok, err := g.staticASCIIStringFragment(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
 	}
 
 	stringArg := func() (string, bool, error) {
 		if len(e.Args) == 0 {
 			return "", false, fmt.Errorf("%s() requires an argument", e.Method)
 		}
-		value, ok := staticASCIIStringValue(e.Args[0])
-		return value, ok, nil
+		return g.staticASCIIStringFragment(e.Args[0])
 	}
 	intArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -6662,15 +6705,15 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 }
 
 func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, bool, error) {
-	recv, ok := staticASCIIStringValue(e.Receiver)
-	if !ok {
-		return "", false, nil
+	recv, ok, err := g.staticASCIIStringFragment(e.Receiver)
+	if err != nil || !ok {
+		return "", ok, err
 	}
-	staticArg := func(idx int) (string, bool) {
+	staticArg := func(idx int) (string, bool, error) {
 		if len(e.Args) <= idx {
-			return "", false
+			return "", false, nil
 		}
-		return staticASCIIStringValue(e.Args[idx])
+		return g.staticASCIIStringFragment(e.Args[idx])
 	}
 	staticIntArg := func(idx int, fallback int) (int, bool) {
 		if len(e.Args) <= idx {
@@ -6769,10 +6812,10 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 		}
 		fill := " "
 		if len(e.Args) == 2 {
-			var ok bool
-			fill, ok = staticArg(1)
-			if !ok {
-				return "", false, nil
+			var err error
+			fill, ok, err = staticArg(1)
+			if err != nil || !ok {
+				return "", ok, err
 			}
 		}
 		if targetLen <= len(recv) || fill == "" {

@@ -2263,6 +2263,21 @@ console.log("hi".padEnd(5, "."))`)
 	}
 }
 
+func TestIntegration_StaticBuiltStringMethodsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(("he" + "llo").toUpperCase())
+console.log(`+"`  ${\"hi\" + \"!\"}  `"+`.trim())
+console.log(("a" + "b").padStart(5, "0" + "1"))
+console.log(("ab" + "cd").includes("b" + "c"))
+console.log(`+"`${\"he\"}llo`"+`.startsWith("h" + "e"))
+console.log(("hel" + "lo").endsWith("l" + "o"))
+console.log(("he" + "llo").indexOf("l"))
+console.log(("he" + "llo").lastIndexOf("l"))`)
+	want := "HELLO\nhi!\n010ab\ntrue\ntrue\ntrue\n2\n3\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticStringSplitRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let parts = "a,b,c".split(",")
 console.log(parts.length)
