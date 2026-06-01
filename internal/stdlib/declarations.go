@@ -99,4 +99,14 @@ declare namespace Object {
     function entries(value: object): string[][]
     function hasOwn(value: object, key: string): boolean
 }
+
+declare namespace JSON {
+    function stringify(value: string): string
+    function stringify(value: number): string
+    function stringify(value: boolean): string
+    function stringify(value: string[]): string
+    function stringify(value: number[]): string
+    function stringify(value: boolean[]): string
+    function stringify(value: object): string
+}
 `

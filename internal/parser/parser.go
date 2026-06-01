@@ -1929,6 +1929,17 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 			return &ast.BuiltinCallExpr{Pos: pos, Name: "Array." + methodTok.Literal, Args: args}, nil
 		}
 
+		if name == "JSON" && p.peekType() == lexer.TokDot && p.peekN(1).Literal == "stringify" {
+			methodTok := p.peekN(1)
+			p.advance()
+			p.advance()
+			args, err := p.parseArgList()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.BuiltinCallExpr{Pos: pos, Name: "JSON." + methodTok.Literal, Args: args}, nil
+		}
+
 		if name == "Object" && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "keys" || p.peekN(1).Literal == "values" || p.peekN(1).Literal == "entries" || p.peekN(1).Literal == "hasOwn") {
 			methodTok := p.peekN(1)
 			p.advance()

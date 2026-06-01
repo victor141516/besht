@@ -720,7 +720,7 @@ func IsBuiltin(name string) bool {
 		"is_empty", "is_set", "len", "head", "tail", "append", "contains",
 		"range", "exit", "env", "fetch", "to_str", "to_int", "String", "Boolean", "concat",
 		"Array.isArray", "Object.keys", "Object.values", "Object.entries", "Object.hasOwn",
-		"console.log", "console.error":
+		"JSON.stringify", "console.log", "console.error":
 		return true
 	}
 	return false
