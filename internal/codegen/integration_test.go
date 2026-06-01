@@ -556,6 +556,21 @@ console.log("left:right".split(":")[0])
 	}
 }
 
+func TestIntegration_StaticListDestructureRuntime(t *testing.T) {
+	out := runCompiledShell(t, `const [name, age] = ["Ada", 37]
+let pair = ["Grace", "Hopper"]
+const [first, last, missing] = pair
+console.log(name)
+console.log(age)
+console.log(first + " " + last)
+console.log(missing)
+console.log(first.length)`)
+	want := "Ada\n37\nGrace Hopper\n\n5\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_SetValuesWithSpacesAndNestedListLiterals(t *testing.T) {
 	out := runCompiledShell(t, `const seen = new Set<string>()
 seen.add("a b")

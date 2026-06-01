@@ -289,7 +289,7 @@ const [row, col] = [0, 1]
 console.log(matrix?.[row]?.[col] ?? "missing")
 ```
 
-`Set<T>` has `new Set<T>()`, `.has(value)`, and mutating `.add(value)`. Type parameters are annotations only. Nested list rows are preserved through `.map()` when the callback returns a list, and `split("")` splits a string into characters. Tuple/list destructuring declarations evaluate the source once and assign each name from list indexes. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains; it short-circuits only on `null`/`undefined` and composes with `??`. General `fn?.()`, `obj.method?.()`, and optional assignment targets are not supported.
+`Set<T>` has `new Set<T>()`, `.has(value)`, and mutating `.add(value)`. Type parameters are annotations only. Nested list rows are preserved through `.map()` when the callback returns a list, and `split("")` splits a string into characters. Tuple/list destructuring declarations evaluate the source once and assign each name from list indexes; static scalar list destructuring emits direct assignments. Optional chaining supports `obj?.prop`, `obj?.[key]`, `obj?.method()`, and nested chains; it short-circuits only on `null`/`undefined` and composes with `??`. General `fn?.()`, `obj.method?.()`, and optional assignment targets are not supported.
 
 ## Objects
 

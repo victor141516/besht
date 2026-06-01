@@ -932,6 +932,41 @@ while (true) {
 	assertNotContains(t, out, `row='0'`)
 }
 
+func TestCodegen_StaticListLiteralDestructure(t *testing.T) {
+	out := compile(t, `const [name, age, missing] = ["Ada", 37]
+let len: number = name.length`)
+	assertContains(t, out, `name='Ada'`)
+	assertContains(t, out, `age='37'`)
+	assertContains(t, out, `missing=''`)
+	assertContains(t, out, `len=3`)
+	assertNotContains(t, out, `_destructure_`)
+	assertNotContains(t, out, `sed -n '1p'`)
+	assertNotContains(t, out, `sed -n '2p'`)
+}
+
+func TestCodegen_StaticListVariableDestructure(t *testing.T) {
+	out := compile(t, `let pair = ["Ada", "Lovelace"]
+const [first, last] = pair`)
+	assertContains(t, out, `first='Ada'`)
+	assertContains(t, out, `last='Lovelace'`)
+	assertNotContains(t, out, `_destructure_`)
+	assertNotContains(t, out, `sed -n '1p'`)
+}
+
+func TestCodegen_StaticListDestructureFallbackAfterControlAssignment(t *testing.T) {
+	out := compile(t, `let pair = ["Ada", "Lovelace"]
+while (true) {
+    pair = ["Grace", "Hopper"]
+    break
+}
+const [first, last] = pair`)
+	assertContains(t, out, `_destructure_`)
+	assertContains(t, out, `sed -n '1p'`)
+	assertContains(t, out, `sed -n '2p'`)
+	assertNotContains(t, out, `first='Ada'`)
+	assertNotContains(t, out, `last='Lovelace'`)
+}
+
 func TestCodegen_ConstDecl(t *testing.T) {
 	out := compile(t, `const threshold: number = 90`)
 	assertContains(t, out, `threshold=90`)

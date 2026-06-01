@@ -1128,6 +1128,21 @@ func (g *Generator) isLazyCommandBinding(expr ast.Expression) bool {
 }
 
 func (g *Generator) genDestructureDecl(s *ast.DestructureDecl) error {
+	if words, ok := g.staticDestructureWords(s.Value); ok {
+		elemType := typeString
+		if valueType := g.inferReceiverType(s.Value); valueType != nil && valueType.Kind == ast.TypeList && valueType.Elem != nil {
+			elemType = valueType.Elem
+		}
+		for i, name := range s.Names {
+			value := shellQuote("")
+			if i < len(words) {
+				value = words[i]
+			}
+			g.declareDestructureBinding(name, elemType, value)
+		}
+		return nil
+	}
+
 	tmp := fmt.Sprintf("_destructure_%d_%d", s.Pos.Line, s.Pos.Column)
 	if containsRunCall(s.Value) && g.cmdAnalysis != nil && !isImmediateRunTerminalCall(s.Value) {
 		if err := g.emitInlineRunChain(s.Value); err != nil {
@@ -1149,12 +1164,51 @@ func (g *Generator) genDestructureDecl(s *ast.DestructureDecl) error {
 		elemType = valueType.Elem
 	}
 	for i, name := range s.Names {
-		varName := g.resolveVarName(name)
-		g.paramMap[name] = varName
-		g.varTypeMap[varName] = elemType
-		g.line(fmt.Sprintf("%s=$(printf '%%s\\n' \"$%s\" | sed -n '%dp')", varName, tmp, i+1))
+		g.declareDestructureBinding(name, elemType, fmt.Sprintf("$(printf '%%s\\n' \"$%s\" | sed -n '%dp')", tmp, i+1))
 	}
 	return nil
+}
+
+func (g *Generator) declareDestructureBinding(name string, elemType *ast.Type, value string) {
+	varName := g.resolveVarName(name)
+	g.paramMap[name] = varName
+	g.varTypeMap[varName] = elemType
+	delete(g.objAliasMap, name)
+	delete(g.staticListMap, varName)
+	if g.listLenMap != nil {
+		delete(g.listLenMap, varName)
+	}
+	if raw, ok := shellQuotedValue(value); ok {
+		if g.stringConstMap == nil {
+			g.stringConstMap = make(map[string]string)
+		}
+		g.stringConstMap[varName] = raw
+	} else {
+		delete(g.stringConstMap, varName)
+	}
+	g.line(fmt.Sprintf("%s=%s", varName, value))
+}
+
+func (g *Generator) staticDestructureWords(expr ast.Expression) ([]string, bool) {
+	switch e := expr.(type) {
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return nil, false
+		}
+		words, ok := g.staticListMap[g.resolveVarName(e.Name)]
+		return words, ok
+	case *ast.AsExpr:
+		return g.staticDestructureWords(e.Expr)
+	default:
+		return staticForListWordsExpr(expr)
+	}
+}
+
+func shellQuotedValue(value string) (string, bool) {
+	if len(value) < 2 || value[0] != '\'' || value[len(value)-1] != '\'' {
+		return "", false
+	}
+	return strings.ReplaceAll(value[1:len(value)-1], "'\"'\"'", "'"), true
 }
 
 func emptyArrayOf(expr ast.Expression) bool {
