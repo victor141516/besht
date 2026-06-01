@@ -1091,6 +1091,11 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 			g.stringConstMap = make(map[string]string)
 		}
 		g.stringConstMap[varName] = value
+	} else if value, ok := g.staticASCIIStringExprValue(s.Value); ok {
+		if g.stringConstMap == nil {
+			g.stringConstMap = make(map[string]string)
+		}
+		g.stringConstMap[varName] = value
 	} else {
 		delete(g.stringConstMap, varName)
 	}
@@ -1538,6 +1543,11 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	}
 	g.updateIntegerBinding(varName, s.Value)
 	if value, ok := stringLiteralValue(s.Value); ok {
+		if g.stringConstMap == nil {
+			g.stringConstMap = make(map[string]string)
+		}
+		g.stringConstMap[varName] = value
+	} else if value, ok := g.staticASCIIStringExprValue(s.Value); ok {
 		if g.stringConstMap == nil {
 			g.stringConstMap = make(map[string]string)
 		}
@@ -2543,6 +2553,12 @@ func (g *Generator) staticASCIIStringExprValue(expr ast.Expression) (string, boo
 			if value[i] >= utf8.RuneSelf {
 				return "", false
 			}
+		}
+		return value, true
+	case *ast.MethodCallExpr:
+		value, ok, err := g.staticASCIIStringTransformValue(e)
+		if err != nil || !ok {
+			return "", false
 		}
 		return value, true
 	default:
@@ -7427,7 +7443,7 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 	}
 }
 
-func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, bool, error) {
+func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (string, bool, error) {
 	recv, ok := g.staticASCIIStringExprValue(e.Receiver)
 	if !ok {
 		return "", false, nil
@@ -7450,27 +7466,27 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("trim() takes no arguments")
 		}
-		return shellQuote(strings.TrimFunc(recv, isASCIIWhitespace)), true, nil
+		return strings.TrimFunc(recv, isASCIIWhitespace), true, nil
 	case "trimStart":
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("trimStart() takes no arguments")
 		}
-		return shellQuote(strings.TrimLeftFunc(recv, isASCIIWhitespace)), true, nil
+		return strings.TrimLeftFunc(recv, isASCIIWhitespace), true, nil
 	case "trimEnd":
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("trimEnd() takes no arguments")
 		}
-		return shellQuote(strings.TrimRightFunc(recv, isASCIIWhitespace)), true, nil
+		return strings.TrimRightFunc(recv, isASCIIWhitespace), true, nil
 	case "toUpperCase":
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("toUpperCase() takes no arguments")
 		}
-		return shellQuote(strings.ToUpper(recv)), true, nil
+		return strings.ToUpper(recv), true, nil
 	case "toLowerCase":
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("toLowerCase() takes no arguments")
 		}
-		return shellQuote(strings.ToLower(recv)), true, nil
+		return strings.ToLower(recv), true, nil
 	case "slice":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", true, fmt.Errorf("slice() takes one or two arguments")
@@ -7494,7 +7510,7 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 		if end < start {
 			end = start
 		}
-		return shellQuote(recv[start:end]), true, nil
+		return recv[start:end], true, nil
 	case "substring":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", true, fmt.Errorf("substring() takes one or two arguments")
@@ -7512,7 +7528,7 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 		if start > end {
 			start, end = end, start
 		}
-		return shellQuote(recv[start:end]), true, nil
+		return recv[start:end], true, nil
 	case "repeat":
 		if len(e.Args) != 1 {
 			return "", true, fmt.Errorf("repeat() requires an argument")
@@ -7524,7 +7540,7 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 		if count < 0 {
 			return "", false, nil
 		}
-		return shellQuote(strings.Repeat(recv, count)), true, nil
+		return strings.Repeat(recv, count), true, nil
 	case "padStart", "padEnd":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return "", true, fmt.Errorf("%s() takes one or two arguments", e.Method)
@@ -7542,18 +7558,26 @@ func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, boo
 			}
 		}
 		if targetLen <= len(recv) || fill == "" {
-			return shellQuote(recv), true, nil
+			return recv, true, nil
 		}
 		need := targetLen - len(recv)
 		padding := strings.Repeat(fill, need/len(fill)+1)
 		padding = padding[:need]
 		if e.Method == "padStart" {
-			return shellQuote(padding + recv), true, nil
+			return padding + recv, true, nil
 		}
-		return shellQuote(recv + padding), true, nil
+		return recv + padding, true, nil
 	default:
 		return "", false, nil
 	}
+}
+
+func (g *Generator) genStaticStringTransform(e *ast.MethodCallExpr) (string, bool, error) {
+	value, ok, err := g.staticASCIIStringTransformValue(e)
+	if !ok || err != nil {
+		return "", ok, err
+	}
+	return shellQuote(value), true, nil
 }
 
 func (g *Generator) genStaticStringSplitMethod(e *ast.MethodCallExpr) (string, bool, error) {

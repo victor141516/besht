@@ -2332,6 +2332,17 @@ console.log("hi".padEnd(5, "."))`)
 	}
 }
 
+func TestIntegration_StaticStringTransformChainsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let name = "  Ada  "
+let upper = name.trim().toUpperCase()
+console.log(upper)
+console.log(upper.toLowerCase().padStart(5, "."))`)
+	want := "ADA\n..ada\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_StaticStringVariableMethodsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let greeting = "hello"
 let spaced = "  hi  "

@@ -1353,6 +1353,26 @@ let padded = greeting.padStart(8, fill)`)
 	assertNotContains(t, out, `printf '%8s'`)
 }
 
+func TestCodegen_StaticStringTransformChains(t *testing.T) {
+	out := compile(t, `let name = "  Ada  "
+let upper = name.trim().toUpperCase()
+let padded = " x ".trim().padEnd(3, ".")
+let lower = upper.toLowerCase()`)
+	assertContains(t, out, `upper='ADA'`)
+	assertContains(t, out, `padded='x..'`)
+	assertContains(t, out, `lower='ada'`)
+	assertNotContains(t, out, `tr '[:lower:]'`)
+	assertNotContains(t, out, `tr '[:upper:]'`)
+	assertNotContains(t, out, `upper=$(printf`)
+	assertNotContains(t, out, `padded=$(printf`)
+}
+
+func TestCodegen_StaticStringTransformChainsFallbackForNonASCII(t *testing.T) {
+	out := compile(t, `let upper = "ñ".toUpperCase()`)
+	assertContains(t, out, `tr '[:lower:]' '[:upper:]'`)
+	assertNotContains(t, out, `upper='Ñ'`)
+}
+
 func TestCodegen_StaticStringVariableTransformsFallbackAfterControlAssignment(t *testing.T) {
 	out := compile(t, `let greeting = "hello"
 while (true) {
