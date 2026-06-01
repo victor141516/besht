@@ -88,7 +88,7 @@ Files use the `.bsh` extension.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
-- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value. Dynamic booleans keep the general formatting path.
+- Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly as `true`/`false`; `Besht.fs.*` and `Besht.strings.*` predicates also print readable `true`/`false` in console calls. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value. Dynamic booleans keep the general formatting path.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
 - Static scalar equality comparisons and static numeric relational comparisons, including arithmetic literal operands, compile to constants. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 - String equality preserves spaces and newlines, including multiline template literals.
@@ -761,6 +761,8 @@ $("make", "test").workdir("/repo/app").run()
 ### Besht helpers
 
 Besht-specific helpers live under the global `Besht` object. They compile to inline POSIX tests or small generated shell; they are not runtime namespace objects.
+
+These predicates are booleans. Conditions compile to direct tests, assignments store `1`/`0`, and `console.log()`/`console.error()` render them as `true`/`false`.
 
 File helpers:
 

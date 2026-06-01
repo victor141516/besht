@@ -287,7 +287,7 @@ Static primitive `.toString()` fragments inside string concatenation and templat
 
 Static `??` expressions compile to the selected side when the left operand is provably nullish or non-nullish. Preserve `""`, `0`, and `false` as non-nullish; control-flow assigned variables and optional/dynamic nullish sources must keep the sentinel path.
 
-Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static `!`/`&&`/`||` expressions render directly as `true`/`false`; static boolean `if` and ternary conditions use the same generator-aware constant path. Dynamic boolean expressions keep the general formatting path.
+Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and simple static `!`/`&&`/`||` expressions render directly as `true`/`false`; static boolean `if` and ternary conditions use the same generator-aware constant path. `Besht.fs.*` and `Besht.strings.*` predicates are boolean expressions too: in single-argument console calls, emit a direct shell `if` that prints `true`/`false`; in value position, keep boolean storage as `1`/`0`. Dynamic boolean expressions keep the general formatting path.
 
 Variables bound to static string literals may fold `.length` to a numeric constant. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
 
@@ -987,7 +987,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`process.env.NAME ?? fallback` must use unset-only detection.** For safe static fallback words, prefer compact `${NAME-fallback}`. Otherwise lower `process.env.NAME` with `${NAME+x}` and `_BESHT_NULLISH_SENTINEL`; never use `${NAME:-fallback}` for this API because an explicitly empty environment variable must be preserved.
 
-**`Besht` is a standard namespace exemption.** Module rewriting must not qualify `Besht` as a class/function-like identifier. `Besht.fs.*`, `Besht.strings.*`, `Besht.args.*`, and `Besht.iter.*` are parser-level method calls on `Besht` groups. In condition position, file/string predicates must emit minimal tests (`[ -f ... ]`, `[ -d ... ]`, `[ -r ... ]`, `[ -w ... ]`, `[ -x ... ]`, `[ -z ... ]`, `[ -n ... ]`) and must not introduce runtime helpers.
+**`Besht` is a standard namespace exemption.** Module rewriting must not qualify `Besht` as a class/function-like identifier. `Besht.fs.*`, `Besht.strings.*`, `Besht.args.*`, and `Besht.iter.*` are parser-level method calls on `Besht` groups. In condition position, file/string predicates must emit minimal quoted tests (`[ -f "$p" ]`, `[ -d "$p" ]`, `[ -r "$p" ]`, `[ -w "$p" ]`, `[ -x "$p" ]`, `[ -z "$s" ]`, `[ -n "$s" ]`) and must not introduce runtime helpers. Console formatting should treat these predicates as booleans and print `true`/`false`, not raw `1`/`0`.
 
 **`Besht.args.*` helpers parse script arguments in generated POSIX sh.** `Besht.args.argv()` returns positional args only, `Besht.args.positional(n)` returns a 1-based positional value or nullish, `Besht.args.option(long, short?)` supports `--long=value`, `--long value`, and optional `-s value`, and `Besht.args.flag(long, short?)` returns boolean `1`/`0`. Keep defaults outside helpers via `??`.
 
