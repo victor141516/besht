@@ -640,8 +640,20 @@ let ok: boolean = Besht.fs.isFile(p)
 if (ok) {
     $("echo", "ok").run()
 }`)
-	assertContains(t, out, `ok=$(if [ -f $p ]; then printf 1; else printf 0; fi)`)
+	assertContains(t, out, `ok=$(if [ -f "$p" ]; then printf 1; else printf 0; fi)`)
 	assertContains(t, out, `[ "$ok" = 1 ]`)
+}
+
+func TestCodegen_BeshtNamespaceConsoleBooleanOutput(t *testing.T) {
+	out := compile(t, `let p: string = "todo.md"
+let s: string = ""
+console.log(Besht.fs.isFile(p))
+console.error(Besht.strings.isEmpty(s))
+console.log("empty?", Besht.strings.isEmpty(s))`)
+	assertContains(t, out, `if [ -f "$p" ]; then printf '%s\n' true; else printf '%s\n' false; fi`)
+	assertContains(t, out, `if [ -z "$s" ]; then printf '%s\n' true >&2; else printf '%s\n' false >&2; fi`)
+	assertContains(t, out, `printf '%s\n' 'empty?' "$(if [ -z "$s" ]; then printf true; else printf false; fi)"`)
+	assertNotContains(t, out, `if [ $(if [ -f "$p" ]; then printf 1; else printf 0; fi) = 1 ]`)
 }
 
 func TestCodegen_BuiltinLen(t *testing.T) {

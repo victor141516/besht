@@ -3549,6 +3549,11 @@ func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 		if len(e.Args) == 1 && g.isListArg(e.Args[0]) {
 			return g.genConsoleList(e.Args[0], "stdout")
 		}
+		if len(e.Args) == 1 {
+			if line, ok, err := g.genConsoleBeshtPredicate(e.Args[0], "stdout"); ok || err != nil {
+				return line, err
+			}
+		}
 		parts, err := g.genArgs(e.Args)
 		if err != nil {
 			return "", err
@@ -3561,6 +3566,11 @@ func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 		if len(e.Args) == 1 && g.isListArg(e.Args[0]) {
 			return g.genConsoleList(e.Args[0], "stderr")
 		}
+		if len(e.Args) == 1 {
+			if line, ok, err := g.genConsoleBeshtPredicate(e.Args[0], "stderr"); ok || err != nil {
+				return line, err
+			}
+		}
 		parts, err := g.genArgs(e.Args)
 		if err != nil {
 			return "", err
@@ -3568,6 +3578,18 @@ func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 		return fmt.Sprintf("printf '%%s\\n' %s >&2", strings.Join(parts, " ")), nil
 	}
 	return "", nil
+}
+
+func (g *Generator) genConsoleBeshtPredicate(expr ast.Expression, dest string) (string, bool, error) {
+	cond, ok, err := g.genBeshtPredicateCondition(expr)
+	if !ok || err != nil {
+		return "", ok, err
+	}
+	redirect := ""
+	if dest == "stderr" {
+		redirect = " >&2"
+	}
+	return fmt.Sprintf("if %s; then printf '%%s\\n' true%s; else printf '%%s\\n' false%s; fi", cond, redirect, redirect), true, nil
 }
 
 func (g *Generator) isObjectArg(expr ast.Expression) bool {
@@ -4765,6 +4787,13 @@ func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
 func (g *Generator) genArgs(args []ast.Expression) ([]string, error) {
 	var out []string
 	for _, arg := range args {
+		if val, ok, err := g.genBeshtPredicateBooleanArg(arg); ok || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ensureArgSafe(val))
+			continue
+		}
 		if g.isBooleanExpr(arg) {
 			if val, ok := g.genStaticBooleanArg(arg); ok {
 				out = append(out, val)
@@ -4781,6 +4810,14 @@ func (g *Generator) genArgs(args []ast.Expression) ([]string, error) {
 		out = append(out, ensureArgSafe(val))
 	}
 	return out, nil
+}
+
+func (g *Generator) genBeshtPredicateBooleanArg(expr ast.Expression) (string, bool, error) {
+	cond, ok, err := g.genBeshtPredicateCondition(expr)
+	if !ok || err != nil {
+		return "", ok, err
+	}
+	return fmt.Sprintf("$(if %s; then printf true; else printf false; fi)", cond), true, nil
 }
 
 func (g *Generator) genStaticBooleanArg(expr ast.Expression) (string, bool) {
@@ -5990,8 +6027,15 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 		switch e.Name {
 		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
 			return true
+		default:
+			if isBeshtPredicateBuiltin(e.Name) {
+				return true
+			}
 		}
 	case *ast.MethodCallExpr:
+		if builtin, ok := beshtBuiltinCall(e); ok && isBeshtPredicateBuiltin(builtin.Name) {
+			return true
+		}
 		if ast.IsBeshtArgsReceiver(e.Receiver) && e.Method == "flag" {
 			return true
 		}
@@ -8310,6 +8354,35 @@ func beshtBuiltinCall(e *ast.MethodCallExpr) (*ast.BuiltinCallExpr, bool) {
 	return &ast.BuiltinCallExpr{Pos: e.Pos, Name: builtinName, Args: e.Args}, true
 }
 
+func isBeshtPredicateBuiltin(name string) bool {
+	switch name {
+	case "Besht.fs.isFile", "Besht.fs.isDir", "Besht.fs.isReadable", "Besht.fs.isWritable", "Besht.fs.isExecutable", "Besht.strings.isEmpty", "Besht.strings.isNonEmpty":
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *Generator) genBeshtPredicateCondition(expr ast.Expression) (string, bool, error) {
+	switch e := unwrapAsExpr(expr).(type) {
+	case *ast.MethodCallExpr:
+		builtin, ok := beshtBuiltinCall(e)
+		if !ok || !isBeshtPredicateBuiltin(builtin.Name) {
+			return "", false, nil
+		}
+		cond, err := g.genBuiltinCondition(builtin)
+		return cond, true, err
+	case *ast.BuiltinCallExpr:
+		if !isBeshtPredicateBuiltin(e.Name) {
+			return "", false, nil
+		}
+		cond, err := g.genBuiltinCondition(e)
+		return cond, true, err
+	default:
+		return "", false, nil
+	}
+}
+
 func (g *Generator) genMethodCondition(e *ast.MethodCallExpr) (string, error) {
 	if ast.IsBeshtArgsReceiver(e.Receiver) {
 		val, err := g.genMethodCall(e)
@@ -8577,8 +8650,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		clean := stripQuotes(arg0)
-		return fmt.Sprintf("[ -f %s ]", clean), nil
+		return fmt.Sprintf("[ -f %s ]", ensureArgSafe(arg0)), nil
 	case "Besht.fs.isDir":
 		if len(e.Args) != 1 {
 			return "", fmt.Errorf("Besht.fs.isDir() takes 1 argument")
@@ -8587,8 +8659,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		clean := stripQuotes(arg0)
-		return fmt.Sprintf("[ -d %s ]", clean), nil
+		return fmt.Sprintf("[ -d %s ]", ensureArgSafe(arg0)), nil
 	case "Besht.fs.isReadable":
 		if len(e.Args) != 1 {
 			return "", fmt.Errorf("Besht.fs.isReadable() takes 1 argument")
@@ -8597,8 +8668,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		clean := stripQuotes(arg0)
-		return fmt.Sprintf("[ -r %s ]", clean), nil
+		return fmt.Sprintf("[ -r %s ]", ensureArgSafe(arg0)), nil
 	case "Besht.fs.isWritable":
 		if len(e.Args) != 1 {
 			return "", fmt.Errorf("Besht.fs.isWritable() takes 1 argument")
@@ -8607,8 +8677,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		clean := stripQuotes(arg0)
-		return fmt.Sprintf("[ -w %s ]", clean), nil
+		return fmt.Sprintf("[ -w %s ]", ensureArgSafe(arg0)), nil
 	case "Besht.fs.isExecutable":
 		if len(e.Args) != 1 {
 			return "", fmt.Errorf("Besht.fs.isExecutable() takes 1 argument")
@@ -8617,8 +8686,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		clean := stripQuotes(arg0)
-		return fmt.Sprintf("[ -x %s ]", clean), nil
+		return fmt.Sprintf("[ -x %s ]", ensureArgSafe(arg0)), nil
 	case "Besht.strings.isEmpty":
 		if len(e.Args) != 1 {
 			return "", fmt.Errorf("Besht.strings.isEmpty() takes 1 argument")

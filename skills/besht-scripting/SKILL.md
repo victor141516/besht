@@ -143,7 +143,7 @@ process.exit(code) // number or status
 
 ## Besht Helpers
 
-Use `Besht.fs.*` for file predicates, `Besht.strings.*` for string predicates, and `Besht.iter.range()` for inclusive integer ranges. These compile to inline POSIX tests or compact generated shell and add no runtime namespace object.
+Use `Besht.fs.*` for file predicates, `Besht.strings.*` for string predicates, and `Besht.iter.range()` for inclusive integer ranges. These compile to inline POSIX tests or compact generated shell and add no runtime namespace object. Predicate conditions compile to direct tests, assignments store `1`/`0`, and console output renders `true`/`false`.
 
 ```ts
 if (Besht.fs.isFile(path)) {
@@ -756,7 +756,7 @@ Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known lists
 ```
 
-Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`; static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
+Note: booleans print as `true`/`false` in string contexts and can be used directly in conditions. Static boolean `console.log()` and `console.error()` arguments such as `Boolean("")`, `true`, and `!false` render directly without a shell `if`; `Besht.fs.*` and `Besht.strings.*` predicates also render as readable `true`/`false` in console output. Static boolean `if` and ternary conditions such as `Boolean(value)`, `Array.isArray(value)`, static string/list searches, static `Object.hasOwn()`, and static comparisons fold to the selected branch or value.
 
 ## Operators
 

@@ -1201,6 +1201,17 @@ if (Besht.fs.isDir(p)) {
 	assertContains(t, out, `[ -d`)
 }
 
+func TestIntegration_BeshtPredicateConsoleBooleans(t *testing.T) {
+	out := runCompiledShell(t, `let path = "/tmp"
+let empty = ""
+console.log(Besht.fs.isDir(path))
+console.log(Besht.strings.isEmpty(empty))
+`)
+	if strings.TrimSpace(out) != "true\ntrue" {
+		t.Fatalf("output: got %q, want true\\ntrue", out)
+	}
+}
+
 func TestIntegration_BeshtNamespaceWrapperInModule(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "checks.bsh", `export function check(path: string): boolean {
