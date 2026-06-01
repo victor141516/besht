@@ -5355,7 +5355,9 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 		if value, ok := staticArithmeticNumberValue(e); ok {
 			return formatStaticNumber(value), true, nil
 		}
-		if value, ok := staticComparisonResult(e); ok {
+		if value, ok, err := g.staticComparisonResult(e); err != nil {
+			return "", true, err
+		} else if ok {
 			if value {
 				return "true", true, nil
 			}
@@ -5442,8 +5444,8 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 			}
 		}
 	case *ast.BinaryExpr:
-		if result, ok := staticComparisonResult(e); ok {
-			return result, true
+		if value, ok, err := g.staticComparisonResult(e); err == nil && ok {
+			return value, true
 		}
 		if e.Op == "??" {
 			switch g.staticNullishState(e.Left) {
@@ -5457,7 +5459,11 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 		}
 		switch e.Op {
 		case "==", "!=", "===", "!==", ">", "<", ">=", "<=":
-			return staticComparisonResult(e)
+			value, ok, err := g.staticComparisonResult(e)
+			if err != nil || !ok {
+				return false, false
+			}
+			return value, true
 		case "&&":
 			left, leftOK := g.staticBooleanValue(e.Left)
 			right, rightOK := g.staticBooleanValue(e.Right)
@@ -5582,7 +5588,9 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		return formatStaticArithmeticNumber(value), nil
 	}
 
-	if result, ok := staticComparisonResult(e); ok {
+	if result, ok, err := g.staticComparisonResult(e); err != nil {
+		return "", err
+	} else if ok {
 		if result {
 			return "1", nil
 		}
@@ -9025,7 +9033,9 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 			}
 			return truthyCondition(val), nil
 		}
-		if result, ok := staticComparisonResult(e); ok {
+		if result, ok, err := g.staticComparisonResult(e); err != nil {
+			return "", err
+		} else if ok {
 			if result {
 				return "true", nil
 			}
@@ -9352,37 +9362,221 @@ func binaryStringTest(left, op, right string) string {
 	return fmt.Sprintf("{ _bst_left=%s; _bst_right=%s; [ -n \"${%s+x}\" ] && [ \"$_bst_left\" = \"$%s\" ] && _bst_left=; [ -n \"${%s+x}\" ] && [ \"$_bst_right\" = \"$%s\" ] && _bst_right=; [ \"$_bst_left\" %s \"$_bst_right\" ]; }", left, right, nullishSentinelVar, nullishSentinelVar, nullishSentinelVar, nullishSentinelVar, op)
 }
 
-func staticComparisonResult(e *ast.BinaryExpr) (bool, bool) {
+func (g *Generator) staticComparisonResult(e *ast.BinaryExpr) (bool, bool, error) {
 	switch e.Op {
 	case "==", "===", "!=", "!==":
-		left, leftOK := staticScalarComparisonValue(e.Left)
-		right, rightOK := staticScalarComparisonValue(e.Right)
+		left, leftOK, err := g.staticScalarComparisonValue(e.Left)
+		if err != nil {
+			return false, true, err
+		}
+		right, rightOK, err := g.staticScalarComparisonValue(e.Right)
+		if err != nil {
+			return false, true, err
+		}
 		if !leftOK || !rightOK {
-			return false, false
+			return false, false, nil
 		}
 		equal := left == right
 		if e.Op == "!=" || e.Op == "!==" {
-			return !equal, true
+			return !equal, true, nil
 		}
-		return equal, true
+		return equal, true, nil
 	case ">", "<", ">=", "<=":
-		left, leftOK := staticArithmeticNumberValue(e.Left)
-		right, rightOK := staticArithmeticNumberValue(e.Right)
+		left, leftOK, err := g.staticNumericComparisonValue(e.Left)
+		if err != nil {
+			return false, true, err
+		}
+		right, rightOK, err := g.staticNumericComparisonValue(e.Right)
+		if err != nil {
+			return false, true, err
+		}
 		if !leftOK || !rightOK {
-			return false, false
+			return false, false, nil
 		}
 		switch e.Op {
 		case ">":
-			return left > right, true
+			return left > right, true, nil
 		case "<":
-			return left < right, true
+			return left < right, true, nil
 		case ">=":
-			return left >= right, true
+			return left >= right, true, nil
 		case "<=":
-			return left <= right, true
+			return left <= right, true, nil
 		}
 	}
-	return false, false
+	return false, false, nil
+}
+
+func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bool, error) {
+	if value, ok := staticScalarComparisonValue(expr); ok {
+		return value, true, nil
+	}
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticScalarComparisonValue(e.Expr)
+	case *ast.UnaryExpr:
+		if e.Op == "!" {
+			if value, ok := g.staticBooleanValue(e); ok {
+				return staticBoolComparisonValue(value), true, nil
+			}
+		}
+		if value, ok := staticArithmeticNumberValue(e); ok {
+			return formatStaticNumber(value), true, nil
+		}
+	case *ast.BinaryExpr:
+		if value, ok := staticArithmeticNumberValue(e); ok {
+			return formatStaticNumber(value), true, nil
+		}
+		if value, ok, err := g.staticComparisonResult(e); err != nil {
+			return "", true, err
+		} else if ok {
+			return staticBoolComparisonValue(value), true, nil
+		}
+	case *ast.BuiltinCallExpr:
+		if value, ok := g.staticBooleanValue(e); ok {
+			return staticBoolComparisonValue(value), true, nil
+		}
+		switch e.Name {
+		case "Number.parseInt":
+			value, ok, err := staticParseIntBuiltinValue(e)
+			return value, ok, err
+		case "Number.parseFloat":
+			value, ok := staticParseFloatBuiltinValue(e)
+			return value, ok, nil
+		}
+	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+			value, ok, err := g.genStaticMathMethod(e)
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return value, true, nil
+		}
+		if value, ok, err := g.genStaticStringMethod(e); err != nil || ok {
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return staticGeneratedScalarValue(value)
+		}
+		if value, ok, err := g.genStaticStringTransform(e); err != nil || ok {
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return staticGeneratedScalarValue(value)
+		}
+		if value, ok, err := g.genStaticNumberMethod(e); err != nil || ok {
+			if err != nil || !ok {
+				return "", ok, err
+			}
+			return staticGeneratedScalarValue(value)
+		}
+	}
+	return "", false, nil
+}
+
+func (g *Generator) staticNumericComparisonValue(expr ast.Expression) (float64, bool, error) {
+	if value, ok := staticArithmeticNumberValue(expr); ok {
+		return value, true, nil
+	}
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticNumericComparisonValue(e.Expr)
+	case *ast.BuiltinCallExpr:
+		switch e.Name {
+		case "Number.parseInt":
+			value, ok, err := staticParseIntBuiltinValue(e)
+			if err != nil || !ok {
+				return 0, ok, err
+			}
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, false, nil
+			}
+			return parsed, true, nil
+		case "Number.parseFloat":
+			value, ok := staticParseFloatBuiltinValue(e)
+			if !ok {
+				return 0, false, nil
+			}
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, false, nil
+			}
+			return parsed, true, nil
+		}
+	case *ast.MethodCallExpr:
+		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
+			value, ok, err := g.genStaticMathMethod(e)
+			if err != nil || !ok {
+				return 0, ok, err
+			}
+			parsed, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, false, nil
+			}
+			return parsed, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+func staticParseIntBuiltinValue(e *ast.BuiltinCallExpr) (string, bool, error) {
+	if len(e.Args) < 1 || len(e.Args) > 2 {
+		return "", true, fmt.Errorf("Number.parseInt() takes one or two arguments")
+	}
+	value, ok := staticStringText(e.Args[0])
+	if !ok {
+		return "", false, nil
+	}
+	var radixArg *int
+	if len(e.Args) == 2 {
+		radix, ok := staticIntLiteral(e.Args[1])
+		if !ok {
+			return "", false, nil
+		}
+		radixArg = &radix
+	}
+	parsed, ok := staticParseIntValue(value, radixArg)
+	return parsed, ok, nil
+}
+
+func staticParseFloatBuiltinValue(e *ast.BuiltinCallExpr) (string, bool) {
+	if len(e.Args) != 1 {
+		return "", false
+	}
+	value, ok := staticStringText(e.Args[0])
+	if !ok {
+		return "", false
+	}
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		return "", false
+	}
+	return formatStaticNumber(parsed), true
+}
+
+func staticBoolComparisonValue(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
+}
+
+func staticGeneratedScalarValue(value string) (string, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(value, "$") {
+		return "", false, nil
+	}
+	if strings.HasPrefix(value, "'") {
+		return singleQuotedToRaw(value), true, nil
+	}
+	if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") && len(value) >= 2 {
+		return value[1 : len(value)-1], true, nil
+	}
+	if strings.ContainsAny(value, " \t\n;&|<>`") {
+		return "", false, nil
+	}
+	return value, true, nil
 }
 
 func staticScalarComparisonValue(expr ast.Expression) (string, bool) {
