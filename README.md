@@ -190,13 +190,13 @@ let name: string = "Alice"           // plain literal
 let also: string = 'Alice'           // same — plain literal
 let tmpl: string = `Hello ${name}!`  // template literal — interpolates ${name}
 let sum = `sum=${a + b}`             // expressions inside ${...}
-let pattern: string = r"^foo-[0-9]+" // raw string — always single-quoted in sh
-let rawpath = String.raw`C:\temp\new\file.txt` // tagged raw template — backslashes literal
+let pattern: string = '^foo-[0-9]+'  // single-quoted literal text
+let path = "C:\\temp\\new\\file.txt" // escape backslashes in double-quoted strings
 let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // escape sequences
 let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 ```
 
-In template literal text, `$` stays literal unless it starts a Besht `${expr}` interpolation. Shell parameter forms such as `$*`, `$?`, and `$$` are emitted as literal text.
+Backticks are template literals and should be used only when interpolation or multiline template text is needed. In template literal text, `$` stays literal unless it starts a Besht `${expr}` interpolation. Shell parameter forms such as `$*`, `$?`, and `$$` are emitted as literal text.
 
 Use `+` to concatenate:
 

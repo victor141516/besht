@@ -2079,18 +2079,18 @@ console.log(hasNeedle("needle haystack"))
 	assertNotContains(t, libOut, `goodbye:world`)
 }
 
-func TestIntegration_RawStringPassedSingleQuoted(t *testing.T) {
+func TestIntegration_SingleQuotedPatternPassedSingleQuoted(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `let p: string = r"^foo-[0-9]+$"
+	path := writeFile(t, dir, "main.bsh", `let p: string = '^foo-[0-9]+$'
 console.log(p)
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `p='^foo-[0-9]+$'`)
 }
 
-func TestIntegration_RawStringInCmdArg(t *testing.T) {
+func TestIntegration_SingleQuotedPatternInCmdArg(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `$("grep", "-v", r"-cache$").run()
+	path := writeFile(t, dir, "main.bsh", `$("grep", "-v", '-cache$').run()
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `'-cache$'`)

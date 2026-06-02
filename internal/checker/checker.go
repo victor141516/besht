@@ -431,7 +431,7 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 		return nil
 	}
 	switch e := expr.(type) {
-	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.RawStringLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.ThisExpr:
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.ThisExpr:
 		return nil
 	case *ast.IdentExpr:
 		if isSemanticGlobalIdent(e.Name) {
@@ -913,7 +913,7 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 		return c.semanticExprType(e.Expr)
 	case *ast.IntLit, *ast.FloatLit, *ast.UpdateExpr:
 		return numType
-	case *ast.StringLit, *ast.RawStringLit, *ast.TemplateLit:
+	case *ast.StringLit, *ast.TemplateLit:
 		return strType
 	case *ast.BoolLit:
 		return boolType
@@ -1357,8 +1357,6 @@ func commandEnvName(expr ast.Expression) (string, error) {
 	var name string
 	switch e := expr.(type) {
 	case *ast.StringLit:
-		name = e.Value
-	case *ast.RawStringLit:
 		name = e.Value
 	default:
 		return "", fmt.Errorf("command env name must be a string literal")

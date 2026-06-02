@@ -432,16 +432,6 @@ type StringLit struct {
 func (n *StringLit) nodePos() Pos { return n.Pos }
 func (n *StringLit) exprNode()    {}
 
-// RawStringLit: r"..." — always single-quoted, no shell expansion
-type RawStringLit struct {
-	baseExpr
-	Pos   Pos
-	Value string
-}
-
-func (n *RawStringLit) nodePos() Pos { return n.Pos }
-func (n *RawStringLit) exprNode()    {}
-
 // TemplateLit: `...${expr}...` — interpolated string
 type TemplateLit struct {
 	baseExpr

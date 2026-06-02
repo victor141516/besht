@@ -280,38 +280,6 @@ func TestLexer_EOF(t *testing.T) {
 	}
 }
 
-func TestLexer_RawStringLiteral(t *testing.T) {
-	toks := tokenize(t, `r"hello world"`)
-	expectTypes(t, toks, lexer.TokRawString)
-	if toks[0].Literal != "hello world" {
-		t.Errorf("raw string: got %q, want %q", toks[0].Literal, "hello world")
-	}
-}
-
-func TestLexer_RawStringWithDollar(t *testing.T) {
-	toks := tokenize(t, `r"-cache$"`)
-	expectTypes(t, toks, lexer.TokRawString)
-	if toks[0].Literal != "-cache$" {
-		t.Errorf("raw string dollar: got %q", toks[0].Literal)
-	}
-}
-
-func TestLexer_RawStringWithRegex(t *testing.T) {
-	toks := tokenize(t, `r"^foo-[0-9]+$"`)
-	expectTypes(t, toks, lexer.TokRawString)
-	if toks[0].Literal != "^foo-[0-9]+$" {
-		t.Errorf("raw string regex: got %q", toks[0].Literal)
-	}
-}
-
-func TestLexer_RawStringEscapedQuote(t *testing.T) {
-	toks := tokenize(t, `r"say \"hi\""`)
-	expectTypes(t, toks, lexer.TokRawString)
-	if toks[0].Literal != `say "hi"` {
-		t.Errorf("raw string escaped quote: got %q", toks[0].Literal)
-	}
-}
-
 func TestLexer_EscapedDollarInString(t *testing.T) {
 	toks := tokenize(t, `"price is \$5"`)
 	expectTypes(t, toks, lexer.TokString)
@@ -320,10 +288,10 @@ func TestLexer_EscapedDollarInString(t *testing.T) {
 	}
 }
 
-func TestLexer_RawStringUnterminatedError(t *testing.T) {
-	l := lexer.New(`r"unterminated`, "test.bsh")
-	_, err := l.Tokenize()
-	if err == nil {
-		t.Fatal("expected error for unterminated raw string, got nil")
+func TestLexer_RPrefixIsIdentifierPlusString(t *testing.T) {
+	toks := tokenize(t, `r"hello world"`)
+	expectTypes(t, toks, lexer.TokIdent, lexer.TokString)
+	if toks[0].Literal != "r" || toks[1].Literal != "hello world" {
+		t.Errorf("r-prefixed string tokens: got %v", toks)
 	}
 }

@@ -245,7 +245,7 @@ $("curl", "-sf", url).pipe($("jq", ".name"));
 $("make", "build").stderr("null");
 ```
 
-The compiler emits shell-safe literal command words bare when possible (`git status --short`) and single-quotes anything that needs protection (`'*.go'`, `'hello world'`, raw strings, shell reserved command names, embedded quotes). Single-quote escaping handles embedded `'` characters automatically (`'it'"'"'s alive'`). Variable references are passed as `"$var"`. This prevents shell injection and gives the compiler full control over quoting strategy.
+The compiler emits shell-safe literal command words bare when possible (`git status --short`) and single-quotes anything that needs protection (`'*.go'`, `'hello world'`, shell reserved command names, embedded quotes). Single-quote escaping handles embedded `'` characters automatically (`'it'"'"'s alive'`). Variable references are passed as `"$var"`. This prevents shell injection and gives the compiler full control over quoting strategy.
 
 The `shell { }` syntax has been **removed**. There is no escape hatch to raw shell.
 
@@ -403,8 +403,8 @@ Tests use `go test ./...`. Coverage target: `make cover`. Current coverage: ~75%
 let name: string = "Alice"          // plain literal — " and ' produce no interpolation
 let also: string = 'Alice'          // same — both quote styles are plain literals
 let tmpl: string = `Hello ${name}!` // template literal — ${var} interpolation
-let pattern: string = r"^foo-[0-9]+$"  // raw string — always single-quoted in sh output
-let rawpath: string = String.raw`C:\temp\new\file.txt` // tagged raw template — same as r"..."
+let pattern: string = '^foo-[0-9]+$'  // single-quoted literal text
+let path: string = "C:\\temp\\new\\file.txt" // escape backslashes in double-quoted strings
 let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // escape sequences
 let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 let count: number = 42
@@ -927,17 +927,15 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`rewriteFnCalls()` runs before codegen.** When adding new expression types that contain function calls, add a case to `rewriteStmt()`/`rewriteExpr()` in `modules.go` so the pass descends into them.
 
-**`rewriteVarRefs()` must be called on `TemplateLit` values only.** Only template literals (`` `...${var}...` ``) contain `${...}` references that need var-name rewriting. Plain `StringLit` and `RawStringLit` are emitted as single-quoted sh and contain no shell expansions. Do NOT call `rewriteVarRefs()` on plain string values.
+**`rewriteVarRefs()` must be called on `TemplateLit` values only.** Only template literals (`` `...${var}...` ``) contain `${...}` references that need var-name rewriting. Plain `StringLit` values are emitted as single-quoted sh and contain no shell expansions. Do NOT call `rewriteVarRefs()` on plain string values.
 
 **`paramMap` is per-function scope.** Saved/restored on function entry/exit in both `genFnDecl` and `genModuleFnDecl`. Loop vars and catch vars must be registered into `paramMap` and cleaned up.
 
 **`genCmdChain()` is recursive.** It walks `.pipe().pipe().stdout()` chains by recursing on the receiver. The base case is `*ast.CmdExpr`. Terminal methods must handle any redirect string accumulated from inner calls.
 
-**`r"..."` raw strings always compile to single-quoted sh.** Use for regex patterns, AWK programs, sed expressions, grep patterns — anything containing `$`, `^`, `[`, `\` that should be literal.
-
 **`\$` in regular strings produces a literal dollar sign.** `"price \$5"` → `"price \$5"` in sh (POSIX: `\$` in double-quotes is literal). Do NOT rely on `$` alone being literal — use `\$` explicitly.
 
-**Compile-time warning for `-`-prefixed string literals in `$()` args.** If a string literal starting with `-` containing special characters (`$`, `^`, `[`, `]`, etc.) is passed as a `$()` argument, the compiler warns and suggests `r"..."` or adding `-e`/`--` before it. Suppressed when the preceding argument is `-e` or `--`.
+**Compile-time warning for `-`-prefixed string literals in `$()` args.** If a string literal starting with `-` containing special characters (`$`, `^`, `[`, `]`, etc.) is passed as a `$()` argument, the compiler warns and suggests adding `-e`/`--` before it. Suppressed when the preceding argument is `-e` or `--`.
 
 **Runtime POSIX self-check.** Compiled scripts emit a `_r=$(printf 'hello:world' | grep -F 'hello' | sed ...)` pipeline at the top of the preamble only when generated shell uses Besht's `grep`/`sed`-based paths or the args runtime. Simple scripts that only need shell builtins and direct `printf` output skip it. In split output, the entry script emits the check if any generated module needs it. If the result is wrong the script exits immediately. Omit with `--opt-no-add-binaries-check` at compile time.
 
@@ -951,11 +949,11 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`genArgs()` applies `ensureArgSafe()` to all generated args.** Any `$(...)` expression is automatically wrapped in `"$(...)"` when passed as an argument to a command, `console.log`, or a function call. This prevents word-splitting of multi-word command output.
 
-**Command literal words prefer natural bare output only when safe.** `genCmdArgs()` uses `cmdArgWordForExpr()` so ordinary string literals such as `"git"` and `"--short"` can emit as `git --short`, while raw strings, globs, spaces, embedded quotes, variables, command substitutions, shell reserved command names, and command-position assignments remain quoted or protected. Do not route general string/assignment/list emission through this command-word path.
+**Command literal words prefer natural bare output only when safe.** `genCmdArgs()` uses `cmdArgWordForExpr()` so ordinary string literals such as `"git"` and `"--short"` can emit as `git --short`, while globs, spaces, embedded quotes, variables, command substitutions, shell reserved command names, and command-position assignments remain quoted or protected. Do not route general string/assignment/list emission through this command-word path.
 
 **`escapeForDoubleQuote()` handles shell-active characters in string literals.** When emitting a double-quoted sh string, backtick `` ` `` and every literal dollar form must be escaped, including `$(`, `$WORD`, `$1`, `${text}`, `$*`, `$?`, and `$$`. Besht template interpolation is inserted separately from parsed `${expr}` nodes by `genTemplateLiteral()`/`strInner()`; do not treat literal template text as shell syntax. `\$` (already escaped by the lexer for literal dollars) must also be left as-is. Any new string emission path must call `escapeForDoubleQuote()` before wrapping in `"..."`.
 
-**`cmdArgQuote()` must not double-quote already-quoted values.** `RawStringLit` emits a single-quoted string from `genExprRHS` (e.g. `'s/foo/bar/'`). If `cmdArgQuote` then calls `shellQuote()` on that value again, it produces malformed shell like `'''s/foo/bar/'''`. The fix: `cmdArgQuote` short-circuits on values that already start and end with `'`. Values starting with `$` are passed raw as variable references. Complex expressions that happen to start with `$` skip quoting — be aware.
+**`cmdArgQuote()` must not double-quote already-quoted values.** Plain string literals emit single-quoted strings from `genExprRHS` (e.g. `'s/foo/bar/'`). If `cmdArgQuote` then calls `shellQuote()` on that value again, it produces malformed shell like `'''s/foo/bar/'''`. The fix: `cmdArgQuote` short-circuits on values that already start and end with `'`. Values starting with `$` are passed raw as variable references. Complex expressions that happen to start with `$` skip quoting — be aware.
 
 **Command `.env(name, value)` prefixes one command invocation only.** It emits `NAME=value command ...` inside the generated pipeline and does not mutate the parent shell environment.
 
@@ -980,8 +978,6 @@ Command methods chain on `command` type values. With the lazy Command model:
 **Static object maps use object backing.** `static Deltas: Record<string, [number, number]> = { U: [-1, 0] }` emits `_obj__class_Class_Deltas_U` storage, and `Class.Deltas[key]` lowers to computed object access. `Record<K, V>` is annotation-only; it guides compiler inference but adds no runtime type checking.
 
 **Class methods and getters that mutate `this` must be void-style calls.** Value-returning methods and getters are invoked through command substitution (`$(Class__method "$slot")`), which runs in a subshell. Any `this.prop = value` mutation inside that subshell is lost, so checker/codegen reject non-void methods and getters that assign to `this` properties. Constructors and setters are exempt because they are called directly.
-
-**`String.raw\`...\`` compiles identically to `r"..."`.** Backslashes are literal — no escape sequence processing. Use for Windows paths, regex, or any string containing `\`.
 
 **Optional string search positions are normalized in awk.** `indexOf`/`includes`/`startsWith` position, `lastIndexOf` position, and `endsWith` length must use `awkArg()` plus awk-side `int()` truncation and clamping. Do not strip quotes into shell arithmetic for these arguments.
 

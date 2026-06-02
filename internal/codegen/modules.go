@@ -767,7 +767,7 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 			return t
 		}
 		return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
-	case *ast.StringLit, *ast.RawStringLit, *ast.TemplateLit:
+	case *ast.StringLit, *ast.TemplateLit:
 		return &ast.Type{Kind: ast.TypeString}
 	case *ast.IntLit, *ast.FloatLit:
 		return &ast.Type{Kind: ast.TypeNumber}

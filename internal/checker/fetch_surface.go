@@ -203,7 +203,7 @@ func (v *fetchSurfaceValidator) expr(expr ast.Expression) error {
 		return nil
 	}
 	switch e := expr.(type) {
-	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.RawStringLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.IdentExpr, *ast.ThisExpr, *ast.UpdateExpr:
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.IdentExpr, *ast.ThisExpr, *ast.UpdateExpr:
 		return nil
 	case *ast.TemplateLit:
 		for _, part := range e.Exprs {

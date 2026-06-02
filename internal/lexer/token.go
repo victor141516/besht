@@ -9,7 +9,6 @@ const (
 	TokInt         TokenType = iota
 	TokFloat                 // 3.14 — decimal literal
 	TokString                // "..." or '...' — plain literal, no interpolation
-	TokRawString             // r"..." — always single-quoted, no interpolation (alias for TokString now)
 	TokTemplateLit           // `...${expr}...` — template literal with interpolation
 	TokIdent                 // identifier
 

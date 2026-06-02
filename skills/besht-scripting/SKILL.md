@@ -4,7 +4,7 @@ description: >
   Write, edit, and debug besht scripts (.bsh files). Use when the user wants
   to create a shell script using besht, asks how to do something in besht,
   needs to compile a .bsh file to POSIX sh, or asks about besht syntax —
-  variables, constants, raw strings r"...", String.raw, $() command expressions,
+  variables, constants, string literals, template literals, $() command expressions,
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
   list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), JSON.stringify(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
@@ -64,13 +64,13 @@ let name: string = "Alice"           // plain — no interpolation
 let also: string = 'Bob'             // same
 let tmpl: string = `Hello ${name}!`  // template literal — interpolates ${name}
 let sum = `sum=${a + b}`             // expressions inside ${...}
-let pattern: string = r"^foo-[0-9]+" // raw — always single-quoted in sh output
-let rawpath = String.raw`C:\temp\new\file.txt` // tagged raw template — same as r"..."
+let pattern: string = '^foo-[0-9]+'  // single-quoted literal text
+let path = "C:\\temp\\new\\file.txt" // escape backslashes in double-quoted strings
 let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // escape sequences
 let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 ```
 
-In template literal text, `$` stays literal unless it starts a Besht `${expr}` interpolation. Shell parameter forms such as `$*`, `$?`, and `$$` are emitted as literal text.
+Backticks are template literals and should be used only when interpolation or multiline template text is needed. In template literal text, `$` stays literal unless it starts a Besht `${expr}` interpolation. Shell parameter forms such as `$*`, `$?`, and `$$` are emitted as literal text.
 
 Concatenation with `+`:
 
@@ -79,8 +79,6 @@ let label: string = "check:" + name;
 let msg: string = `Hello, ${name}!`; // preferred when interpolation is needed
 let bigger = a > b ? a : b;
 ```
-
-Use raw strings (`r"..."`) for regex patterns, AWK programs, sed expressions, Windows paths, or any text containing `$`, `^`, `[`, or `\` that must stay literal. `String.raw\`...\`` is identical to `r"..."`.
 
 Escape sequences in double-quoted strings: `\n` (newline), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (double quote), `\'` (single quote), `\uXXXX` (unicode). Single-quoted strings do NOT process escapes.
 
@@ -470,10 +468,10 @@ $("make", "build").env("CI", "1").run()     // CI=1 make build
 let root: string = $("pwd").workdir("/").run().readStdout()
 $("make", "test").workdir("/repo/app").run()
 
-// Use raw strings for patterns containing special characters
-$("grep", "-v", r"^sha256").run()
-$("grep", "-E", r"HOP-[0-9]{4,5}").run()
-$("sed", r"s/foo/bar/g").run()
+// Use ordinary quoted strings for patterns containing special characters
+$("grep", "-v", '^sha256').run()
+$("grep", "-E", 'HOP-[0-9]{4,5}').run()
+$("sed", 's/foo/bar/g').run()
 ```
 
 ## Optional Chaining
@@ -820,7 +818,7 @@ if (!Besht.fs.isDir(path)) {
 **Iterate command output:**
 
 ```ts
-for (file in $("find", ".", "-name", r"*.log", "-mtime", "+7").run().readStdoutLines()) {
+for (file in $("find", ".", "-name", "*.log", "-mtime", "+7").run().readStdoutLines()) {
     $("rm", file).run()
 }
 ```
@@ -859,6 +857,5 @@ let lines: number = Number.parseInt(raw); // string -> number
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
 - `===`/`!==` are aliases for `==`/`!=`
 - Objects and classes support the operations described above; unsupported TypeScript features are listed in their sections
-- `String.raw\`...\`` is identical to `r"..."` — backslashes are literal
 - `list.join(sep)` supports multi-character separators
 - Scalar `list.toString()` is supported as `list.join(",")`; nested-list JS flattening is not implemented
