@@ -106,6 +106,8 @@ let dryRun = Besht.args.flag("dry-run", "d")
 
 Use `??` for argument defaults. `Besht.args.positional()` and `Besht.args.option()` are nullish when absent and preserve empty strings when present. `Besht.args.flag()` returns a boolean. `--` stops option parsing, so later `-`-prefixed values are positional. Top-level scripts that only read positional arguments compile to a compact inline scan; `argv()`, `option()`, `flag()`, and args reads inside functions use the shared parser runtime.
 
+Do not transliterate ordinary shell `while`/`case` or `getopts` parsers when they only read named options, flags, and positionals. Map them to `Besht.args.option("name", "n")`, `Besht.args.flag("verbose", "v")`, `Besht.args.positional(n)`, and `Besht.args.argv()`. Write a manual argument parser only when the original script has custom behavior that these helpers cannot express.
+
 ## Fetch
 
 `fetch()` is currently a narrow synchronous text-only GET API backed by `curl -sS -- <url>`.
@@ -451,6 +453,7 @@ When translating shell-style scripts, translate structure into command methods i
 | `cmd && next` | run a named command, inspect `.exitCode()`, then use `if` |
 | `${1-default}` | `Besht.args.positional(1) ?? "default"` |
 | `${1:-default}` | read the positional arg, then use `Besht.strings.isEmpty()` to apply the empty-string default |
+| `while`/`case` parser for `--root`, `-r`, `--verbose` | `Besht.args.option("root", "r")`, `Besht.args.flag("verbose", "v")`, `Besht.args.positional(n)` |
 
 Avoid `$("sh", "-c", "...")`, `$("bash", "-c", "...")`, embedded `cd`, `VAR=value cmd`, `cmd1 | cmd2`, or redirect text inside command strings unless the script's real purpose is to invoke a shell interpreter. Besht should own quoting, argument boundaries, pipes, redirects, per-command environment, and per-command working directory. Use raw strings (`r"..."`) for grep/sed/awk patterns and globs that must stay literal.
 

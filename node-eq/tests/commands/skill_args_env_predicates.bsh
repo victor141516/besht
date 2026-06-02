@@ -1,0 +1,59 @@
+let root = Besht.args.option("root", "r") ?? ".";
+let name = Besht.args.option("name", "n") ?? "guest";
+let verbose = Besht.args.flag("verbose", "v");
+
+let first = Besht.args.positional(1) ?? "";
+let second = Besht.args.positional(2) ?? "";
+
+let mode = process.env.BESHT_SKILL_MODE ?? "default";
+let empty = process.env.BESHT_SKILL_EMPTY ?? "fallback";
+let label = process.env.BESHT_SKILL_LABEL ?? "";
+
+console.log("--- args ---");
+console.log(`root=${root}`);
+console.log(`name=${name}`);
+console.log(`verbose=${verbose ? "true" : "false"}`);
+if (Besht.strings.isNonEmpty(first)) {
+  console.log(`first=${first}`);
+} else {
+  console.log("first=<missing-or-empty>");
+}
+if (Besht.strings.isNonEmpty(second)) {
+  console.log(`second=${second}`);
+} else {
+  console.log("second=<missing-or-empty>");
+}
+
+console.log("--- env ---");
+console.log(`mode=${mode}`);
+console.log(`empty=${empty}`);
+if (Besht.strings.isEmpty(label)) {
+  console.log("label=<empty>");
+} else {
+  console.log(`label=${label}`);
+}
+
+console.log("--- path ---");
+if (Besht.fs.isDir(root)) {
+  console.log("root-is-dir=true");
+} else {
+  console.log("root-is-dir=false");
+}
+
+if (Besht.fs.isFile(`${root}/README.md`)) {
+  console.log("readme-is-file=true");
+} else {
+  console.log("readme-is-file=false");
+}
+
+if (Besht.fs.isReadable(`${root}/README.md`)) {
+  console.log("readme-readable=true");
+} else {
+  console.log("readme-readable=false");
+}
+
+if (Besht.fs.isExecutable(`${root}/dist/besht`)) {
+  console.log("compiler-executable=true");
+} else {
+  console.log("compiler-executable=false");
+}
