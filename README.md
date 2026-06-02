@@ -681,6 +681,8 @@ if (visited.has("0,0")) {
 
 Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-list predicate callbacks for `.some()`, `.every()`, `.find()`, and `.findIndex()` are direct arrow expressions with one item parameter or `(item, index)`.
 
+When translating shell pipelines that process already-known text or numbers, prefer native Besht data operations over spawning `sed`/`awk`/`grep`/`tr`. Use `map`, `filter`, `reduce`, `forEach((item, index) => ...)`, `join`, and string methods such as `trim()`, `startsWith()`, and `toUpperCase()` for in-memory transformations. Keep command pipelines for external data sources and tool-specific work.
+
 ```ts
 let names = ["alice", "bob", "anna"]
 let shouted = names.map(name => name.toUpperCase())
@@ -705,6 +707,13 @@ let labeled = names.map((name, i) => {
 // reduce with expression body
 let total = nums.reduce((acc, n) => acc + n, 0)
 let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("\n")
+
+let rawWords = ["  alpha", "Beta", "apricot", "banana"]
+let labels = rawWords
+    .map(word => word.trim())
+    .filter(word => word.startsWith("a"))
+    .map(word => "item:" + word)
+    .join(", ")
 
 // reduce with block body and object accumulator
 let counts = words.reduce((acc, word) => {

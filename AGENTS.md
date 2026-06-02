@@ -965,6 +965,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **node-eq command parity should cover idiomatic command APIs.** `node-eq/runtime.ts` mirrors command `.env()` and `.workdir()` and `node-eq/run-bsh` materializes Besht raw strings (`r"..."`) into JavaScript strings, so compare fixtures can exercise shell-to-Besht translations without avoiding supported language features. `node-eq/tests/commands/skill_pipeline_idioms.bsh` is paired with a source shell script to keep future skill iterations focused on pipes, redirects, workdir, env, raw patterns, and exit-code gating.
 
+**Skill validation should cover native data idioms, not only commands.** `node-eq/tests/language/callbacks/skill_native_data_idioms.bsh` is paired with a shell source that uses `sed`/`grep`/`tr`/`awk` over literal data. The Besht fixture intentionally uses native lists, callbacks, string transforms, joins, numeric reduction, and indexed `forEach`; keep this as a guardrail for teaching agents to translate in-memory shell pipelines into Besht data operations instead of process pipelines.
+
 **`command` objects do not auto-coerce.** Unlike the old model, `command` no longer coerces to `string` on assignment. You must explicitly call `.run()` then `.readStdout()` to get a string. The Command Analysis pass enforces this.
 
 **`run()` returns `self`, not `void`.** This enables chaining: `$("whoami").run().readStdout()`. Do not declare `.run()` as returning `void` anywhere in the compiler — it returns the same `Command` identity.

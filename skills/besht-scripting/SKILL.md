@@ -240,6 +240,8 @@ switch (mode) {
 
 Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-list `.some()`, `.every()`, `.find()`, and `.findIndex()` use direct expression-bodied arrow predicates.
 
+When translating shell pipelines that transform already-known text or numbers, prefer native Besht lists and methods over external `sed`/`awk`/`grep`/`tr` commands. For example, a shell pipeline that trims lines, filters by prefix, uppercases, joins labels, sums numbers, or prints `NR - 1` indexes is usually clearer as `list.map(...)`, `filter(...)`, `word.trim()`, `startsWith(...)`, `toUpperCase()`, `join(...)`, `reduce(...)`, and `forEach((item, index) => ...)`. Reserve command pipelines for real external data sources or operations that need an external tool.
+
 ```ts
 let names = ["alice", "bob", "anna"]
 let upper = names.map(name => name.toUpperCase())
@@ -270,6 +272,13 @@ let counts = words.reduce((acc, word) => {
 // reduce with expression body
 let total = nums.reduce((acc, n) => acc + n, 0)
 let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("\n")
+
+let rawWords = ["  alpha", "Beta", "apricot", "banana"]
+let cleaned = rawWords.map(word => word.trim())
+let labels = cleaned
+    .filter(word => word.startsWith("a"))
+    .map(word => "item:" + word)
+    .join(", ")
 ```
 
 `Array.from({ length })` creates `[0, 1, ... length - 1]`. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` is statement-only, takes a direct arrow callback with `(item)` or `(item, index)`, compiles static scalar receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Defer general arrow function values.

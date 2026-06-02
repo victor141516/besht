@@ -1,0 +1,20 @@
+const words = ["  alpha", "Beta", "apricot", "banana", "  avocado  "]
+const numbers = [3, 7, 10, 2]
+
+const cleaned = words.map(word => word.trim())
+const aWords = cleaned.filter(word => word.startsWith("a"))
+
+console.log("--- a words uppercase ---")
+aWords.map(word => word.toUpperCase()).forEach(word => console.log(word))
+
+console.log("--- joined labels ---")
+console.log(aWords.map(word => "item:" + word).join(", "))
+
+console.log("--- totals ---")
+const sum = numbers.reduce((acc, n) => acc + n, 0)
+const big = numbers.filter(n => n >= 5).length
+console.log("sum=" + sum.toString())
+console.log("big=" + big.toString())
+
+console.log("--- indexed ---")
+cleaned.forEach((word, index) => console.log(index.toString() + ":" + word))
