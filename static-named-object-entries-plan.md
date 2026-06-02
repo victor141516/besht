@@ -7,7 +7,7 @@ Small Besht sample:
 ```ts
 let user = { id: 1, name: "Ada", active: true }
 console.log(Object.entries(user).length)
-for (entry of Object.entries(user)) {
+for (entry in Object.entries(user)) {
     console.log(entry[0] + "=" + entry[1])
 }
 ```
@@ -43,12 +43,12 @@ Inline object literal `Object.entries()` already folds when all entry values are
 - Invalidate tracked entries on any dot or computed property assignment to the object.
 - Fold `Object.entries(name)` to a static newline-backed packed-row list while the entry list remains tracked.
 - Reuse existing static list length binding for `.length`.
-- Make compact `for-of` over static packed entries expose a temporary row as newline-delimited fields so `entry[0]` and `entry[1]` compile naturally inside the loop.
+- Make compact list loops over static packed entries expose a temporary row as newline-delimited fields so `entry[0]` and `entry[1]` compile naturally inside the loop.
 - Preserve runtime metadata paths for mutated objects, non-static values, nested/list/object/command/fetch values, object parameters, aliases with unknown slots, and dynamic cases.
 
 ## Verification
 
-- Add codegen coverage for static named object entries, length, and compact `for-of`.
+- Add codegen coverage for static named object entries, length, and compact list loops.
 - Add fallback coverage after property mutation.
 - Add runtime integration coverage for folded named-object entry output.
 - Update `AGENTS.md`, `README.md`, and `skills/besht-scripting/SKILL.md`.

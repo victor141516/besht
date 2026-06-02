@@ -434,13 +434,13 @@ let a: string[] = ["a", "b"]
 let b: Array<string> = ["c", "d"]
 let c: list<string> = ["e", "f"]
 let matrix: string[][] = rows.map(row => row.join("").split("") as string[])
-let indexes: number[] = Array.from({ length: 3 }) // [0, 1, 2]
+let indexes: number[] = Array.from({ length: 3 }) // [0, 1, 2]; Besht numeric range, not JS undefined slots
 let selected: string[] = Array.of("a", "b") // ["a", "b"]
-let objectKeys: string[] = Object.keys(user) // object key list
+let objectKeys: string[] = Object.keys(user) // compiler-managed object key list, not general JS reflection
 let objectValues: string[] = Object.values(user) // object value list
 let objectEntries: string[][] = Object.entries(user) // packed [key, value] rows
 let objectHasName: boolean = Object.hasOwn(user, "name")
-let jsonUser: string = JSON.stringify(user) // scalar-valued objects; requires --opt-use-jq
+let jsonUser: string = JSON.stringify(user) // scalar Besht values only; requires --opt-use-jq and jq
 let jsonList: string = JSON.stringify(["a", "b"])
 
 // Constants (compile-time immutability)
@@ -582,15 +582,12 @@ for (f in files) {
 }
 for (f in files) $("echo", f).run()
 
-// For-of alias
-for (f of files) {
+// Declaration form
+for (let f in files) {
     $("echo", f).run()
 }
 
-// For-of alias with declaration
-for (let f of files) {
-    $("echo", f).run()
-}
+// TypeScript for...of is not supported.
 
 // Break and continue
 for (f in files) {
@@ -1009,6 +1006,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`Array.from({ length })` is narrow by design.** It only supports an object literal with a numeric `length` field (including shorthand `{ length }`) and emits a zero-based numeric list. Do not broaden it to arbitrary iterables or mapper callbacks without adding parser/checker/codegen coverage and docs.
 
+**`of` is not a keyword.** Keep `of` tokenized as `TokIdent` so `Array.of()` and ordinary member/identifier parsing do not depend on a removed `for...of` syntax token. `parseFor()` should only special-case an identifier literal `of` after the loop variable to emit the explicit unsupported-syntax error.
+
 **`Array.isArray(value)` is static.** It returns true only when codegen can infer `value` as `TypeList`; otherwise it emits false. Do not add runtime array metadata or dynamic shape inspection for this API without a broader object/list representation design.
 
 **Type assertions are erased.** `expr as Type` exists for TypeScript-compatible syntax and compiler type inference only. It emits the inner expression unchanged. This is especially useful for empty list accumulators such as `[] as string[]`.
@@ -1019,7 +1018,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **List predicate callbacks short-circuit in current-shell heredoc loops.** `list.some(callback)`, `list.every(callback)`, `list.find(callback)`, and `list.findIndex(callback)` use direct arrow callbacks with one item parameter or `(item, index)`. Keep callback params in `paramMap`, increment the optional index once per scalar element, and avoid pipeline loops when state must persist inside the generated predicate loop. `find()` must require the nullish runtime helper and initialize its result to `_BESHT_NULLISH_SENTINEL`; no-match must compose with `??`. Nested-list element decoding is not part of these scalar predicate methods yet.
 
-**For-of list expression loops run in the current shell.** `for (const move of moves.split("") as string[])` uses a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist.
+**List expression loops use `for (... in ...)` and run in the current shell.** `for (const move in moves.split("") as string[])` uses a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist. TypeScript `for...of` is rejected by the parser; keep tests and docs on the Besht `in` syntax.
 
 **Optional chaining uses flags on existing postfix AST nodes.** `IndexExpr`, `PropertyExpr`, and `MethodCallExpr` have `Optional bool`; keep all AST walkers descending into their receivers, indexes, and arguments. Codegen emits POSIX shell that stores the receiver once, compares it with `_BESHT_NULLISH_SENTINEL`, and returns that same sentinel on short-circuit so `??` can distinguish nullish from `""`, `0`, and `false`. Optional chaining guards nullish receivers only; do not add runtime shape/type checks. General `fn?.()`, `obj.method?.()`, and optional assignment targets remain unsupported.
 

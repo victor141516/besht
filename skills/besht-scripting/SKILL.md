@@ -285,7 +285,7 @@ let labels = cleaned
     .join(", ")
 ```
 
-`Array.from({ length })` creates `[0, 1, ... length - 1]`. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` is statement-only, takes a direct arrow callback with `(item)` or `(item, index)`, compiles static scalar receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Defer general arrow function values.
+`Array.from({ length })` differs from JavaScript: it creates `[0, 1, ... length - 1]` and does not support general iterables or mapper callbacks. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` is statement-only, takes a direct arrow callback with `(item)` or `(item, index)`, compiles static scalar receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Defer general arrow function values.
 
 Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants. Unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold from compiler-managed static object metadata; mutated or dynamic objects keep metadata-backed output so assignments stay visible.
 
@@ -345,9 +345,9 @@ function showKeys(obj: object): string[] {
 }
 ```
 
-`Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. Unmutated named object key lists, static-scalar value and entry lists, static-key `Object.hasOwn()` calls, and safe direct reads of scalar properties from static object literal bindings compile to constants. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct shell tests. Non-boolean property conditions keep JavaScript-style truthiness. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current list representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. These helpers do not add a runtime helper library. `process.env` is not enumerable; read individual variables with `process.env.NAME`.
+`Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. This differs from JavaScript runtime reflection: Besht uses compiler-managed object metadata, object keys must contain only letters, numbers, and `_`, and `process.env` is not enumerable. Unmutated named object key lists, static-scalar value and entry lists, static-key `Object.hasOwn()` calls, and safe direct reads of scalar properties from static object literal bindings compile to constants. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct shell tests. Non-boolean property conditions keep JavaScript-style truthiness. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current list representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. These helpers do not add a runtime helper library.
 
-`JSON.stringify(value)` encodes strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when the program is compiled with `--opt-use-jq`. Generated JSON code invokes `jq`, and the runtime self-check verifies `jq` exists only when JSON code is emitted.
+`JSON.stringify(value)` differs from JavaScript: it encodes only strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects, requires `--opt-use-jq`, and invokes `jq` in generated code. The runtime self-check verifies `jq` exists only when JSON code is emitted.
 
 ```ts
 console.log(JSON.stringify({ id: 7, name: "Ada", active: true }))
@@ -628,12 +628,14 @@ for (f in files) {
   $("echo", f).run();
 }
 
-for (let f of files) {
+for (let f in files) {
   $("echo", f).run();
 }
 
-for (f of files) $("echo", f).run()
+for (f in files) $("echo", f).run()
 ```
+
+TypeScript `for...of` loops are not supported.
 
 Static scalar list expressions, static scalar `Array.of(...)` calls, static `Array.from({ length: N })` calls, and variables bound to them compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
 
@@ -736,7 +738,7 @@ Scalar `list.toString()` is supported as comma-join output; nested-list JavaScri
 
 Static scalar list literals and list-returning method chains over static scalar lists (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the generated `printf` builder.
 
-Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder.
+Static scalar `Array.of(...)` calls and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder. Besht `Array.from({ length })` creates a numeric range and does not support JavaScript's general iterable or mapper forms.
 
 Static string literals, variables bound to static string literals, static scalar list expressions, and variables bound to static scalar lists compile `.length` properties to numeric constants; dynamic lengths use POSIX `wc`.
 

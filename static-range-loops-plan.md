@@ -5,7 +5,7 @@
 Small Besht script:
 
 ```ts
-for (i of Besht.iter.range(1, 3)) {
+for (i in Besht.iter.range(1, 3)) {
     console.log(i)
 }
 ```

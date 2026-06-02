@@ -33,13 +33,18 @@ func expectTypes(t *testing.T, toks []lexer.Token, want ...lexer.TokenType) {
 }
 
 func TestLexer_Keywords(t *testing.T) {
-	toks := tokenize(t, "let function export import from return if else for in of while try catch true false class new this static")
+	toks := tokenize(t, "let function export import from return if else for in while try catch true false class new this static")
 	expectTypes(t, toks,
 		lexer.TokLet, lexer.TokFunction, lexer.TokExport, lexer.TokImport, lexer.TokFrom,
-		lexer.TokReturn, lexer.TokIf, lexer.TokElse, lexer.TokFor, lexer.TokIn, lexer.TokOf,
+		lexer.TokReturn, lexer.TokIf, lexer.TokElse, lexer.TokFor, lexer.TokIn,
 		lexer.TokWhile, lexer.TokTry, lexer.TokCatch, lexer.TokTrue, lexer.TokFalse,
 		lexer.TokClass, lexer.TokNew, lexer.TokThis, lexer.TokStatic,
 	)
+}
+
+func TestLexer_OfIsIdentifier(t *testing.T) {
+	toks := tokenize(t, "of")
+	expectTypes(t, toks, lexer.TokIdent)
 }
 
 func TestLexer_TypeKeywords(t *testing.T) {

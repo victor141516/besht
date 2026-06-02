@@ -60,7 +60,9 @@ function moveReno(board: Board, moves: Moves): Result {
   const game = new Game(board)
   let result: Result = 'fail'
 
-  for (const move of moves.split('') as Direction[]) {
+  const moveList = moves.split('') as Direction[]
+  for (let moveIndex = 0; moveIndex < moveList.length; moveIndex++) {
+    const move = moveList[moveIndex]
     const nextPos = game.getNextPosition(move)
     const cell = game.getCellAt(nextPos)
 
