@@ -32,6 +32,10 @@ When a user mentions something that would be a good future improvement but isn't
 >
 > Should I add it?
 
+## Ongoing Skill Improvement Loop
+
+`todo.md` contains the canonical, never-ending process for improving `skills/besht-scripting/SKILL.md` through no-hints validation agents. When continuing that work, read the todo entry first, then use this AGENTS.md file for compiler internals, pitfalls, branch workflow, and test expectations. Keep the skill file itself limited to user-facing Besht syntax and practical examples; put validation process notes in `todo.md` and AGENTS.md.
+
 ---
 
 ## Type Checking Policy

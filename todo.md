@@ -4,6 +4,65 @@ Items here are not scheduled. They were identified during development and saved 
 
 ---
 
+## Never-ending Besht scripting skill improvement loop
+
+**Status: ongoing forever.** `skills/besht-scripting/SKILL.md` is never "done". It should keep improving as the compiler grows, as agents find new awkward translations, and as more idiomatic Besht patterns become possible. A streak of clean no-hints validation runs is useful evidence for one period of work, but it is not a permanent completion condition.
+
+The purpose of this loop is to make the Besht scripting skill strong enough that a fresh agent can write clean, valid, idiomatic Besht by reading the skill file alone. The evaluator must not teach the validation agent the answer through the prompt.
+
+### Loop to repeat
+
+1. Start from the current compiler, README.md, AGENTS.md, node-eq fixtures, and `skills/besht-scripting/SKILL.md`; treat those files as authoritative over memory.
+2. Pick one feature family or idiom at a time. Use the compiler and tests to understand the real supported language surface before designing the validation task.
+3. Create a small non-mutating shell-style source script for that feature family. Keep it realistic enough to tempt shell-shaped translation, but safe to run repeatedly.
+4. Spawn a fresh agent thread. Tell it only to read `skills/besht-scripting/SKILL.md` and translate the script into Besht. Do not mention the expected APIs, shortcuts, pitfalls, or desired implementation shape.
+5. Review the generated Besht before compiling it. Look for raw shell hacks, injected shell strings, avoidable `$("sh", "-c", ...)`, manual `cd`, manual env prefixes, copied shell parser loops, command pipelines over static data, missing `.run()`, double-run command objects, or less natural patterns when Besht has native support.
+6. If the generated Besht is not clean, update `skills/besht-scripting/SKILL.md` with concise user-facing guidance and examples. Keep compiler internals, node-eq details, and agent workflow details out of the skill file; put those in AGENTS.md and this todo entry instead.
+7. Add or update a paired node-eq fixture when the lesson is worth preserving. Pair the original shell-style script with an idiomatic `.bsh` script so future compare runs guard the behavior and style.
+8. Compile and compare the generated/fixture Besht against the original shell behavior. Use `./node-eq/compare ...` plus a direct shell-vs-compiled diff when the original shell source is saved beside the fixture.
+9. Run the relevant gates before committing. For broader or compiler-touching changes, run `make build`, `make test`, and full `./node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`.
+10. Commit the iteration on a feature branch. Do not merge to master without explicit user approval.
+11. Repeat with a different feature family. Even after several excellent outputs in a row, keep this item open because future compiler changes, new APIs, and new agent failure modes will create more opportunities.
+
+### Validation prompt template
+
+Keep prompts minimal and no-hints:
+
+````text
+Do not edit any files. Read `skills/besht-scripting/SKILL.md`, then translate the shell script below into a Besht `.bsh` script. Return the Besht code and a short note about assumptions.
+
+```sh
+# shell script here
+```
+````
+
+Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Besht.args`", "avoid awk", or "use Object.entries". Those facts must come from the skill file, otherwise the run validates the prompt rather than the skill.
+
+### Existing guardrail fixtures
+
+- `node-eq/tests/commands/skill_pipeline_idioms.*`: command expressions, pipes, redirects, `.env()`, `.workdir()`, raw patterns, and exit-code-gated command chains.
+- `node-eq/tests/language/callbacks/skill_native_data_idioms.*`: translating static text/number pipelines into native lists, callbacks, string transforms, joins, reductions, and indexed `forEach`.
+- `node-eq/tests/commands/skill_args_env_predicates.*`: translating shell argument parsers, environment defaults, file predicates, and string predicates into `Besht.args`, `process.env`, `Besht.fs`, and `Besht.strings`.
+- `node-eq/tests/language/objects/skill_object_data_idioms.*`: translating static delimiter-separated records into objects, callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`.
+
+### Feature families to keep probing
+
+- Commands: pipelines, redirects, stderr/stdout capture, `.exitCode()`, `.clone()`, command spreading, raw patterns, and avoiding shell injection.
+- Script interface: args parsing, `--`, empty arguments, `process.env.NAME ?? fallback`, `Besht.fs.*`, `Besht.strings.*`, and `process.exit()`.
+- In-memory data: list methods, callbacks, reduction, `forEach`, static transforms, `Set<T>`, object literals, dynamic keys, object helpers, optional chaining, and JSON output.
+- Control flow: `if`/`else`, `switch`, loops, `break`/`continue`, `try`/`catch`, command failure handling, and status values.
+- Modules and declarations: imports, `.d.bsh`, shell imports with assertions, split output, exported values, default exports, and TypeScript import fallback flags.
+- Classes: constructors, instance/static properties, methods, getters/setters, `this`, and unsupported inheritance/modifier boundaries.
+- New compiler work: every new language feature, flag, optimization, or pitfall should get at least one no-hints skill validation slice if it affects how users write Besht.
+
+### What "good" means
+
+Good generated Besht should compile, match the source script behavior, and look like natural Besht rather than transliterated shell. It should prefer compiler-supported language constructs over shell-shaped workarounds, but it should still use external commands when the task genuinely depends on external tools or external data.
+
+This process intentionally has no final checkbox. The practical stopping point for a work session is a documented, tested, committed improvement plus a note about what feature family should be probed next.
+
+---
+
 ## Standard-library namespace and JS-style API surface
 
 **Status: breaking cleanup implemented.** The user-facing standard-library surface is now the canonical TypeScript/JavaScript-shaped API plus Besht-specific helpers under `Besht.*`.

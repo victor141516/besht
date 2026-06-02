@@ -1122,3 +1122,7 @@ make cover
 make cover-html
 open coverage.html
 ```
+
+## Maintaining the Besht scripting skill
+
+`todo.md` documents the ongoing loop for improving `skills/besht-scripting/SKILL.md` with no-hints validation agents and node-eq guardrail fixtures. That process is intentionally never-ending: new compiler features, new idioms, and new agent failure modes should keep feeding small skill-improvement iterations.
