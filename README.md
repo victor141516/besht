@@ -92,7 +92,7 @@ Files use the `.bsh` extension.
 
 - Type annotations and `as` assertions are accepted for TypeScript-compatible syntax, editor support, and occasional compiler representation hints. They never validate values or produce type mismatch errors.
 - Template literals support `${expr}`, not just `${name}`.
-- `for (item of items)` and `for (let item of items)` are accepted as aliases for `for (item in items)`.
+- TypeScript `for...of` loops are not supported. Use Besht list loops with `for (item in items)` or `for (let item in items)`.
 - Ternary expressions `cond ? a : b` and nullish coalescing `value ?? fallback` are supported.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
@@ -114,15 +114,15 @@ Files use the `.bsh` extension.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
 - Static scalar list literals and list-returning method chains over static scalar lists (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive lists keep the `printf` builder.
-- Static scalar `Array.of(...)` calls and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
+- Static scalar `Array.of(...)` calls and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
 - Static string literals, variables bound to static string literals, static scalar list expressions, and variables bound to static scalar lists compile `.length` properties to numeric constants; dynamic lengths keep the POSIX `wc` path.
-- `for (... of [...])` and loops over static scalar list expressions or variables bound to them compile to compact shell `for` loops when values do not contain newlines; dynamic lists keep the newline-safe read loop.
+- `for (... in [...])` and loops over static scalar list expressions or variables bound to them compile to compact shell `for` loops when values do not contain newlines; dynamic lists keep the newline-safe read loop.
 - Static scalar list indexes with known in-range integer indexes and static nested-list indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row path.
 - Static scalar list literals and variables bound to static scalar lists fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
 - Static scalar list literals and variables bound to static scalar lists fold `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles to constants; dynamic searches keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold from compiler-managed metadata.
 - Direct reads of scalar properties from static object literal bindings compile to constants when the object is not assigned, computed-assigned, aliased, or passed to a function.
-- Object literals compile to per-property shell variables; `Object.keys(obj)` returns known object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership. `JSON.stringify(value)` is available when compiling with `--opt-use-jq`.
+- Object literals compile to per-property shell variables; `Object.keys(obj)` returns known compiler-managed object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership. `JSON.stringify(value)` is available for scalar Besht values when compiling with `--opt-use-jq`.
 - Static scalar list destructuring over literals and variables bound to them emits direct assignments; dynamic destructuring keeps the temp-and-`sed` path.
 - Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct `= 1` shell tests. Non-boolean property conditions keep generic JavaScript-style truthiness.
 - Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters.
@@ -143,9 +143,9 @@ Files use the `.bsh` extension.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
 - When the runtime preamble is empty, generated shell uses a single blank separator between the header and the first statement.
 - Semicolons are optional (only required inside `for` headers).
-- `Array.from({ length })` creates a numeric list from `0` to `length - 1`; `Array.of(...)` creates a list from the given values; `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
-- `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use compiler-managed object key metadata and do not emit runtime helpers.
-- `JSON.stringify(value)` is opt-in through `--opt-use-jq`; generated scripts then require `jq` only when JSON code is emitted.
+- `Array.from({ length })` differs from JavaScript: it creates the numeric list `0` through `length - 1` and does not support general iterables or mapper callbacks. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
+- `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` differ from JavaScript reflection: they use compiler-managed object key metadata, require Besht-compatible keys, and do not emit runtime helpers.
+- `JSON.stringify(value)` differs from JavaScript: it is opt-in through `--opt-use-jq`, invokes `jq` in generated code, and only supports strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects.
 - `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
 - Arrow callbacks support expression and block bodies for list `.map()`, `.reduce()`, and statement-position `.forEach()`; `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, and `.forEach()` callbacks may also receive a zero-based index parameter.
 - Generated shell elides string runtime helpers unless one-argument string `.includes()`, `.startsWith()`, or `.endsWith()` actually needs them.
@@ -371,12 +371,14 @@ for (fruit in fruits) {
   $("echo", fruit).run();
 }
 
-for (let fruit of fruits) {
+for (let fruit in fruits) {
   $("echo", fruit).run();
 }
 
-for (fruit of fruits) $("echo", fruit).run()
+for (fruit in fruits) $("echo", fruit).run()
 ```
+
+TypeScript `for...of` is not supported.
 
 **For — command output:**
 
@@ -563,7 +565,7 @@ function showKeys(obj: object): string[] {
 ```
 
 Static and computed object keys must contain only letters, numbers, and `_`.
-`Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return known keys, scalar values, or `[key, value]` rows in insertion order and include aliases, object parameters, later `obj.prop = value`, and `obj[key] = value` additions. Inline static scalar object literals compile these calls to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold to constants. Statically known boolean values are rendered as `true`/`false` in values and entries output. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current `string[]` and packed `string[][]` representations cannot preserve deeper nested values. `Object.hasOwn(obj, key)` checks exact key membership against the same metadata and returns `false` for dynamic keys that are not valid Besht object keys. These helpers do not emit a runtime helper library. `process.env` is not enumerable; access individual variables with `process.env.NAME`.
+`Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return known keys, scalar values, or `[key, value]` rows in insertion order and include aliases, object parameters, later `obj.prop = value`, and `obj[key] = value` additions. This differs from JavaScript's runtime reflection over arbitrary enumerable own properties: Besht uses compiler-managed object metadata, static and computed keys must contain only letters, numbers, and `_`, and `process.env` is not enumerable. Inline static scalar object literals compile these calls to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold to constants. Statically known boolean values are rendered as `true`/`false` in values and entries output. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current `string[]` and packed `string[][]` representations cannot preserve deeper nested values. `Object.hasOwn(obj, key)` checks exact key membership against the same metadata and returns `false` for dynamic keys that are not valid Besht object keys. These helpers do not emit a runtime helper library.
 
 ### Classes
 
@@ -661,6 +663,8 @@ matrix[0].length; // row length
 const [row, col] = [1, 2]; // tuple/list destructuring, direct assignments for static scalar lists
 let maybe = matrix?.[row]?.[col] ?? "missing"
 ```
+
+`Array.from({ length })` is a Besht-specific numeric range factory. Unlike JavaScript, it does not create an array of `undefined` values and does not accept arbitrary iterables or mapper callbacks.
 
 `list.toString()` is currently a scalar-list API slice. JavaScript nested-list flattening for `string[][]` and packed row lists is not implemented.
 
@@ -829,6 +833,7 @@ Array helpers:
 | `Array.of(a, b, ...)`        | Create a list from the given values          |
 | `Array.isArray(value)`       | Static predicate for compiler-known list values |
 
+`Array.from({ length })` is intentionally different from JavaScript: Besht creates a numeric list from `0` through `length - 1` and does not support general iterables or mapper callbacks.
 `Array.isArray()` is evaluated from Besht's inferred representations. It returns true for expressions the compiler knows are lists and false otherwise; it does not add runtime shape metadata or dynamic JavaScript-style inspection.
 
 Object helpers:
@@ -840,13 +845,15 @@ Object helpers:
 | `Object.entries(obj)`    | Return object `[key, value]` rows as a `string[][]` |
 | `Object.hasOwn(obj, key)` | Return whether a compiler-managed object has an exact key |
 
+These object helpers are metadata-backed Besht APIs, not general JavaScript reflection over arbitrary runtime objects. Keys must be valid Besht object keys, and `process.env` is not enumerable.
+
 JSON helper:
 
 | Function | Description |
 | -------- | ----------- |
 | `JSON.stringify(value)` | Encode strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when compiled with `--opt-use-jq` |
 
-`JSON.stringify()` intentionally requires the `--opt-use-jq` compiler flag. With that flag, generated JSON code invokes `jq` and the runtime self-check verifies `jq` is available whenever JSON code is emitted. Without the flag, compiling a program that calls `JSON.stringify()` is an error. `JSON.parse()` is not implemented.
+`JSON.stringify()` intentionally differs from JavaScript. It requires the `--opt-use-jq` compiler flag, invokes `jq` in generated code, and supports only strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects. Without the flag, compiling a program that calls `JSON.stringify()` is an error. `JSON.parse()` is not implemented.
 
 ```ts
 console.log(JSON.stringify({ id: 7, name: "Ada", active: true }))

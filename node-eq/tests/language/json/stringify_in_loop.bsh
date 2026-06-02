@@ -1,5 +1,6 @@
 // besht-compile-flags: --opt-use-jq
 let values: string[] = ["a", "b"]
-for (let value of values) {
+for (let valueIndex = 0; valueIndex < values.length; valueIndex++) {
+  let value = values[valueIndex]
   console.log(JSON.stringify(value))
 }

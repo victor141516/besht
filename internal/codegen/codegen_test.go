@@ -366,17 +366,17 @@ for (f in files) {
 	assertContains(t, out, `done`)
 }
 
-func TestCodegen_ForOfList(t *testing.T) {
+func TestCodegen_ForInListBareVariable(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
-for (f of files) {
+for (f in files) {
     $("echo", f).run()
 }`)
 	assertContains(t, out, `for f in 'a' 'b'; do`)
 }
 
-func TestCodegen_ForLetOfList(t *testing.T) {
+func TestCodegen_ForLetInList(t *testing.T) {
 	out := compile(t, `let files: list<string> = ["a", "b"]
-for (let f of files) {
+for (let f in files) {
     $("echo", f).run()
 }`)
 	assertContains(t, out, `for f in 'a' 'b'; do`)
@@ -389,7 +389,7 @@ while (true) {
     files = files.push("c")
     break
 }
-for (let f of files) {
+for (let f in files) {
     $("echo", f).run()
 }`)
 	assertContains(t, out, `while IFS= read -r`)
@@ -1574,7 +1574,7 @@ let count = "a,b,c".split(",").length`)
 }
 
 func TestCodegen_StaticStringSplitForLoop(t *testing.T) {
-	out := compile(t, `for (part of "a,b,c".split(",")) {
+	out := compile(t, `for (part in "a,b,c".split(",")) {
     console.log(part)
 }`)
 	assertContains(t, out, `for part in 'a' 'b' 'c'; do`)
@@ -1596,7 +1596,7 @@ let count: number = csv.split(sep).length`)
 func TestCodegen_StaticStringVariableSplitForLoop(t *testing.T) {
 	out := compile(t, `let csv: string = "a,b,c"
 let sep: string = ","
-for (part of csv.split(sep)) {
+for (part in csv.split(sep)) {
     console.log(part)
 }`)
 	assertContains(t, out, `for part in 'a' 'b' 'c'; do`)
@@ -1918,7 +1918,7 @@ let item = xs.concat(["c"])[2]
 let bound = xs.concat(["c"])
 xs.unshift("z")
 let mutatedJoined = xs.join(",")
-for (value of xs.concat(["d"])) {
+for (value in xs.concat(["d"])) {
     console.log(value)
 }`)
 	assertContains(t, out, `inlineJoined='a,b,c'`)
@@ -2949,10 +2949,10 @@ func TestCodegen_ArrayOf(t *testing.T) {
 func TestCodegen_StaticArrayFactories(t *testing.T) {
 	out := compile(t, `let ofValues = Array.of("a", "b", "c")
 let indexes = Array.from({ length: 3 })
-for (value of Array.of("x", "y")) {
+for (value in Array.of("x", "y")) {
     console.log(value)
 }
-for (i of Array.from({ length: 3 })) {
+for (i in Array.from({ length: 3 })) {
     console.log(i)
 }`)
 	assertContains(t, out, "ofValues='a\nb\nc'")
@@ -3023,7 +3023,7 @@ let hasName = Object.hasOwn(user, "name")
 let missing = Object.hasOwn(user, "missing")
 let invalid = Object.hasOwn(user, "bad-key")
 console.log(Object.hasOwn(user, "active"))
-for (key of Object.keys(user)) {
+for (key in Object.keys(user)) {
     console.log(key)
 }`)
 	assertContains(t, out, "keys='id\nname\nactive'")
@@ -3057,10 +3057,10 @@ func TestCodegen_StaticNamedObjectEntries(t *testing.T) {
 	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
 let entries = Object.entries(user)
 let count = Object.entries(user).length
-for (entry of Object.entries(user)) {
+for (entry in Object.entries(user)) {
     console.log(entry[0] + "=" + entry[1])
 }
-for (entry of entries) {
+for (entry in entries) {
     console.log(entry[0] + "=" + entry[1])
 }`)
 	assertContains(t, out, "entries='id\0371\nname\037Ada\nactive\037true'")
@@ -3093,7 +3093,7 @@ func TestCodegen_StaticNamedObjectValues(t *testing.T) {
 let values = Object.values(user)
 let count = Object.values(user).length
 let joined = Object.values(user).join(",")
-for (value of Object.values(user)) {
+for (value in Object.values(user)) {
     console.log(value)
 }`)
 	assertContains(t, out, "values='1\nAda\ntrue'")
@@ -3169,7 +3169,7 @@ let values = Object.values({ name: "Ada", active: true })
 let entries = Object.entries({ name: "Ada", active: true })
 let yes = Object.hasOwn({ name: "Ada", active: true }, "active")
 let no = Object.hasOwn({ name: "Ada", active: true }, "missing")
-for (key of Object.keys({ name: "Ada", active: true })) {
+for (key in Object.keys({ name: "Ada", active: true })) {
     console.log(key)
 }`)
 	assertContains(t, out, "keys='name\nactive'")
@@ -3425,7 +3425,7 @@ console.log(MathUtils.round(2.7))`)
 	assertContains(t, out, `$(MathUtils__round 2.7)`)
 }
 
-func TestCodegen_TypeScriptClassStaticRecordAndForOfState(t *testing.T) {
+func TestCodegen_TypeScriptClassStaticRecordAndLoopState(t *testing.T) {
 	out := compile(t, `function run(moves: string): string {
     class Game {
         private static Deltas: Record<string, [number, number]> = { U: [-1, 0] }
@@ -3437,7 +3437,7 @@ func TestCodegen_TypeScriptClassStaticRecordAndForOfState(t *testing.T) {
     }
     let result = "fail"
     let game = new Game()
-    for (const move of moves.split("") as string[]) {
+    for (const move in moves.split("") as string[]) {
         const next = game.getNextPosition(move)
         result = "success"
         break

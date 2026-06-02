@@ -9,7 +9,7 @@ let csv: string = "a,b,c"
 let sep: string = ","
 let parts: list<string> = csv.split(sep)
 console.log(parts.length)
-for (part of csv.split(sep)) {
+for (part in csv.split(sep)) {
     console.log(part)
 }
 ```
@@ -22,7 +22,7 @@ sep=','
 parts=$(printf '%s' "$csv" | tr '$sep' '\n')
 ```
 
-The `for-of` expression over `csv.split(sep)` also currently falls through to the generic method path and errors with `unknown command method "split"`.
+The list-loop expression over `csv.split(sep)` also currently falls through to the generic method path and errors with `unknown command method "split"`.
 
 A hand-written shell script would use a constant newline-backed value and a compact word loop:
 
@@ -44,12 +44,12 @@ The compiler already folds inline static ASCII string literal `.split()` calls. 
 
 - Convert static split detection from a literal-only helper to a generator-aware helper.
 - Resolve both the `.split()` receiver and separator with `staticASCIIStringExprValue`.
-- Reuse the new helper in static list length, list binding, assignment emission, for-of compact loops, and direct expression generation.
+- Reuse the new helper in static list length, list binding, assignment emission, compact list loops, and direct expression generation.
 - Preserve fallback behavior for control-flow reassigned variables, non-ASCII receivers/separators, newline-sensitive split results, and dynamic values.
 
 ## Verification
 
-- Add codegen coverage for `csv.split(sep)` assignment, `.length`, and compact `for-of` loops.
+- Add codegen coverage for `csv.split(sep)` assignment, `.length`, and compact list loops.
 - Add fallback coverage for control-flow reassigned receivers.
 - Add runtime integration coverage for folded variable split output.
 - Update `AGENTS.md`, `README.md`, and `skills/besht-scripting/SKILL.md`.

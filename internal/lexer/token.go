@@ -24,7 +24,6 @@ const (
 	TokElse
 	TokFor
 	TokIn
-	TokOf
 	TokWhile
 	TokSwitch
 	TokCase
@@ -110,7 +109,6 @@ var keywords = map[string]TokenType{
 	"else":      TokElse,
 	"for":       TokFor,
 	"in":        TokIn,
-	"of":        TokOf,
 	"while":     TokWhile,
 	"switch":    TokSwitch,
 	"case":      TokCase,

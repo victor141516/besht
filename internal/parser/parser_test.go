@@ -25,6 +25,17 @@ func expectParseError(t *testing.T, src string) {
 	}
 }
 
+func expectParseErrorContains(t *testing.T, src, want string) {
+	t.Helper()
+	_, err := parser.Parse(src, "test.bsh")
+	if err == nil {
+		t.Fatal("expected parse error, got nil")
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("parse error %q does not contain %q", err.Error(), want)
+	}
+}
+
 func TestParser_LetDecl(t *testing.T) {
 	prog := mustParse(t, `let x: string = "hello"`)
 	if len(prog.Statements) != 1 {
@@ -377,35 +388,16 @@ func TestParser_ForList(t *testing.T) {
 	}
 }
 
-func TestParser_ForOfList(t *testing.T) {
-	prog := mustParse(t, `for (f of files) {
+func TestParser_ForOfListUnsupported(t *testing.T) {
+	expectParseErrorContains(t, `for (f of files) {
     $("echo", f)
-}`)
-	stmt := prog.Statements[0].(*ast.ForStmt)
-	ident, ok := stmt.Iterator.(*ast.IdentExpr)
-	if !ok {
-		t.Fatalf("iterator: expected *ast.IdentExpr, got %T", stmt.Iterator)
-	}
-	if ident.Name != "files" {
-		t.Fatalf("iterator name: got %q", ident.Name)
-	}
+}`, "for...of is not supported")
 }
 
-func TestParser_ForLetOfList(t *testing.T) {
-	prog := mustParse(t, `for (let f of files) {
+func TestParser_ForLetOfListUnsupported(t *testing.T) {
+	expectParseErrorContains(t, `for (let f of files) {
     $("echo", f)
-}`)
-	stmt := prog.Statements[0].(*ast.ForStmt)
-	if stmt.VarName != "f" {
-		t.Fatalf("var name: got %q", stmt.VarName)
-	}
-	ident, ok := stmt.Iterator.(*ast.IdentExpr)
-	if !ok {
-		t.Fatalf("iterator: expected *ast.IdentExpr, got %T", stmt.Iterator)
-	}
-	if ident.Name != "files" {
-		t.Fatalf("iterator name: got %q", ident.Name)
-	}
+}`, "for...of is not supported")
 }
 
 func TestParser_CompoundAssignment(t *testing.T) {
@@ -1261,8 +1253,7 @@ func TestParser_BracketlessDanglingElseBindsInnerIf(t *testing.T) {
 func TestParser_BracketlessLoopBodies(t *testing.T) {
 	prog := mustParse(t, `while (i < 10) i++
 for (let i = 0; i < 3; i++) total += i
-for (item in items) break
-for (let item of items) continue`)
+for (item in items) break`)
 	whileStmt := prog.Statements[0].(*ast.WhileStmt)
 	if len(whileStmt.Body.Statements) != 1 {
 		t.Fatalf("while body statements: got %d", len(whileStmt.Body.Statements))
@@ -1274,10 +1265,6 @@ for (let item of items) continue`)
 	forIn := prog.Statements[2].(*ast.ForStmt)
 	if len(forIn.Body.Statements) != 1 {
 		t.Fatalf("for-in body statements: got %d", len(forIn.Body.Statements))
-	}
-	forOf := prog.Statements[3].(*ast.ForStmt)
-	if len(forOf.Body.Statements) != 1 {
-		t.Fatalf("for-of body statements: got %d", len(forOf.Body.Statements))
 	}
 }
 

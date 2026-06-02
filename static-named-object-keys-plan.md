@@ -10,7 +10,7 @@ console.log(Object.hasOwn(user, "name"))
 console.log(Object.hasOwn(user, "missing"))
 console.log(Object.keys(user).length)
 console.log(Object.keys(user).join(","))
-for (key of Object.keys(user)) {
+for (key in Object.keys(user)) {
     console.log(key)
 }
 ```
@@ -49,12 +49,12 @@ Inline object literal APIs already fold to constants. Named objects keep runtime
 - Track static key sets for object literal bindings.
 - Invalidate that tracked key set on any dot or computed property assignment to the object.
 - Fold `Object.keys(name)` to a static newline-backed list while the key set remains tracked.
-- Fold `Object.keys(name).length`, `.join(...)`, compact `for-of`, and `Object.hasOwn(name, staticKey)` from the same tracked key set.
+- Fold `Object.keys(name).length`, `.join(...)`, compact list loops, and `Object.hasOwn(name, staticKey)` from the same tracked key set.
 - Preserve dynamic metadata paths for mutated objects, object parameters, aliases with unknown slots, and dynamic keys.
 
 ## Verification
 
-- Add codegen coverage for static named object keys, length, join, `for-of`, and `hasOwn`.
+- Add codegen coverage for static named object keys, length, join, compact list loops, and `hasOwn`.
 - Add fallback coverage after a property mutation.
 - Add runtime integration coverage for folded named-object key output.
 - Update `AGENTS.md`, `README.md`, and `skills/besht-scripting/SKILL.md`.

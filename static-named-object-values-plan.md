@@ -8,7 +8,7 @@ Small Besht sample:
 let user = { id: 1, name: "Ada", active: true }
 console.log(Object.values(user).length)
 console.log(Object.values(user).join(","))
-for (value of Object.values(user)) {
+for (value in Object.values(user)) {
     console.log(value)
 }
 ```
@@ -45,12 +45,12 @@ Inline object literal `Object.values()` calls already fold when all values are s
 - Track static scalar value lists for object literal bindings alongside the existing static key tracking.
 - Invalidate that tracked value list on any dot or computed property assignment to the object.
 - Fold `Object.values(name)` to a static newline-backed list while the value list remains tracked.
-- Reuse existing list folding paths for `.length`, `.join(...)`, and compact `for-of`.
+- Reuse existing list folding paths for `.length`, `.join(...)`, and compact list loops.
 - Preserve runtime metadata paths for mutated objects, non-static values, nested/list/object/command/fetch values, object parameters, aliases with unknown slots, and dynamic cases.
 
 ## Verification
 
-- Add codegen coverage for static named object values, length, join, and compact `for-of`.
+- Add codegen coverage for static named object values, length, join, and compact list loops.
 - Add fallback coverage after property mutation.
 - Add runtime integration coverage for folded named-object value output.
 - Update `AGENTS.md`, `README.md`, and `skills/besht-scripting/SKILL.md`.

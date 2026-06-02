@@ -492,7 +492,7 @@ function moveReno(board: Board, moves: Moves): Result {
 
   const game = new Game(board)
   let result: Result = 'fail'
-  for (const move of moves.split('') as Direction[]) {
+  for (const move in moves.split('') as Direction[]) {
     const nextPos = game.getNextPosition(move)
     const cell = game.getCellAt(nextPos)
     if (cell === undefined || cell === '#') { result = 'crash'; break }
@@ -1697,7 +1697,7 @@ console.log(xs.concat(["c"]).join(","))
 console.log(xs.slice(1).join(","))
 console.log(xs.reverse().join(","))
 console.log(xs.push("c").join(","))
-for (value of xs.concat(["c"])) {
+for (value in xs.concat(["c"])) {
     console.log(value)
 }`)
 	want := "a,b,c\nb,c\nb,a\na,b,c\na|b|c\na,b,c\nb\nb,a\na,b,c\na\nb\nc\n"
@@ -1854,10 +1854,10 @@ func TestIntegration_CmdSingleQuoteEscape(t *testing.T) {
 	assertContains(t, out, `'"'"'`)
 }
 
-func TestIntegration_ForLetOfList(t *testing.T) {
+func TestIntegration_ForLetInList(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `let files = ["a", "b"]
-for (let file of files) {
+for (let file in files) {
     $("echo", file).run()
 }
 `)
@@ -2645,10 +2645,10 @@ console.log(("he" + "llo").lastIndexOf("l"))`)
 func TestIntegration_StaticStringSplitRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let parts = "a,b,c".split(",")
 console.log(parts.length)
-for (part of parts) {
+for (part in parts) {
     console.log(part)
 }
-for (ch of "xy".split("")) {
+for (ch in "xy".split("")) {
     console.log(ch)
 }`)
 	want := "3\na\nb\nc\nx\ny\n"
@@ -2662,7 +2662,7 @@ func TestIntegration_StaticStringVariableSplitRuntime(t *testing.T) {
 let sep: string = ","
 let parts: list<string> = csv.split(sep)
 console.log(parts.length)
-for (part of csv.split(sep)) {
+for (part in csv.split(sep)) {
     console.log(part)
 }`)
 	want := "3\na\nb\nc\n"
@@ -2778,10 +2778,10 @@ console.log(empty.join(",") === "")`)
 func TestIntegration_StaticArrayFactoriesRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let indexes = Array.from({ length: 3 })
 console.log(indexes.length)
-for (value of Array.of("x", "y")) {
+for (value in Array.of("x", "y")) {
     console.log(value)
 }
-for (i of indexes) {
+for (i in indexes) {
     console.log(i)
 }`)
 	want := "3\nx\ny\n0\n1\n2\n"
@@ -3007,7 +3007,7 @@ let entries = Object.entries({ name: "Ada", active: true })
 console.log(entries[1][0] + "=" + entries[1][1])
 console.log(Object.hasOwn({ name: "Ada", active: true }, "active"))
 console.log(Object.hasOwn({ name: "Ada", active: true }, "missing"))
-for (key of Object.keys({ name: "Ada", active: true })) {
+for (key in Object.keys({ name: "Ada", active: true })) {
     console.log(key)
 }`)
 	want := "name,active\nAda,true\nactive=true\ntrue\nfalse\nname\nactive\n"
@@ -3022,7 +3022,7 @@ console.log(Object.keys(user).length)
 console.log(Object.keys(user).join(","))
 console.log(Object.hasOwn(user, "name"))
 console.log(Object.hasOwn(user, "missing"))
-for (key of Object.keys(user)) {
+for (key in Object.keys(user)) {
     console.log(key)
 }`)
 	want := "3\nid,name,active\ntrue\nfalse\nid\nname\nactive\n"
@@ -3036,7 +3036,7 @@ func TestIntegration_StaticNamedObjectEntriesRuntime(t *testing.T) {
 let entries = Object.entries(user)
 console.log(Object.entries(user).length)
 console.log(entries[1][0] + "=" + entries[1][1])
-for (entry of Object.entries(user)) {
+for (entry in Object.entries(user)) {
     console.log(entry[0] + "=" + entry[1])
 }`)
 	want := "3\nname=Ada\nid=1\nname=Ada\nactive=true\n"
@@ -3049,7 +3049,7 @@ func TestIntegration_StaticNamedObjectValuesRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let user = { id: 1, name: "Ada", active: true }
 console.log(Object.values(user).length)
 console.log(Object.values(user).join(","))
-for (value of Object.values(user)) {
+for (value in Object.values(user)) {
     console.log(value)
 }`)
 	want := "3\n1,Ada,true\n1\nAda\ntrue\n"
@@ -3075,7 +3075,7 @@ console.log(report())`)
 }
 
 func TestIntegration_StaticListForUsesCompactShellLoop(t *testing.T) {
-	src := `for (name of ["Ada Lovelace", "", "Bob"]) {
+	src := `for (name in ["Ada Lovelace", "", "Bob"]) {
     console.log("[" + name + "]")
 }`
 	out := runCompiledShell(t, src)
@@ -3099,7 +3099,7 @@ func TestIntegration_StaticListForUsesCompactShellLoop(t *testing.T) {
 
 func TestIntegration_StaticListVariableForUsesCompactShellLoop(t *testing.T) {
 	src := `let names = ["Ada Lovelace", "", "Bob"]
-for (name of names) {
+for (name in names) {
     console.log("[" + name + "]")
 }`
 	out := runCompiledShell(t, src)

@@ -8,14 +8,14 @@ let result = $("echo", "hello world")
 console.log(result)
 
 // Pipe chain
-let words = $("printf", "one\ntwo\nthree")
+let words = ($("printf", "one\ntwo\nthree")
     .pipe($("sort"))
     .run()
-    .readStdoutLines()
+    .readStdoutLines()) as string[]
 
-for (let word of words) {
+words.forEach(word => {
     console.log(word)
-}
+})
 
 // stderr null
 let silenced = $("echo", "quiet").stderr("null").run().readStdout()
