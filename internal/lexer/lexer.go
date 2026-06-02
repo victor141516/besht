@@ -281,10 +281,23 @@ func (l *Lexer) writeEscape(sb *strings.Builder, quote rune, decodeUnicode bool)
 	l.advance()
 	escaped := l.advance()
 	switch escaped {
+	case '\n':
+		return nil
+	case '\r':
+		if l.peek() == '\n' {
+			l.advance()
+		}
+		return nil
+	case 'b':
+		sb.WriteByte('\b')
+	case 'f':
+		sb.WriteByte('\f')
 	case 'n':
 		sb.WriteByte('\n')
 	case 't':
 		sb.WriteByte('\t')
+	case 'v':
+		sb.WriteByte('\v')
 	case 'r':
 		sb.WriteByte('\r')
 	case '\\':
@@ -295,15 +308,30 @@ func (l *Lexer) writeEscape(sb *strings.Builder, quote rune, decodeUnicode bool)
 		sb.WriteByte('\'')
 	case '`':
 		sb.WriteByte('`')
+	case 'x':
+		if !decodeUnicode || l.pos+2 > len(l.src) {
+			sb.WriteByte('x')
+			return nil
+		}
+		hex := string(l.src[l.pos : l.pos+2])
+		v, err := strconv.ParseInt(hex, 16, 8)
+		if err != nil {
+			sb.WriteByte('x')
+			return nil
+		}
+		for i := 0; i < 2; i++ {
+			l.advance()
+		}
+		sb.WriteByte(byte(v))
 	case 'u':
 		if !decodeUnicode || l.pos+4 > len(l.src) {
-			sb.WriteString(`\u`)
+			sb.WriteByte('u')
 			return nil
 		}
 		hex := string(l.src[l.pos : l.pos+4])
 		v, err := strconv.ParseInt(hex, 16, 32)
 		if err != nil {
-			sb.WriteString(`\u`)
+			sb.WriteByte('u')
 			return nil
 		}
 		for i := 0; i < 4; i++ {
@@ -314,7 +342,6 @@ func (l *Lexer) writeEscape(sb *strings.Builder, quote rune, decodeUnicode bool)
 		if escaped == quote {
 			sb.WriteRune(escaped)
 		} else {
-			sb.WriteByte('\\')
 			sb.WriteRune(escaped)
 		}
 	}

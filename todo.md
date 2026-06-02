@@ -47,6 +47,7 @@ Remaining future work:
 - Expand object APIs only after preserving the current no-runtime-metadata boundary. Near candidates are `Object.assign()` and `Object.fromEntries()`; nested `Object.values()` / `Object.entries()` support requires a broader object/list representation design.
 - `JSON.stringify()` is implemented as an opt-in jq-backed slice (`--opt-use-jq`) for strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects. `JSON.parse()` remains deferred unless Besht gains a parser or a broader jq-backed JSON design.
 - General callback values and closures remain future work. Current callback lowering is method-specific and compiler-known, including statement-position `forEach()`.
+- Implement JavaScript-compatible nested list `toString()` flattening. Scalar lists already use `join(",")`; nested lists such as `string[][]` and packed row lists should eventually match JavaScript's recursive comma-flattening behavior instead of staying unsupported.
 
 Implementation notes:
 

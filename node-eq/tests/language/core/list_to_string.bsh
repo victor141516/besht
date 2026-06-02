@@ -1,0 +1,4 @@
+let words = ["alpha", "beta", "gamma"]
+console.log(words.toString())
+console.log(words.join(","))
+console.log([1, 2, 3].toString())

@@ -2103,7 +2103,7 @@ func TestIntegration_EscapedDollarLiteral(t *testing.T) {
 console.log(price)
 `)
 	out := compileFile(t, path)
-	assertContains(t, out, `\$5`)
+	assertContains(t, out, `price='costs $5'`)
 }
 
 func TestIntegration_LiteralBacktickAndDollarParen(t *testing.T) {

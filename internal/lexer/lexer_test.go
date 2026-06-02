@@ -74,6 +74,25 @@ func TestLexer_StringEscapes(t *testing.T) {
 	}
 }
 
+func TestLexer_JavaScriptStringEscapes(t *testing.T) {
+	tests := []struct {
+		src  string
+		want string
+	}{
+		{`"\b\f\v\x41"`, "\b\f\vA"},
+		{`'\b\f\v\x42'`, "\b\f\vB"},
+		{`"\q\$"`, "q$"},
+	}
+
+	for _, tt := range tests {
+		toks := tokenize(t, tt.src)
+		expectTypes(t, toks, lexer.TokString)
+		if toks[0].Literal != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.src, toks[0].Literal, tt.want)
+		}
+	}
+}
+
 func TestLexer_StringWithInterpolation(t *testing.T) {
 	toks := tokenize(t, `"Hello ${name}!"`)
 	expectTypes(t, toks, lexer.TokString)
@@ -315,7 +334,7 @@ func TestLexer_RawStringEscapedQuote(t *testing.T) {
 func TestLexer_EscapedDollarInString(t *testing.T) {
 	toks := tokenize(t, `"price is \$5"`)
 	expectTypes(t, toks, lexer.TokString)
-	if toks[0].Literal != `price is \$5` {
+	if toks[0].Literal != `price is $5` {
 		t.Errorf("escaped dollar: got %q", toks[0].Literal)
 	}
 }

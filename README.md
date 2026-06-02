@@ -99,7 +99,7 @@ Files use the `.bsh` extension.
 - Logical operators `&&`, `||`, `!`, and nullish coalescing `??` are supported.
 - Static value-position `||` and `&&` expressions compile to the selected side when the left operand's truthiness is known.
 - Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, `!false`, static comparisons, and variables bound to static boolean expressions render directly as `true`/`false`; `Besht.fs.*` and `Besht.strings.*` predicates also print readable `true`/`false` in console calls. Dynamic boolean console arguments reuse the same shell condition once and print `true`/`false` from it.
-- Strict equality `===` and `!==` compile the same as `==` and `!=`.
+- `===` and `!==` are the supported equality operators. The unsupported `==` and `!=` spellings emit compiler warnings and are treated the same as `===` and `!==`; prefer the strict spellings.
 - Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, and parseable `Number.parseInt()`/`Number.parseFloat()` calls. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static boolean `if` conditions and ternary expressions, including variables bound to static boolean expressions, fold to the selected branch or value; dynamic and control-flow-assigned conditions keep normal shell tests.
@@ -192,9 +192,11 @@ let tmpl: string = `Hello ${name}!`  // template literal — interpolates ${name
 let sum = `sum=${a + b}`             // expressions inside ${...}
 let pattern: string = r"^foo-[0-9]+" // raw string — always single-quoted in sh
 let rawpath = String.raw`C:\temp\new\file.txt` // tagged raw template — backslashes literal
-let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // escape sequences
+let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$ hex:\x41"  // escape sequences
 let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 ```
+
+Both quote styles use JavaScript-style escape processing: `\b`, `\f`, `\n`, `\r`, `\t`, `\v`, `\\`, `\"`, `\'`, `\xHH`, and `\uXXXX` are decoded. Unknown identity escapes such as `\q` behave like JavaScript strings and produce `q`. Use `r"..."` or `String.raw\`...\`` when backslashes must remain literal.
 
 In template literal text, `$` stays literal unless it starts a Besht `${expr}` interpolation. Shell parameter forms such as `$*`, `$?`, and `$$` are emitted as literal text.
 
@@ -393,7 +395,7 @@ for (f in files) {
   if (Besht.strings.isEmpty(f)) {
     continue;
   }
-  if (f == "STOP") {
+  if (f === "STOP") {
     break;
   }
   $("echo", f).run();
@@ -422,8 +424,8 @@ switch (mode) {
 let active = true && !false    // logical AND, NOT
 let either = active || false   // logical OR
 let fallback = maybe ?? "default" // nullish fallback only
-let same = x === y             // strict equality (same as ==)
-let diff = x !== y             // strict inequality (same as !=)
+let same = x === y             // supported equality
+let diff = x !== y             // supported inequality
 let sameTree = draw() === `*
 #`                              // multiline strings compare safely
 
@@ -435,6 +437,8 @@ let count = acc[word] || 0     // returns acc[word] if truthy, else 0
 let port = Besht.args.option("port", "p") ?? "8080"
 let label = maybeName ?? "anonymous"
 ```
+
+Use `===` and `!==` for equality. `==` and `!=` are unsupported spellings: the compiler prints a warning and treats them as `===` and `!==` so runtime behavior stays strict-like.
 
 ### String methods
 
@@ -652,8 +656,8 @@ l.forEach((x, i) => console.log(i.toString() + ":" + x)); // statement-only side
 l.filter(x => x.startsWith("a")); // new list with truthy callback results
 let anyA = l.some(x => x.startsWith("a")); // true if any callback result is truthy; false for an empty list
 let allNamed = l.every(x => x.length > 0); // true if all callback results are truthy; true for an empty list
-let hit = l.find((x, i) => i == 1) ?? "missing"; // first matching element, or nullish when no match
-let at = l.findIndex(x => x == "beta"); // 1, or -1 if no match
+let hit = l.find((x, i) => i === 1) ?? "missing"; // first matching element, or nullish when no match
+let at = l.findIndex(x => x === "beta"); // 1, or -1 if no match
 let copied = [...l, "omega"]; // list spread in list literals
 l.length; // number
 matrix[0][1]; // nested indexing
@@ -685,7 +689,7 @@ Arrow callbacks support both expression-bodied and block-bodied forms for list `
 let names = ["alice", "bob", "anna"]
 let shouted = names.map(name => name.toUpperCase())
 let aNames = shouted.filter(name => name.startsWith("A"))
-let hasAnna = names.some(name => name == "anna")
+let hasAnna = names.some(name => name === "anna")
 let allShort = names.every((name, i) => name.length < 10 && i >= 0)
 let firstB = names.find(name => name.startsWith("b")) ?? "none"
 console.log(aNames.join(","))
@@ -698,7 +702,7 @@ names.forEach((name, i) => {
 
 let typed = names.filter((name: string) => name.includes("a"))
 let labeled = names.map((name, i) => {
-    if (i == 0) return "first:" + name
+    if (i === 0) return "first:" + name
     return i.toString() + ":" + name
 })
 
@@ -846,7 +850,7 @@ JSON helper:
 | -------- | ----------- |
 | `JSON.stringify(value)` | Encode strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when compiled with `--opt-use-jq` |
 
-`JSON.stringify()` intentionally requires the `--opt-use-jq` compiler flag. With that flag, generated JSON code invokes `jq` and the runtime self-check verifies `jq` is available whenever JSON code is emitted. Without the flag, compiling a program that calls `JSON.stringify()` is an error. `JSON.parse()` is not implemented.
+`JSON.stringify()` intentionally requires the `--opt-use-jq` compiler flag. With that flag, generated JSON code invokes `jq` and the runtime self-check verifies `jq` is available whenever JSON code is emitted. Without the flag, compiling a program that calls `JSON.stringify()` is an error. The current supported input slice is strings, numbers, booleans, nullish values, scalar lists, and scalar-valued compiler-managed objects; commands, fetch responses, sets, and nested Besht object/list/set values are rejected until Besht has a broader JSON representation. `JSON.parse()` is not implemented.
 
 ```ts
 console.log(JSON.stringify({ id: 7, name: "Ada", active: true }))
