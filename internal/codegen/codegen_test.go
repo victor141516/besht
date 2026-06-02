@@ -2395,11 +2395,11 @@ func TestCodegen_CmdMultiArgCapture(t *testing.T) {
 func TestCodegen_CmdSafeLiteralArgsUseBareWords(t *testing.T) {
 	out := compile(t, `$("git", "status", "--short").run()
 $("find", ".", "-name", "*.go").run()
-$("sed", r"s/foo/bar/").run()
+$("sed", "s/foo/bar/").run()
 $("if", "value").run()`)
 	assertContains(t, out, `git status --short`)
 	assertContains(t, out, `find . -name '*.go'`)
-	assertContains(t, out, `sed 's/foo/bar/'`)
+	assertContains(t, out, `sed s/foo/bar/`)
 	assertContains(t, out, `'if' value`)
 	assertNotContains(t, out, `'git'`)
 	assertNotContains(t, out, `'--short'`)
@@ -3286,27 +3286,6 @@ func TestCodegen_ListIncludesInCondition(t *testing.T) {
 
 // ── Integration tests for $() ──────────────────────────────────────────────────
 
-func TestCodegen_RawStringSingleQuoted(t *testing.T) {
-	out := compile(t, `let p: string = r"^foo-[0-9]+$"`)
-	assertContains(t, out, `p='^foo-[0-9]+$'`)
-}
-
-func TestCodegen_RawStringDollarSign(t *testing.T) {
-	out := compile(t, `let f: string = r"-cache$"`)
-	assertContains(t, out, `f='-cache$'`)
-}
-
-func TestCodegen_RawStringInCmdArg(t *testing.T) {
-	out := compile(t, `$("grep", "-v", r"-cache$").run()`)
-	assertContains(t, out, `'-cache$'`)
-	assertNotContains(t, out, `"-cache$"`)
-}
-
-func TestCodegen_RawStringRegexInSed(t *testing.T) {
-	out := compile(t, `let r = $("echo", "foo").pipe($("sed", r"s/foo/bar/")).run().readStdout()`)
-	assertContains(t, out, `'s/foo/bar/'`)
-}
-
 func TestCodegen_EscapedDollarInString(t *testing.T) {
 	out := compile(t, `let p: string = "total is \$42"`)
 	assertContains(t, out, `\$42`)
@@ -3335,8 +3314,8 @@ let msg: string = "Hello ${name}!"`)
 	assertNotContains(t, out, `"Hello ${name}!"`)
 }
 
-func TestCodegen_LiteralDollarSingleQuoted(t *testing.T) {
-	out := compile(t, `$("echo", r"cost is $5").run()`)
+func TestCodegen_SingleQuotedStringCmdArg(t *testing.T) {
+	out := compile(t, `$("echo", 'cost is $5').run()`)
 	assertContains(t, out, `'cost is $5'`)
 	assertNotContains(t, out, `"cost is $5"`)
 }

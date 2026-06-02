@@ -139,9 +139,6 @@ func (l *Lexer) nextToken() (Token, error) {
 		case ch == '\'':
 			return l.lexSingleQuotedString(line, col)
 		case ch == '`':
-			if l.hasStringRawTagBefore() {
-				return l.lexRawTemplateLit(line, col)
-			}
 			return l.lexTemplateLit(line, col)
 		case unicode.IsDigit(ch):
 			return l.lexInt(line, col)
@@ -235,33 +232,6 @@ func (l *Lexer) lexTemplateLit(line, col int) (Token, error) {
 	return Token{}, &LexError{File: l.file, Line: line, Column: col, Message: "unterminated template literal"}
 }
 
-func (l *Lexer) hasStringRawTagBefore() bool {
-	i := l.pos - 1
-	for i >= 0 && unicode.IsSpace(l.src[i]) {
-		i--
-	}
-	needle := []rune("String.raw")
-	if i+1 < len(needle) {
-		return false
-	}
-	start := i + 1 - len(needle)
-	return string(l.src[start:i+1]) == string(needle)
-}
-
-func (l *Lexer) lexRawTemplateLit(line, col int) (Token, error) {
-	l.advance()
-	var sb strings.Builder
-	for l.pos < len(l.src) {
-		ch := l.peek()
-		if ch == '`' {
-			l.advance()
-			return l.tok(TokTemplateLit, sb.String(), line, col), nil
-		}
-		sb.WriteRune(l.advance())
-	}
-	return Token{}, &LexError{File: l.file, Line: line, Column: col, Message: "unterminated template literal"}
-}
-
 func (l *Lexer) lexInt(line, col int) (Token, error) {
 	var sb strings.Builder
 	for l.pos < len(l.src) && unicode.IsDigit(l.peek()) {
@@ -328,42 +298,10 @@ func (l *Lexer) lexIdent(line, col int) (Token, error) {
 	}
 	word := sb.String()
 
-	if word == "r" && l.peek() == '"' {
-		return l.lexRawString(line, col)
-	}
-
 	if tt, ok := keywords[word]; ok {
 		return l.tok(tt, word, line, col), nil
 	}
 	return l.tok(TokIdent, word, line, col), nil
-}
-
-func (l *Lexer) lexRawString(line, col int) (Token, error) {
-	l.advance() // consume opening "
-	var sb strings.Builder
-	for l.pos < len(l.src) {
-		ch := l.peek()
-		if ch == '"' {
-			l.advance()
-			return l.tok(TokRawString, sb.String(), line, col), nil
-		}
-		if ch == '\\' {
-			l.advance()
-			escaped := l.advance()
-			switch escaped {
-			case '"':
-				sb.WriteByte('"')
-			case '\\':
-				sb.WriteByte('\\')
-			default:
-				sb.WriteByte('\\')
-				sb.WriteRune(escaped)
-			}
-			continue
-		}
-		sb.WriteRune(l.advance())
-	}
-	return Token{}, &LexError{File: l.file, Line: line, Column: col, Message: "unterminated raw string literal"}
 }
 
 func (l *Lexer) lexSymbol(line, col int) (Token, error) {

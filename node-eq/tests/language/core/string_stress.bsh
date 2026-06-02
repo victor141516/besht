@@ -50,8 +50,8 @@ line one
 line two
 PRINT "still string"
 END`
-const s47 = String.raw`raw-looking path: C:\temp\new\file.txt`
-const s48 = String.raw`raw-looking escapes: \n \t \" \' \u0041`
+const s47 = "path with backslashes: C:\\temp\\new\\file.txt"
+const s48 = "escaped-looking text: \\n \\t \\\" \\' \\u0041"
 const s49 = "not a closing statement: END"
 const s50 = "not a label: start:"
 

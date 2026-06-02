@@ -45,46 +45,6 @@ function stripDeclares(code: string): string {
     .trimStart()
 }
 
-function transformRawStrings(code: string): string {
-  let out = ""
-  let i = 0
-  const ident = /[A-Za-z0-9_$]/
-
-  while (i < code.length) {
-    if (code[i] === "r" && code[i + 1] === "\"" && (i === 0 || (!ident.test(code[i - 1]) && code[i - 1] !== "\"" && code[i - 1] !== "'"))) {
-      i += 2
-      let value = ""
-      while (i < code.length) {
-        const ch = code[i]
-        if (ch === "\"") {
-          i++
-          break
-        }
-        if (ch === "\\") {
-          i++
-          if (i >= code.length) {
-            value += "\\"
-            break
-          }
-          const escaped = code[i]
-          if (escaped === "\"" || escaped === "\\") value += escaped
-          else value += `\\${escaped}`
-          i++
-          continue
-        }
-        value += ch
-        i++
-      }
-      out += JSON.stringify(value)
-      continue
-    }
-    out += code[i]
-    i++
-  }
-
-  return out
-}
-
 function resolveBshImport(source: string, fromFile: string): string | null {
   if (!source.startsWith("./") && !source.startsWith("../")) return null
   const base = resolve(dirname(fromFile), source)
@@ -141,7 +101,7 @@ function materialize(file: string): string {
   materialized.set(absFile, tmpFile)
   tempFiles.push(tmpFile)
 
-  let stripped = transformRawStrings(stripDeclares(readFileSync(absFile, "utf8")))
+  let stripped = stripDeclares(readFileSync(absFile, "utf8"))
   const schema = collectArgSchema(stripped)
   stripped = stripped.replace(/import\s+\{([^}]+)\}\s+from\s+(['"])(\.{1,2}\/[^'"]+\.sh)\2\s+assert\s*\{\s*type\s*:\s*(['"])shell\4\s*\}\s*;?/g, (match, names, _quote, source) => {
     return shellImportBindings(names, source, absFile) ?? match

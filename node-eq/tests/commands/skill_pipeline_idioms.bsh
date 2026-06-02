@@ -4,10 +4,10 @@ if (Besht.strings.isEmpty(root)) {
 }
 
 console.log("--- top go files ---")
-let goFiles: string = $("find", root, "-maxdepth", "2", "-type", "f", "-name", r"*.go")
+let goFiles: string = $("find", root, "-maxdepth", "2", "-type", "f", "-name", '*.go')
   .stderr("null")
-  .pipe($("sed", r"s#^\./##"))
-  .pipe($("grep", "-v", r"/vendor/"))
+  .pipe($("sed", 's#^\./##'))
+  .pipe($("grep", "-v", '/vendor/'))
   .pipe($("sort"))
   .pipe($("head", "-n", "5"))
   .run()
@@ -17,10 +17,10 @@ if (Besht.strings.isNonEmpty(goFiles)) {
 }
 
 console.log("--- markdown mentions ---")
-let markdownMentions: string = $("grep", "-RIn", "Besht", root, r"--include=*.md")
+let markdownMentions: string = $("grep", "-RIn", "Besht", root, '--include=*.md')
   .stderr("null")
   .pipe($("cut", "-d:", "-f1"))
-  .pipe($("sed", r"s#^\./##"))
+  .pipe($("sed", 's#^\./##'))
   .pipe($("sort", "-u"))
   .pipe($("head", "-n", "4"))
   .run()
@@ -44,7 +44,7 @@ if (probe.exitCode() == 0) {
 
 console.log("--- silent count ---")
 console.log(
-  $("find", root, "-type", "f", "-name", r"*.bsh")
+  $("find", root, "-type", "f", "-name", '*.bsh')
     .stderr("null")
     .pipe($("wc", "-l"))
     .pipe($("tr", "-d", " "))

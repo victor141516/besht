@@ -160,7 +160,7 @@ func (v *forEachSurfaceValidator) exprStmt(expr ast.Expression) error {
 
 func (v *forEachSurfaceValidator) expr(expr ast.Expression) error {
 	switch e := expr.(type) {
-	case nil, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.RawStringLit, *ast.TemplateLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.IdentExpr, *ast.UpdateExpr, *ast.ThisExpr:
+	case nil, *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.TemplateLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.IdentExpr, *ast.UpdateExpr, *ast.ThisExpr:
 		return nil
 	case *ast.MethodCallExpr:
 		if e.Method == "forEach" && v.isListValue(e.Receiver) {

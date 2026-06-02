@@ -1159,6 +1159,14 @@ func TestParser_ArrayOfParsesAsBuiltinCall(t *testing.T) {
 	}
 }
 
+func TestParser_RPrefixedStringUnsupported(t *testing.T) {
+	expectParseError(t, `let pattern = r"^foo"`)
+}
+
+func TestParser_StringRawTaggedTemplateUnsupported(t *testing.T) {
+	expectParseError(t, "let path = String.raw`C:\\temp\\file.txt`")
+}
+
 func TestParser_ArrayIsArrayParsesAsBuiltinCall(t *testing.T) {
 	prog := mustParse(t, `let ok = Array.isArray(["a", "b"])`)
 	decl := prog.Statements[0].(*ast.LetDecl)

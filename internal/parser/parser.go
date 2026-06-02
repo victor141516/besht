@@ -165,7 +165,7 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 	case lexer.TokContinue:
 		p.advance()
 		return &ast.ContinueStmt{Pos: p.pos2ast(tok)}, nil
-	case lexer.TokRawString, lexer.TokTemplateLit, lexer.TokDollar, lexer.TokNew, lexer.TokPlusPlus, lexer.TokMinusMinus:
+	case lexer.TokTemplateLit, lexer.TokDollar, lexer.TokNew, lexer.TokPlusPlus, lexer.TokMinusMinus:
 		expr, err := p.parseExpr()
 		if err != nil {
 			return nil, err
@@ -1833,10 +1833,6 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 		p.advance()
 		return &ast.BoolLit{Pos: pos, Value: false}, nil
 
-	case lexer.TokRawString:
-		p.advance()
-		return &ast.RawStringLit{Pos: pos, Value: tok.Literal}, nil
-
 	case lexer.TokTemplateLit:
 		p.advance()
 		return p.parseTemplateLiteral(pos, tok)
@@ -1891,6 +1887,9 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	case lexer.TokIdent, lexer.TokTypeString, lexer.TokTypeNumber, lexer.TokTypeBoolean, lexer.TokTypeStatus, lexer.TokTypeList, lexer.TokTypeArray, lexer.TokFrom:
 		name := tok.Literal
 		p.advance()
+		if name == "r" && p.peekType() == lexer.TokString {
+			return nil, p.errorf(p.peek(), `r-prefixed string syntax is not supported; use a normal quoted string`)
+		}
 		if name == "undefined" {
 			return &ast.UndefinedLit{Pos: pos}, nil
 		}
@@ -1898,10 +1897,7 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 			return &ast.NullLit{Pos: pos}, nil
 		}
 		if name == "String" && p.peekType() == lexer.TokDot && isIdentifierName(p.peekN(1).Type) && p.peekN(1).Literal == "raw" && p.peekN(2).Type == lexer.TokTemplateLit {
-			p.advance()
-			p.advance()
-			tmpl := p.advance()
-			return &ast.RawStringLit{Pos: pos, Value: tmpl.Literal}, nil
+			return nil, p.errorf(p.peekN(1), "String.raw tagged templates are not supported; use a normal quoted string")
 		}
 		if name == "Number" && p.peekType() == lexer.TokDot && isIdentifierName(p.peekN(1).Type) {
 			p.advance()

@@ -36,7 +36,7 @@ Fold static scalar comparisons:
 
 Keep the change conservative:
 
-- Only fold strings, raw strings, no-expression template strings, numbers, booleans, `null`, `undefined`, and erased `as` wrappers.
+- Only fold strings, no-expression template strings, numbers, booleans, `null`, `undefined`, and erased `as` wrappers.
 - Preserve current Besht semantics where strict equality is the same as loose equality.
 - Leave dynamic expressions, function calls, command outputs, lists, objects, and sets on the existing comparison path.
 

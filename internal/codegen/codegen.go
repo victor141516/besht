@@ -888,7 +888,7 @@ func walkArgsExpr(expr ast.Expression, visit func(ast.Expression)) {
 	}
 	visit(expr)
 	switch e := expr.(type) {
-	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.RawStringLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.IdentExpr, *ast.ThisExpr, *ast.UpdateExpr:
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.BoolLit, *ast.UndefinedLit, *ast.NullLit, *ast.IdentExpr, *ast.ThisExpr, *ast.UpdateExpr:
 		return
 	case *ast.TemplateLit:
 		for _, expr := range e.Exprs {
@@ -1055,7 +1055,7 @@ func (g *Generator) inferExprType(expr ast.Expression) *ast.Type {
 		return t
 	}
 	switch e := expr.(type) {
-	case *ast.StringLit, *ast.RawStringLit, *ast.TemplateLit:
+	case *ast.StringLit, *ast.TemplateLit:
 		return typeString
 	case *ast.UndefinedLit, *ast.NullLit:
 		return typeString
@@ -1623,8 +1623,6 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	} else if _, isStr := s.Value.(*ast.StringLit); isStr {
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeString}
 	} else if _, isTmpl := s.Value.(*ast.TemplateLit); isTmpl {
-		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeString}
-	} else if _, isRaw := s.Value.(*ast.RawStringLit); isRaw {
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeString}
 	} else if _, isInt := s.Value.(*ast.IntLit); isInt {
 		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeNumber}
@@ -2823,11 +2821,6 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 				return nil, false
 			}
 			words = append(words, shellQuote(e.Value))
-		case *ast.RawStringLit:
-			if strings.Contains(e.Value, "\n") {
-				return nil, false
-			}
-			words = append(words, shellQuote(e.Value))
 		case *ast.IntLit:
 			words = append(words, shellQuote(strconv.FormatInt(e.Value, 10)))
 		case *ast.FloatLit:
@@ -2848,8 +2841,6 @@ func staticForListWords(list *ast.ListLit) ([]string, bool) {
 func staticScalarValue(expr ast.Expression) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.StringLit:
-		return e.Value, true
-	case *ast.RawStringLit:
 		return e.Value, true
 	case *ast.IntLit:
 		return strconv.FormatInt(e.Value, 10), true
@@ -3240,8 +3231,6 @@ func staticStringByteLength(expr ast.Expression) (int, bool) {
 	switch e := expr.(type) {
 	case *ast.StringLit:
 		return len(e.Value), true
-	case *ast.RawStringLit:
-		return len(e.Value), true
 	case *ast.TemplateLit:
 		if len(e.Exprs) == 0 {
 			return len(strings.Join(e.Parts, "")), true
@@ -3343,8 +3332,6 @@ func staticASCIIStringValue(expr ast.Expression) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.StringLit:
 		value = e.Value
-	case *ast.RawStringLit:
-		value = e.Value
 	case *ast.TemplateLit:
 		if len(e.Exprs) != 0 {
 			return "", false
@@ -3429,8 +3416,6 @@ func clampInt(n, min, max int) int {
 func staticStringText(expr ast.Expression) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.StringLit:
-		return e.Value, true
-	case *ast.RawStringLit:
 		return e.Value, true
 	case *ast.TemplateLit:
 		if len(e.Exprs) == 0 {
@@ -4465,8 +4450,6 @@ func stringLiteralValue(expr ast.Expression) (string, bool) {
 		return stringLiteralValue(e.Expr)
 	case *ast.StringLit:
 		return e.Value, true
-	case *ast.RawStringLit:
-		return e.Value, true
 	}
 	return "", false
 }
@@ -4741,8 +4724,6 @@ func (g *Generator) staticObjectKeyExpr(expr ast.Expression) (string, bool) {
 		return g.staticObjectKeyExpr(e.Expr)
 	case *ast.StringLit:
 		return e.Value, true
-	case *ast.RawStringLit:
-		return e.Value, true
 	case *ast.IdentExpr:
 		value, ok := g.stringConstMap[g.resolveVarName(e.Name)]
 		return value, ok
@@ -4755,8 +4736,6 @@ func (g *Generator) staticObjectHasOwnKeyExpr(expr ast.Expression) (string, bool
 	case *ast.AsExpr:
 		return g.staticObjectHasOwnKeyExpr(e.Expr)
 	case *ast.StringLit:
-		return e.Value, true
-	case *ast.RawStringLit:
 		return e.Value, true
 	case *ast.IdentExpr:
 		if g.controlAssigned[e.Name] {
@@ -4936,8 +4915,6 @@ func (g *Generator) genJSONStringify(expr ast.Expression) (string, error) {
 func jsonExprPos(expr ast.Expression) ast.Pos {
 	switch e := expr.(type) {
 	case *ast.StringLit:
-		return e.Pos
-	case *ast.RawStringLit:
 		return e.Pos
 	case *ast.TemplateLit:
 		return e.Pos
@@ -5380,8 +5357,6 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 	switch e := expr.(type) {
 	case *ast.StringLit:
 		return shellQuote(e.Value), nil
-	case *ast.RawStringLit:
-		return shellQuote(e.Value), nil
 	case *ast.TemplateLit:
 		return g.genTemplateLiteral(e)
 	case *ast.IntLit:
@@ -5515,7 +5490,7 @@ func (g *Generator) staticNullishState(expr ast.Expression) staticNullishState {
 		return g.staticNullishState(e.Expr)
 	case *ast.UndefinedLit, *ast.NullLit:
 		return staticNullishValue
-	case *ast.StringLit, *ast.RawStringLit, *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.ListLit, *ast.ObjectLit, *ast.NewExpr:
+	case *ast.StringLit, *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.ListLit, *ast.ObjectLit, *ast.NewExpr:
 		return staticNonNullishValue
 	case *ast.TemplateLit:
 		if len(e.Exprs) == 0 {
@@ -5743,11 +5718,6 @@ func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
 			return "0", nil
 		}
 		return "1", nil
-	case *ast.RawStringLit:
-		if e.Value == "" {
-			return "0", nil
-		}
-		return "1", nil
 	case *ast.IntLit:
 		if e.Value == 0 {
 			return "0", nil
@@ -5832,8 +5802,6 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 	case *ast.AsExpr:
 		return g.staticStringFragment(e.Expr)
 	case *ast.StringLit:
-		return e.Value, true, nil
-	case *ast.RawStringLit:
 		return e.Value, true, nil
 	case *ast.TemplateLit:
 		var b strings.Builder
@@ -6125,8 +6093,6 @@ func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 		return false, true
 	case *ast.StringLit:
 		return e.Value != "", true
-	case *ast.RawStringLit:
-		return e.Value != "", true
 	case *ast.TemplateLit:
 		if len(e.Exprs) == 0 {
 			return strings.Join(e.Parts, "") != "", true
@@ -6238,7 +6204,7 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		}
 		isStrNode := func(n ast.Expression) bool {
 			switch n.(type) {
-			case *ast.StringLit, *ast.RawStringLit, *ast.TemplateLit:
+			case *ast.StringLit, *ast.TemplateLit:
 				return true
 			}
 			return false
@@ -6350,8 +6316,6 @@ func staticEnvDefaultValue(expr ast.Expression) (string, bool) {
 	case *ast.AsExpr:
 		return staticEnvDefaultValue(e.Expr)
 	case *ast.StringLit:
-		return e.Value, true
-	case *ast.RawStringLit:
 		return e.Value, true
 	case *ast.TemplateLit:
 		if len(e.Exprs) == 0 {
@@ -7057,7 +7021,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return t
 		}
 		return &ast.Type{Kind: ast.TypeList, Elem: g.inferListElemType(e)}
-	case *ast.StringLit, *ast.RawStringLit, *ast.TemplateLit:
+	case *ast.StringLit, *ast.TemplateLit:
 		return typeString
 	case *ast.IntLit, *ast.FloatLit:
 		return typeNumber
@@ -10487,8 +10451,6 @@ func staticScalarComparisonValue(expr ast.Expression) (string, bool) {
 		}
 	case *ast.StringLit:
 		return e.Value, true
-	case *ast.RawStringLit:
-		return e.Value, true
 	case *ast.TemplateLit:
 		if len(e.Exprs) == 0 {
 			return strings.Join(e.Parts, ""), true
@@ -10767,8 +10729,6 @@ func exprLiteralValue(expr ast.Expression) string {
 	switch e := expr.(type) {
 	case *ast.StringLit:
 		return e.Value
-	case *ast.RawStringLit:
-		return e.Value
 	}
 	return ""
 }
@@ -10787,7 +10747,7 @@ func warnIfFlagLikePattern(expr ast.Expression, val string) {
 	specialChars := `$^[]{}.+*?()\`
 	for _, ch := range specialChars {
 		if strings.ContainsRune(literal, ch) {
-			fmt.Fprintf(os.Stderr, "besht: warning: argument %q starts with '-' and contains special characters — use r%q for a raw pattern, or add '--' / '-e' flag before it\n", literal, literal)
+			fmt.Fprintf(os.Stderr, "besht: warning: argument %q starts with '-' and contains special characters — add '--' / '-e' flag before it if it is a pattern\n", literal)
 			return
 		}
 	}
@@ -11171,8 +11131,6 @@ func commandEnvName(expr ast.Expression) (string, error) {
 	var name string
 	switch e := expr.(type) {
 	case *ast.StringLit:
-		name = e.Value
-	case *ast.RawStringLit:
 		name = e.Value
 	default:
 		return "", fmt.Errorf("command env name must be a string literal")
