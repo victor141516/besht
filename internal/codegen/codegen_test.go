@@ -3515,6 +3515,8 @@ func TestCodegen_JSONStringifyWithJQ(t *testing.T) {
 	out := compileWithOptions(t, `let user = { id: 1, name: "Victor", active: true }
 let json: string = JSON.stringify(user)
 let list: string = JSON.stringify(["a", "b"])
+let items = ["a", "b"]
+let counted: string = JSON.stringify({ count: items.length })
 let ok: string = JSON.stringify(true)`, codegen.Options{UseJQ: true})
 	assertContains(t, out, `command -v jq`)
 	assertContains(t, out, `json=$(jq -cn`)
@@ -3523,5 +3525,6 @@ let ok: string = JSON.stringify(true)`, codegen.Options{UseJQ: true})
 	assertContains(t, out, `--argjson _v2 "$(if [ $_obj_user_active = 1 ]; then printf true; else printf false; fi)"`)
 	assertContains(t, out, `list=$(_bst_json_list_`)
 	assertContains(t, out, `jq -Rsc 'split("\n")`)
+	assertContains(t, out, `counted=$(jq -cn --arg _k0 'count' --argjson _v0 2 '{($`)
 	assertContains(t, out, `ok=$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
 }

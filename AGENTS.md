@@ -969,6 +969,10 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Skill validation should cover script interface idioms.** `node-eq/tests/commands/skill_args_env_predicates.bsh` is paired with a shell source that reads options, flags, positionals, environment defaults, file predicates, and string predicates. The Besht fixture intentionally uses `Besht.args.option()`/`.flag()`/`.positional()`, `process.env.NAME ?? fallback`, `Besht.fs.*`, and `Besht.strings.*`; keep it as a guardrail against agents transliterating ordinary shell option parser loops or `[ -f ]`/`[ -z ]` checks.
 
+**Skill validation should cover static record idioms.** `node-eq/tests/language/objects/skill_object_data_idioms.bsh` is paired with a shell source that uses `awk -F:`, `cut`, `paste`, and membership probes over a literal colon-delimited table. The Besht fixture intentionally uses object literals, list callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`; keep it as a guardrail against agents preserving text-processing pipelines for static in-memory records.
+
+**JSON object values must preserve expression types.** `JSON.stringify({ count: items.length })` must pass `items.length` to jq as JSON number data, not as a string. Keep `inferReceiverType()` aware that `.length` on strings and lists is numeric so object-literal JSON codegen chooses `--argjson`.
+
 **`command` objects do not auto-coerce.** Unlike the old model, `command` no longer coerces to `string` on assignment. You must explicitly call `.run()` then `.readStdout()` to get a string. The Command Analysis pass enforces this.
 
 **`run()` returns `self`, not `void`.** This enables chaining: `$("whoami").run().readStdout()`. Do not declare `.run()` as returning `void` anywhere in the compiler — it returns the same `Command` identity.

@@ -1,0 +1,47 @@
+// besht-compile-flags: --opt-use-jq
+let names: string[] = ["ada", "grace", "linus", "ken"];
+
+let roles = {
+    ada: "admin",
+    grace: "member",
+    linus: "member",
+    ken: "guest",
+};
+
+let active = {
+    ada: true,
+    grace: true,
+    linus: false,
+    ken: false,
+};
+
+console.log("--- active staff ---");
+let activeStaff = names
+    .filter(name => active[name] && roles[name] != "guest")
+    .map(name => name + "=" + roles[name]);
+
+activeStaff.forEach(entry => {
+    console.log(entry);
+});
+
+console.log("--- probes ---");
+let probes: string[] = ["ada", "ken", "alan"];
+probes.forEach(probe => {
+    console.log(`${probe}=${Object.hasOwn(roles, probe).toString()}`);
+});
+
+console.log("--- names ---");
+console.log(names.join(","));
+
+console.log("--- role entries ---");
+names.forEach(name => {
+    console.log(`${name}:${roles[name]}`);
+});
+
+console.log("--- summary json ---");
+console.log(JSON.stringify({
+    primary: "ada",
+    primaryRole: roles.ada,
+    hasAlan: Object.hasOwn(roles, "alan"),
+    activeCount: activeStaff.length,
+}));

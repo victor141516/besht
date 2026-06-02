@@ -7110,6 +7110,12 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: elem}
 		}
 	case *ast.PropertyExpr:
+		if e.Property == "length" {
+			receiverType := g.inferReceiverType(e.Receiver)
+			if receiverType != nil && (receiverType.Kind == ast.TypeString || receiverType.Kind == ast.TypeList) {
+				return typeNumber
+			}
+		}
 		if _, ok := isProcessEnvProperty(e); ok {
 			return typeString
 		}

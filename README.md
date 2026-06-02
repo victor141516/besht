@@ -685,6 +685,8 @@ Arrow callbacks support both expression-bodied and block-bodied forms for list `
 
 When translating shell pipelines that process already-known text or numbers, prefer native Besht data operations over spawning `sed`/`awk`/`grep`/`tr`. Use `map`, `filter`, `reduce`, `forEach((item, index) => ...)`, `join`, and string methods such as `trim()`, `startsWith()`, and `toUpperCase()` for in-memory transformations. Keep command pipelines for external data sources and tool-specific work.
 
+For literal delimiter-separated records or shell snippets that use `awk -F:`, `cut`, `paste`, or repeated membership probes over a static table, model the data directly. Use object literals for key/value records, `Object.keys()`, `Object.entries()`, and `Object.hasOwn()` for enumeration and probes, `Set<T>` for membership groups, and `JSON.stringify()` for JSON output instead of preserving the text-processing pipeline.
+
 ```ts
 let names = ["alice", "bob", "anna"]
 let shouted = names.map(name => name.toUpperCase())
@@ -780,6 +782,21 @@ console.log($("pwd").run().readStdout()) // inline reads can compile directly to
 
 When translating shell scripts, keep shell structure in Besht's command model instead of embedding shell fragments in strings:
 
+Before translating a shell pipeline into `$()` calls, ask whether the pipeline is actually processing external command output or only a literal/static variable from the script. Literal data such as `TEAM='ada:admin:yes...'` piped through `awk`, `cut`, `paste`, `grep`, or `sed` should become Besht data structures and methods, not a command pipeline.
+
+```ts
+// Shell shape: printf "$TEAM" | awk -F: '$3 == "yes" { print $1 "=" $2 }'
+let roles = { ada: "admin", grace: "member", linus: "member", ken: "guest" }
+let active = new Set<string>()
+active.add("ada")
+active.add("grace")
+Object.entries(roles).forEach(entry => {
+    if (active.has(entry[0])) {
+        console.log(entry[0] + "=" + entry[1])
+    }
+})
+```
+
 | Shell idiom | Besht pattern |
 | ----------- | ------------- |
 | `cmd arg "$value"` | `$("cmd", "arg", value).run()` |
@@ -793,6 +810,7 @@ When translating shell scripts, keep shell structure in Besht's command model in
 | `${1-default}` | `Besht.args.positional(1) ?? "default"` |
 | `${1:-default}` | read the positional arg, then use `Besht.strings.isEmpty()` to apply the empty-string default |
 | `while`/`case` parser for `--root`, `-r`, `--verbose` | `Besht.args.option("root", "r")`, `Besht.args.flag("verbose", "v")`, `Besht.args.positional(n)` |
+| `printf "$TEAM" \| awk -F: ...` over a literal table | object literals, `Set<T>`, `Object.entries()`, `Object.hasOwn()`, list callbacks, `JSON.stringify()` |
 
 Avoid `$("sh", "-c", "...")` or inline strings containing `cd`, pipes, redirects, or `VAR=value cmd` unless the script intentionally invokes a shell interpreter. Pass arguments as separate values and use raw strings (`r"..."`) for grep/sed/awk patterns that must stay literal.
 

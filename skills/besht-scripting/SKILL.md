@@ -244,6 +244,8 @@ Arrow callbacks support both expression-bodied and block-bodied forms for list `
 
 When translating shell pipelines that transform already-known text or numbers, prefer native Besht lists and methods over external `sed`/`awk`/`grep`/`tr` commands. For example, a shell pipeline that trims lines, filters by prefix, uppercases, joins labels, sums numbers, or prints `NR - 1` indexes is usually clearer as `list.map(...)`, `filter(...)`, `word.trim()`, `startsWith(...)`, `toUpperCase()`, `join(...)`, `reduce(...)`, and `forEach((item, index) => ...)`. Reserve command pipelines for real external data sources or operations that need an external tool.
 
+For literal delimiter-separated records or shell snippets that use `awk -F:`, `cut`, `paste`, or repeated membership probes over a static table, model the data directly. Use object literals for key/value records, `Object.keys()`, `Object.entries()`, and `Object.hasOwn()` for enumeration and probes, `Set<T>` for membership groups, and `JSON.stringify()` for JSON output instead of preserving the text-processing pipeline.
+
 ```ts
 let names = ["alice", "bob", "anna"]
 let upper = names.map(name => name.toUpperCase())
@@ -438,6 +440,21 @@ Static string literal `Number.parseInt()` calls with parseable prefixes and stat
 
 All external commands use `$()` expressions. Arguments are separate strings. The compiler emits conservative shell-safe literal command words bare when possible and quotes anything that needs protection.
 
+Before translating a shell pipeline into `$()` calls, ask whether the pipeline is actually processing external command output or only a literal/static variable from the script. Literal data such as `TEAM='ada:admin:yes...'` piped through `awk`, `cut`, `paste`, `grep`, or `sed` should become Besht data structures and methods, not a command pipeline.
+
+```ts
+// Shell shape: printf "$TEAM" | awk -F: '$3 == "yes" { print $1 "=" $2 }'
+let roles = { ada: "admin", grace: "member", linus: "member", ken: "guest" }
+let active = new Set<string>()
+active.add("ada")
+active.add("grace")
+Object.entries(roles).forEach(entry => {
+    if (active.has(entry[0])) {
+        console.log(entry[0] + "=" + entry[1])
+    }
+})
+```
+
 When translating shell-style scripts, translate structure into command methods instead of embedding shell syntax in strings:
 
 | Shell idiom | Besht pattern |
@@ -454,6 +471,7 @@ When translating shell-style scripts, translate structure into command methods i
 | `${1-default}` | `Besht.args.positional(1) ?? "default"` |
 | `${1:-default}` | read the positional arg, then use `Besht.strings.isEmpty()` to apply the empty-string default |
 | `while`/`case` parser for `--root`, `-r`, `--verbose` | `Besht.args.option("root", "r")`, `Besht.args.flag("verbose", "v")`, `Besht.args.positional(n)` |
+| `printf "$TEAM" \| awk -F: ...` over a literal table | object literals, `Set<T>`, `Object.entries()`, `Object.hasOwn()`, list callbacks, `JSON.stringify()` |
 
 Avoid `$("sh", "-c", "...")`, `$("bash", "-c", "...")`, embedded `cd`, `VAR=value cmd`, `cmd1 | cmd2`, or redirect text inside command strings unless the script's real purpose is to invoke a shell interpreter. Besht should own quoting, argument boundaries, pipes, redirects, per-command environment, and per-command working directory. Use raw strings (`r"..."`) for grep/sed/awk patterns and globs that must stay literal.
 
