@@ -32,6 +32,7 @@ interface FetchResponse {
 }
 declare function fetch(url: string): FetchResponse
 declare function Boolean(value): boolean
+type JSONValue = string
 
 declare const process: {
     env: Record<string, string>
@@ -81,9 +82,11 @@ declare namespace Object {
 }
 
 declare namespace JSON {
+    function parse(value: string): JSONValue
     function stringify(value: string): string
     function stringify(value: number): string
     function stringify(value: boolean): string
+    function stringify(value: JSONValue): string
     function stringify(value: string[]): string
     function stringify(value: number[]): string
     function stringify(value: boolean[]): string

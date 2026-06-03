@@ -239,145 +239,169 @@ func (g *Generator) collectArgsSchema(stmts []ast.Statement) {
 	walkArgsStatements(stmts, g.collectArgsSchemaExpr)
 }
 
-func statementsUseJSONStringify(stmts []ast.Statement) bool {
+func firstJSONBuiltinUse(stmts []ast.Statement) string {
 	for _, stmt := range stmts {
-		if stmtUsesJSONStringify(stmt) {
-			return true
+		if name := stmtJSONBuiltinUse(stmt); name != "" {
+			return name
 		}
 	}
-	return false
+	return ""
+}
+
+func statementsUseJSONStringify(stmts []ast.Statement) bool {
+	return firstJSONBuiltinUse(stmts) == "JSON.stringify"
 }
 
 func stmtUsesJSONStringify(stmt ast.Statement) bool {
+	return stmtJSONBuiltinUse(stmt) == "JSON.stringify"
+}
+
+func stmtJSONBuiltinUse(stmt ast.Statement) string {
 	if stmt == nil {
-		return false
+		return ""
 	}
 	switch s := stmt.(type) {
 	case *ast.LetDecl:
-		return exprUsesJSONStringify(s.Value)
+		return exprJSONBuiltinUse(s.Value)
 	case *ast.DestructureDecl:
-		return exprUsesJSONStringify(s.Value)
+		return exprJSONBuiltinUse(s.Value)
 	case *ast.Assignment:
-		return exprUsesJSONStringify(s.Value)
+		return exprJSONBuiltinUse(s.Value)
 	case *ast.IndexAssignStmt:
-		return exprUsesJSONStringify(s.Index) || exprUsesJSONStringify(s.Value)
+		return firstNonEmpty(exprJSONBuiltinUse(s.Index), exprJSONBuiltinUse(s.Value))
 	case *ast.PropertyAssignStmt:
-		return exprUsesJSONStringify(s.Value)
+		return exprJSONBuiltinUse(s.Value)
 	case *ast.ExprStmt:
-		return exprUsesJSONStringify(s.Expr)
+		return exprJSONBuiltinUse(s.Expr)
 	case *ast.ReturnStmt:
-		return exprUsesJSONStringify(s.Value)
+		return exprJSONBuiltinUse(s.Value)
 	case *ast.IfStmt:
-		if exprUsesJSONStringify(s.Condition) || blockUsesJSONStringify(s.Then) || blockUsesJSONStringify(s.Else) {
-			return true
+		if name := firstNonEmpty(exprJSONBuiltinUse(s.Condition), blockJSONBuiltinUse(s.Then), blockJSONBuiltinUse(s.Else)); name != "" {
+			return name
 		}
 		for _, ei := range s.ElseIfs {
-			if exprUsesJSONStringify(ei.Condition) || blockUsesJSONStringify(ei.Body) {
-				return true
+			if name := firstNonEmpty(exprJSONBuiltinUse(ei.Condition), blockJSONBuiltinUse(ei.Body)); name != "" {
+				return name
 			}
 		}
 	case *ast.WhileStmt:
-		return exprUsesJSONStringify(s.Condition) || blockUsesJSONStringify(s.Body)
+		return firstNonEmpty(exprJSONBuiltinUse(s.Condition), blockJSONBuiltinUse(s.Body))
 	case *ast.ForStmt:
-		return exprUsesJSONStringify(s.Iterator) || blockUsesJSONStringify(s.Body)
+		return firstNonEmpty(exprJSONBuiltinUse(s.Iterator), blockJSONBuiltinUse(s.Body))
 	case *ast.FnDecl:
-		return blockUsesJSONStringify(s.Body)
+		return blockJSONBuiltinUse(s.Body)
 	case *ast.TryStmt:
-		return blockUsesJSONStringify(s.Body) || blockUsesJSONStringify(s.Catch)
+		return firstNonEmpty(blockJSONBuiltinUse(s.Body), blockJSONBuiltinUse(s.Catch))
 	case *ast.SwitchStmt:
-		if exprUsesJSONStringify(s.Value) {
-			return true
+		if name := exprJSONBuiltinUse(s.Value); name != "" {
+			return name
 		}
 		for _, c := range s.Cases {
-			if exprUsesJSONStringify(c.Value) || blockUsesJSONStringify(c.Body) {
-				return true
+			if name := firstNonEmpty(exprJSONBuiltinUse(c.Value), blockJSONBuiltinUse(c.Body)); name != "" {
+				return name
 			}
 		}
-		return false
 	case *ast.ClassDecl:
 		for _, m := range s.Methods {
-			if blockUsesJSONStringify(m.Body) {
-				return true
+			if name := blockJSONBuiltinUse(m.Body); name != "" {
+				return name
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 func blockUsesJSONStringify(block *ast.Block) bool {
+	return blockJSONBuiltinUse(block) == "JSON.stringify"
+}
+
+func blockJSONBuiltinUse(block *ast.Block) string {
 	if block == nil {
-		return false
+		return ""
 	}
-	return statementsUseJSONStringify(block.Statements)
+	return firstJSONBuiltinUse(block.Statements)
 }
 
 func exprUsesJSONStringify(expr ast.Expression) bool {
+	return exprJSONBuiltinUse(expr) == "JSON.stringify"
+}
+
+func exprJSONBuiltinUse(expr ast.Expression) string {
 	if expr == nil {
-		return false
+		return ""
 	}
 	switch e := expr.(type) {
 	case *ast.BuiltinCallExpr:
-		if e.Name == "JSON.stringify" {
-			return true
+		if e.Name == "JSON.parse" || e.Name == "JSON.stringify" {
+			return e.Name
 		}
 		for _, arg := range e.Args {
-			if exprUsesJSONStringify(arg) {
-				return true
+			if name := exprJSONBuiltinUse(arg); name != "" {
+				return name
 			}
 		}
 	case *ast.FnCallExpr:
 		for _, arg := range e.Args {
-			if exprUsesJSONStringify(arg) {
-				return true
+			if name := exprJSONBuiltinUse(arg); name != "" {
+				return name
 			}
 		}
 	case *ast.MethodCallExpr:
-		if exprUsesJSONStringify(e.Receiver) {
-			return true
+		if name := exprJSONBuiltinUse(e.Receiver); name != "" {
+			return name
 		}
 		for _, arg := range e.Args {
-			if exprUsesJSONStringify(arg) {
-				return true
+			if name := exprJSONBuiltinUse(arg); name != "" {
+				return name
 			}
 		}
 	case *ast.PropertyExpr:
-		return exprUsesJSONStringify(e.Receiver)
+		return exprJSONBuiltinUse(e.Receiver)
 	case *ast.IndexExpr:
-		return exprUsesJSONStringify(e.Expr) || exprUsesJSONStringify(e.Index)
+		return firstNonEmpty(exprJSONBuiltinUse(e.Expr), exprJSONBuiltinUse(e.Index))
 	case *ast.BinaryExpr:
-		return exprUsesJSONStringify(e.Left) || exprUsesJSONStringify(e.Right)
+		return firstNonEmpty(exprJSONBuiltinUse(e.Left), exprJSONBuiltinUse(e.Right))
 	case *ast.TernaryExpr:
-		return exprUsesJSONStringify(e.Condition) || exprUsesJSONStringify(e.Then) || exprUsesJSONStringify(e.Else)
+		return firstNonEmpty(exprJSONBuiltinUse(e.Condition), exprJSONBuiltinUse(e.Then), exprJSONBuiltinUse(e.Else))
 	case *ast.UnaryExpr:
-		return exprUsesJSONStringify(e.Expr)
+		return exprJSONBuiltinUse(e.Expr)
 	case *ast.PipeExpr:
-		return exprUsesJSONStringify(e.Left) || exprUsesJSONStringify(e.Right)
+		return firstNonEmpty(exprJSONBuiltinUse(e.Left), exprJSONBuiltinUse(e.Right))
 	case *ast.CmdExpr:
 		for _, arg := range e.Args {
-			if exprUsesJSONStringify(arg) {
-				return true
+			if name := exprJSONBuiltinUse(arg); name != "" {
+				return name
 			}
 		}
 	case *ast.ListLit:
 		for _, elem := range e.Elements {
-			if exprUsesJSONStringify(elem) {
-				return true
+			if name := exprJSONBuiltinUse(elem); name != "" {
+				return name
 			}
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
-			if exprUsesJSONStringify(field.Value) {
-				return true
+			if name := exprJSONBuiltinUse(field.Value); name != "" {
+				return name
 			}
 		}
 	case *ast.ArrowExpr:
-		return exprUsesJSONStringify(e.Body) || blockUsesJSONStringify(e.BlockBody)
+		return firstNonEmpty(exprJSONBuiltinUse(e.Body), blockJSONBuiltinUse(e.BlockBody))
 	case *ast.SpreadExpr:
-		return exprUsesJSONStringify(e.Expr)
+		return exprJSONBuiltinUse(e.Expr)
 	case *ast.AsExpr:
-		return exprUsesJSONStringify(e.Expr)
+		return exprJSONBuiltinUse(e.Expr)
 	}
-	return false
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func statementsUseArgs(stmts []ast.Statement) bool {
@@ -1071,7 +1095,7 @@ func (g *Generator) inferExprType(expr ast.Expression) *ast.Type {
 	case *ast.IntLit, *ast.FloatLit:
 		return typeNumber
 	case *ast.BoolLit:
-		return &ast.Type{Kind: ast.TypeBoolean}
+		return typeBoolean
 	case *ast.ListLit:
 		return &ast.Type{Kind: ast.TypeList, Elem: g.inferListElemType(e)}
 	case *ast.IdentExpr:
@@ -1110,9 +1134,26 @@ func (g *Generator) inferExprType(expr ast.Expression) *ast.Type {
 		return &ast.Type{Kind: ast.TypeObject}
 	case *ast.UnaryExpr:
 		if e.Op == "!" {
-			return &ast.Type{Kind: ast.TypeBoolean}
+			return typeBoolean
 		}
 		return typeNumber
+	case *ast.BuiltinCallExpr:
+		switch e.Name {
+		case "JSON.parse":
+			return typeJSON
+		case "JSON.stringify":
+			return typeString
+		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
+			return typeBoolean
+		}
+	case *ast.PropertyExpr:
+		if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeJSON {
+			return typeJSON
+		}
+	case *ast.IndexExpr:
+		if recvType := g.inferReceiverType(e.Expr); recvType != nil && recvType.Kind == ast.TypeJSON {
+			return typeJSON
+		}
 	}
 	return nil
 }
@@ -5059,16 +5100,158 @@ func objectHasOwnRefExpr(ref objectRef, keyExpr string) string {
 	return objectHasOwnSlotExpr(ref.SlotExpr, keyExpr)
 }
 
+func (g *Generator) requireJQFeature(feature string) error {
+	if !g.UseJQ {
+		return fmt.Errorf("%s requires --opt-use-jq", feature)
+	}
+	g.requireRuntimeHelper("jq")
+	return nil
+}
+
+func jsonFatalShell(message string) string {
+	return fmt.Sprintf("printf '%%s\\n' %s >&2; kill -TERM \"$$\"; exit 1", shellQuote("[besht] "+message))
+}
+
+func jsonTemp(prefix string, pos ast.Pos) string {
+	return fmt.Sprintf("%s_%d_%d", prefix, pos.Line, pos.Column)
+}
+
+func (g *Generator) genJSONParse(expr ast.Expression) (string, error) {
+	if err := g.requireJQFeature("JSON.parse()"); err != nil {
+		return "", err
+	}
+	val, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	inVar := jsonTemp("_bst_json_in", jsonExprPos(expr))
+	outVar := jsonTemp("_bst_json_out", jsonExprPos(expr))
+	return fmt.Sprintf("$(%s=%s; if %s=$(printf '%%s' \"$%s\" | jq -c . 2>/dev/null); then printf '%%s' \"$%s\"; else %s; fi)", inVar, val, outVar, inVar, outVar, jsonFatalShell("JSON.parse() failed")), nil
+}
+
+func (g *Generator) genJSONCompact(expr ast.Expression, message string) (string, error) {
+	if err := g.requireJQFeature("JSON.stringify()"); err != nil {
+		return "", err
+	}
+	val, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	return g.genJSONCompactValue(val, jsonExprPos(expr), message), nil
+}
+
+func (g *Generator) genJSONCompactValue(val string, pos ast.Pos, message string) string {
+	inVar := jsonTemp("_bst_json_in", pos)
+	outVar := jsonTemp("_bst_json_out", pos)
+	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ]; then printf null; elif %s=$(printf '%%s' \"$%s\" | jq -c . 2>/dev/null); then printf '%%s' \"$%s\"; else %s; fi)", inVar, val, inVar, nullishSentinelVar, outVar, inVar, outVar, jsonFatalShell(message))
+}
+
+func (g *Generator) genJSONNullishValue(expr ast.Expression) (string, error) {
+	val, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	tmp := jsonTemp("_bst_json_nullish", jsonExprPos(expr))
+	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ] || [ \"$%s\" = null ]; then printf '%%s' \"$%s\"; else printf '%%s' \"$%s\"; fi)", tmp, val, tmp, nullishSentinelVar, tmp, nullishSentinelVar, tmp), nil
+}
+
+func (g *Generator) genJSONProperty(e *ast.PropertyExpr) (string, error) {
+	if err := g.requireJQFeature("JSON property access"); err != nil {
+		return "", err
+	}
+	recv, err := g.genExprValue(e.Receiver)
+	if err != nil {
+		return "", err
+	}
+	program := `if type == "object" then .[$_k] elif ($_k == "length" and (type == "array" or type == "string")) then length else error("not object") end | if . == null then empty else . end`
+	return g.genJSONPathValue(recv, e.Pos, "--arg _k "+shellQuote(e.Property), program, "JSON property access failed"), nil
+}
+
+func (g *Generator) genJSONIndex(e *ast.IndexExpr) (string, error) {
+	if err := g.requireJQFeature("JSON index access"); err != nil {
+		return "", err
+	}
+	recv, err := g.genExprValue(e.Expr)
+	if err != nil {
+		return "", err
+	}
+	index, err := g.genExprValue(e.Index)
+	if err != nil {
+		return "", err
+	}
+	program := `($_i | tonumber) as $n | if type == "array" then .[$n] else error("not array") end | if . == null then empty else . end`
+	return g.genJSONPathValue(recv, e.Pos, "--arg _i "+ensureArgSafe(index), program, "JSON index access failed"), nil
+}
+
+func (g *Generator) genJSONPathValue(recv string, pos ast.Pos, jqArgs, jqProgram, message string) string {
+	recvVar := jsonTemp("_bst_json_recv", pos)
+	outVar := jsonTemp("_bst_json_out", pos)
+	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ] || [ \"$%s\" = null ]; then %s; fi; if %s=$(printf '%%s' \"$%s\" | jq -c %s %s 2>/dev/null); then if [ -n \"$%s\" ]; then printf '%%s' \"$%s\"; else printf '%%s' \"$%s\"; fi; else %s; fi)", recvVar, recv, recvVar, nullishSentinelVar, recvVar, jsonFatalShell(message), outVar, recvVar, jqArgs, shellQuote(jqProgram), outVar, outVar, nullishSentinelVar, jsonFatalShell(message))
+}
+
+func isJSONScalarExtractionTarget(t *ast.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind {
+	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean:
+		return true
+	}
+	return false
+}
+
+func (g *Generator) isJSONBackedExpr(expr ast.Expression) bool {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.isJSONBackedExpr(e.Expr)
+	}
+	typ := g.inferReceiverType(expr)
+	return typ != nil && typ.Kind == ast.TypeJSON
+}
+
+func (g *Generator) genJSONExtract(expr ast.Expression, target *ast.Type) (string, error) {
+	if err := g.requireJQFeature("JSON scalar extraction"); err != nil {
+		return "", err
+	}
+	val, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	var program string
+	var message string
+	switch target.Kind {
+	case ast.TypeString:
+		program = `if . == null then empty elif type == "string" then . else error("expected string") end`
+		message = "JSON string extraction failed"
+	case ast.TypeNumber:
+		program = `if . == null then empty elif type == "number" then . else error("expected number") end`
+		message = "JSON number extraction failed"
+	case ast.TypeBoolean:
+		program = `if . == null then empty elif type == "boolean" then if . then "1" else "0" end else error("expected boolean") end`
+		message = "JSON boolean extraction failed"
+	default:
+		return g.genExprValue(expr)
+	}
+	inVar := jsonTemp("_bst_json_extract", jsonExprPos(expr))
+	outVar := jsonTemp("_bst_json_out", jsonExprPos(expr))
+	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ] || [ \"$%s\" = null ]; then printf '%%s' \"$%s\"; elif %s=$(printf '%%s' \"$%s\" | jq -er %s 2>/dev/null); then printf '%%s' \"$%s\"; else %s; fi)", inVar, val, inVar, nullishSentinelVar, inVar, nullishSentinelVar, outVar, inVar, shellQuote(program), outVar, jsonFatalShell(message)), nil
+}
+
 func (g *Generator) genJSONStringify(expr ast.Expression) (string, error) {
 	if !g.UseJQ {
 		return "", fmt.Errorf("JSON.stringify() requires --opt-use-jq")
 	}
 	g.requireRuntimeHelper("jq")
 	if as, ok := expr.(*ast.AsExpr); ok {
+		if as.Type != nil && as.Type.Kind == ast.TypeJSON {
+			return g.genJSONCompact(as.Expr, "JSON.stringify() failed")
+		}
 		return g.genJSONStringify(as.Expr)
 	}
 	typ := g.inferReceiverType(expr)
 	switch e := expr.(type) {
+	case *ast.NullLit, *ast.UndefinedLit:
+		return "null", nil
 	case *ast.ObjectLit:
 		if err := g.validateObjectLiteralScalarValues("JSON.stringify", e); err != nil {
 			return "", err
@@ -5101,6 +5284,8 @@ func (g *Generator) genJSONStringify(expr ast.Expression) (string, error) {
 				return "", err
 			}
 			return fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(val)), nil
+		case ast.TypeJSON:
+			return g.genJSONCompact(expr, "JSON.stringify() failed")
 		case ast.TypeList:
 			val, err := g.genExprValue(expr)
 			if err != nil {
@@ -5560,6 +5745,9 @@ func (g *Generator) genObjectPrintCode(varName, dest string) string {
 }
 
 func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (string, error) {
+	if targetType != nil && isJSONScalarExtractionTarget(targetType) && g.isJSONBackedExpr(expr) && !isNullishBinaryExpr(expr) {
+		return g.genJSONExtract(expr, targetType)
+	}
 	switch e := expr.(type) {
 	case *ast.StringLit:
 		return shellQuote(e.Value), nil
@@ -5649,6 +5837,9 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 	case *ast.SpreadExpr:
 		return g.genExprValue(e.Expr)
 	case *ast.AsExpr:
+		if e.Type != nil && isJSONScalarExtractionTarget(e.Type) && g.isJSONBackedExpr(e.Expr) && !isNullishBinaryExpr(e.Expr) {
+			return g.genJSONExtract(e.Expr, e.Type)
+		}
 		return g.genExprRHS(e.Expr, e.Type)
 	}
 	return "", fmt.Errorf("codegen: unknown expression type %T", expr)
@@ -5658,12 +5849,20 @@ func (g *Generator) genExprValue(expr ast.Expression) (string, error) {
 	return g.genExprRHS(expr, nil)
 }
 
+func isNullishBinaryExpr(expr ast.Expression) bool {
+	bin, ok := expr.(*ast.BinaryExpr)
+	return ok && bin.Op == "??"
+}
+
 func (g *Generator) genNullishValue(expr ast.Expression) (string, error) {
 	if idx, ok := expr.(*ast.IndexExpr); ok {
 		if idx.Optional {
 			return g.genOptionalIndexExpr(idx)
 		}
 		return g.genNullishIndexExpr(idx)
+	}
+	if typ := g.inferReceiverType(expr); typ != nil && typ.Kind == ast.TypeJSON {
+		return g.genJSONNullishValue(expr)
 	}
 	return g.genExprValue(expr)
 }
@@ -6448,9 +6647,22 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		return fmt.Sprintf("$(if %s; then printf 1; else printf 0; fi)", cond), nil
 	case "??":
 		g.requireRuntimeHelper("nullish")
-		leftStr, err = g.genNullishValue(e.Left)
-		if err != nil {
-			return "", err
+		if targetType != nil {
+			rightStr, err = g.genExprRHS(e.Right, targetType)
+			if err != nil {
+				return "", err
+			}
+		}
+		if targetType != nil && isJSONScalarExtractionTarget(targetType) && g.isJSONBackedExpr(e.Left) {
+			leftStr, err = g.genJSONExtract(e.Left, targetType)
+			if err != nil {
+				return "", err
+			}
+		} else {
+			leftStr, err = g.genNullishValue(e.Left)
+			if err != nil {
+				return "", err
+			}
 		}
 		return fmt.Sprintf("$(_bst_l=%s; if [ \"$_bst_l\" = \"$%s\" ]; then _bst_r=%s; printf '%%s' \"$_bst_r\"; else printf '%%s' \"$_bst_l\"; fi)", leftStr, nullishSentinelVar, rightStr), nil
 	case "||":
@@ -6914,6 +7126,9 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Object.hasOwn":
 		return g.genObjectHasOwn(e.Args[0], e.Args[1])
 
+	case "JSON.parse":
+		return g.genJSONParse(e.Args[0])
+
 	case "JSON.stringify":
 		return g.genJSONStringify(e.Args[0])
 
@@ -6936,6 +7151,9 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 	}
 	if isProcessEnvObject(e) {
 		return "", fmt.Errorf("process.env cannot be used as a value; access a variable like process.env.HOME")
+	}
+	if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeJSON {
+		return g.genJSONProperty(e)
 	}
 	if _, ok := e.Receiver.(*ast.ThisExpr); ok {
 		if g.currentThisVar == "" {
@@ -7263,6 +7481,8 @@ func isCmdReceiver(expr ast.Expression) bool {
 
 var typeString = &ast.Type{Kind: ast.TypeString}
 var typeNumber = &ast.Type{Kind: ast.TypeNumber}
+var typeBoolean = &ast.Type{Kind: ast.TypeBoolean}
+var typeJSON = &ast.Type{Kind: ast.TypeJSON}
 
 func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 	t := expr.GetType()
@@ -7325,7 +7545,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		case "fetch":
 			return &ast.Type{Kind: ast.TypeFetchResponse}
 		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
-			return &ast.Type{Kind: ast.TypeBoolean}
+			return typeBoolean
+		case "JSON.parse":
+			return typeJSON
 		case "JSON.stringify":
 			return typeString
 		case "console.log", "console.error":
@@ -7349,6 +7571,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: elem}
 		}
 	case *ast.PropertyExpr:
+		if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeJSON {
+			return typeJSON
+		}
 		if e.Property == "length" {
 			receiverType := g.inferReceiverType(e.Receiver)
 			if receiverType != nil && (receiverType.Kind == ast.TypeString || receiverType.Kind == ast.TypeList) {
@@ -7416,6 +7641,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		}
 	case *ast.IndexExpr:
 		containerType := g.inferReceiverType(e.Expr)
+		if containerType != nil && containerType.Kind == ast.TypeJSON {
+			return typeJSON
+		}
 		if containerType != nil && containerType.Kind == ast.TypeList {
 			return containerType.Elem
 		}
@@ -9970,6 +10198,9 @@ func (g *Generator) genIndexExpr(e *ast.IndexExpr) (string, error) {
 		}
 	}
 	recvType := g.inferReceiverType(e.Expr)
+	if recvType != nil && recvType.Kind == ast.TypeJSON {
+		return g.genJSONIndex(e)
+	}
 	if recvType != nil && recvType.Kind == ast.TypeObject {
 		return g.genComputedPropertyAccess(e)
 	}
@@ -10113,6 +10344,9 @@ func (g *Generator) staticStringIndexValue(e *ast.IndexExpr) (string, bool) {
 func (g *Generator) genNullishIndexExpr(e *ast.IndexExpr) (string, error) {
 	g.requireRuntimeHelper("nullish")
 	recvType := g.inferReceiverType(e.Expr)
+	if recvType != nil && recvType.Kind == ast.TypeJSON {
+		return g.genJSONIndex(e)
+	}
 	if recvType != nil && recvType.Kind == ast.TypeObject {
 		return g.genComputedPropertyAccess(e)
 	}

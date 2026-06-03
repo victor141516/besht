@@ -1,0 +1,4 @@
+// besht-compile-flags: --opt-use-jq
+let data = JSON.parse("{\"user\":null,\"items\":[]}")
+console.log(data.user?.name ?? "Anonymous")
+console.log(data.items[0] ?? "empty")

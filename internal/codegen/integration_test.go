@@ -41,6 +41,15 @@ func compileFile(t *testing.T, path string) string {
 	return out
 }
 
+func compileFileWithOptions(t *testing.T, path string, opts codegen.Options) string {
+	t.Helper()
+	out, err := codegen.CompileFile(path, opts)
+	if err != nil {
+		t.Fatalf("compile error: %v", err)
+	}
+	return out
+}
+
 func runCompiledShell(t *testing.T, src string, args ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,6 +66,21 @@ func runCompiledShell(t *testing.T, src string, args ...string) string {
 		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
 	}
 	return string(output)
+}
+
+func runCompiledShellWithOptions(t *testing.T, src string, opts codegen.Options, args ...string) (string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", src)
+	out := compileFileWithOptions(t, path, opts)
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmdArgs := append([]string{shPath}, args...)
+	cmd := exec.Command("sh", cmdArgs...)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 func runCompiledShellWithEnv(t *testing.T, src string, env []string, args ...string) (string, error) {
@@ -3926,6 +3950,78 @@ func TestIntegration_JSONStringifyCheckRequiresJQOptIn(t *testing.T) {
 	}
 	if err := codegen.CheckFile(path, codegen.Options{UseJQ: true}); err != nil {
 		t.Fatalf("CheckFile with UseJQ: %v", err)
+	}
+}
+
+func TestIntegration_JSONParseCheckRequiresJQOptIn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.bsh")
+	if err := os.WriteFile(path, []byte(`let data = JSON.parse("{}")`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := codegen.CheckFile(path, codegen.Options{}); err == nil || !strings.Contains(err.Error(), "JSON.parse() requires --opt-use-jq") {
+		t.Fatalf("CheckFile error = %v, want --opt-use-jq requirement", err)
+	}
+	if err := codegen.CheckFile(path, codegen.Options{UseJQ: true}); err != nil {
+		t.Fatalf("CheckFile with UseJQ: %v", err)
+	}
+}
+
+func TestIntegration_JSONParsePathExtractionRuntime(t *testing.T) {
+	out, err := runCompiledShellWithOptions(t, `let body = "{\"user\":{\"name\":\"Ada\",\"active\":true,\"nick\":null},\"items\":[2,3]}"
+let data = JSON.parse(body)
+let name: string = data.user.name
+let active: boolean = data.user.active
+let first: number = data.items[0]
+let title: string = data.user.title ?? "Engineer"
+let nick: string = data.user.nick ?? "none"
+console.log(name)
+console.log(active)
+console.log(first)
+console.log(title)
+console.log(nick)
+console.log(JSON.stringify(data.items[1]))`, codegen.Options{UseJQ: true})
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s", err, out)
+	}
+	want := "Ada\ntrue\n2\nEngineer\nnone\n3\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_JSONOptionalPathRuntime(t *testing.T) {
+	out, err := runCompiledShellWithOptions(t, `let data = JSON.parse("{\"user\":null}")
+let label: string = data.user?.name ?? "Anonymous"
+console.log(label)`, codegen.Options{UseJQ: true})
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s", err, out)
+	}
+	if out != "Anonymous\n" {
+		t.Fatalf("output: got %q", out)
+	}
+}
+
+func TestIntegration_JSONParseInvalidRuntimeError(t *testing.T) {
+	out, err := runCompiledShellWithOptions(t, `let data = JSON.parse("{bad")
+console.log(data)`, codegen.Options{UseJQ: true})
+	if err == nil {
+		t.Fatalf("run shell succeeded, output %q", out)
+	}
+	if !strings.Contains(out, "[besht] JSON.parse() failed") {
+		t.Fatalf("output: got %q, want JSON.parse() failure", out)
+	}
+}
+
+func TestIntegration_JSONWrongScalarExtractionRuntimeError(t *testing.T) {
+	out, err := runCompiledShellWithOptions(t, `let data = JSON.parse("{\"count\":\"two\"}")
+let count: number = data.count
+console.log(count)`, codegen.Options{UseJQ: true})
+	if err == nil {
+		t.Fatalf("run shell succeeded, output %q", out)
+	}
+	if !strings.Contains(out, "[besht] JSON number extraction failed") {
+		t.Fatalf("output: got %q, want JSON number extraction failure", out)
 	}
 }
 

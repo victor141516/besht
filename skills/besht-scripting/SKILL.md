@@ -7,7 +7,7 @@ description: >
   variables, constants, string literals, template literals, $() command expressions,
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
-  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), JSON.stringify(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
+  list/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.hasOwn(), JSON.parse(), JSON.stringify(), Set<T>, nested lists, object literals, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
   concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), Boolean(value), Number.parseInt(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
   fetch(url).text().
 ---
@@ -29,7 +29,7 @@ besht compile script.bsh --opt-no-add-binaries-check  # omit runtime self-check 
 besht compile script.bsh --opt-no-source-map           # omit source comments from compiled output
 besht compile script.bsh --opt-resolve-ts-imports      # allow extensionless imports to fall back to .ts
 besht compile script.bsh --opt-allow-external-shell-imports  # allow explicit .sh imports outside compiler root
-besht compile script.bsh --opt-use-jq                  # enable jq-backed JSON.stringify() codegen
+besht compile script.bsh --opt-use-jq                  # enable jq-backed JSON codegen
 ```
 
 Bundled one-file output omits module separator comments. Bundled output with multiple Besht modules keeps `# --- module: name ---` separators. Besht emits runtime self-checks only when generated output needs the corresponding utilities; simple direct-output scripts skip them. When options leave the runtime preamble empty, generated entry scripts keep a single blank separator between the header and the first shell statement.
@@ -352,15 +352,22 @@ function showKeys(obj: object): string[] {
 
 `Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. This differs from JavaScript runtime reflection: Besht uses compiler-managed object metadata, object keys must contain only letters, numbers, and `_`, and `process.env` is not enumerable. Unmutated named object key lists, static-scalar value and entry lists, static-key `Object.hasOwn()` calls, and safe direct reads of scalar properties from static object literal bindings compile to constants. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct shell tests. Non-boolean property conditions keep JavaScript-style truthiness. `Object.values()` and `Object.entries()` reject statically known list/object/set/command/fetch values because the current list representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. These helpers do not add a runtime helper library.
 
-`JSON.stringify(value)` differs from JavaScript: it encodes only strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects, requires `--opt-use-jq`, and invokes `jq` in generated code. The runtime self-check verifies `jq` exists only when JSON code is emitted.
+JSON support requires `--opt-use-jq` and invokes `jq` in generated code. `JSON.parse(text)` validates and compacts JSON as a `JSONValue`; invalid JSON prints `[besht] JSON.parse() failed` and exits nonzero. Property/index access on a `JSONValue` returns another `JSONValue`. Missing final properties, out-of-range array indexes, and JSON `null` are nullish for `??`; accessing through a missing/null intermediate fails unless you use optional chaining. Add `: string`, `: number`, `: boolean`, or `as ...` to extract a JSON scalar into a normal Besht value.
 
 ```ts
+let data = JSON.parse("{\"user\":{\"name\":\"Ada\"},\"scores\":[7]}")
+let name: string = data.user.name
+let score = data.scores[0] as number
+let title: string = data.user.title ?? "Engineer"
+let fallback: string = data.missing?.name ?? "Anonymous"
+
 console.log(JSON.stringify({ id: 7, name: "Ada", active: true }))
 console.log(JSON.stringify(["Ada", "Grace"]))
+console.log(JSON.stringify(data.user))
 console.log(JSON.stringify(Number.parseInt("2a", 10)))
 ```
 
-`JSON.parse()` is not supported.
+`JSON.stringify(value)` encodes `JSONValue`, strings, numbers, booleans, null/undefined, scalar lists, and scalar-valued compiler-managed objects. It rejects commands, fetch responses, sets, and nested Besht objects/lists that the current representation cannot preserve safely.
 
 ## Classes
 

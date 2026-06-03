@@ -104,7 +104,7 @@ Remaining future work:
 - Broader JS stdlib migration for APIs that map cleanly to POSIX sh without broad runtime metadata.
 - The larger move away from `list<T>` terminology toward `Array<T>` / `T[]` as the preferred user-facing type in docs, examples, declarations, and diagnostics.
 - Expand object APIs only after preserving the current no-runtime-metadata boundary. Near candidates are `Object.assign()` and `Object.fromEntries()`; nested `Object.values()` / `Object.entries()` support requires a broader object/list representation design.
-- `JSON.stringify()` is implemented as an opt-in jq-backed slice (`--opt-use-jq`) for strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects. `JSON.parse()` remains deferred unless Besht gains a parser or a broader jq-backed JSON design.
+- `JSON.parse()` and `JSON.stringify()` are implemented as opt-in jq-backed slices (`--opt-use-jq`). `JSON.parse()` returns compact `JSONValue` data with jq-backed path access and scalar extraction; `JSON.stringify()` handles `JSONValue`, strings, numbers, booleans, null/undefined, scalar lists, and scalar-valued compiler-managed objects.
 - General callback values have a first slice: arrows can be stored, called, passed to functions, and passed to list callback APIs. Full JavaScript closure semantics for returned callback instances and mutation persistence in every value-position call still need a broader return-slot/environment design.
 
 Implementation notes:
@@ -114,94 +114,6 @@ Implementation notes:
 - Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Any API that introduces dynamic object keys or slots must validate names before generated shell uses `eval`; tests should cover polluted `_objkeys_*` metadata and unsafe computed keys.
 - Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, stdlib declarations, checker/codegen tests, and node-eq fixtures in sync.
-
----
-
-## Optional jq-backed codegen and JSON support
-
-Add one opt-in compiler flag, `--opt-use-jq`, that permits generated output to depend on `jq`. Without this flag, `JSON.parse()` and `JSON.stringify()` should produce a compile-time semantic error explaining that they require `--opt-use-jq`. With the flag enabled, codegen may also choose `jq` for other operations when it materially simplifies generated shell, but the existing POSIX/static-folding paths should remain the default when they are smaller or clearer.
-
-Runtime dependency checks should follow the existing external-binary check model:
-
-- Passing `--opt-use-jq` alone must not force a check.
-- If generated shell actually calls `jq`, emit a runtime check that `jq` is installed and working.
-- `--opt-no-add-binaries-check` suppresses the `jq` check too.
-
-Introduce an internal JSON representation hint such as `TypeJSON`, exposed to users as a `JSONValue` annotation. This remains a compiler representation hint, not compile-time type checking.
-
-Suggested standard declarations:
-
-```ts
-type JSONValue = string
-
-declare namespace JSON {
-    function parse(value: string): JSONValue
-    function stringify(value): string
-}
-```
-
-`JSON.parse(text)` should:
-
-- evaluate `text` safely;
-- validate and canonicalize immediately with `jq -c .`;
-- store compact valid JSON as a `JSONValue`;
-- on invalid JSON, print a Besht-specific runtime error such as `[besht] JSON.parse() failed` and exit nonzero.
-
-JSON property/index access should be as close to native JavaScript behavior as practical:
-
-```ts
-let data = JSON.parse(body)
-let user = data.user          // JSONValue
-let first = data.items[0]     // JSONValue
-```
-
-- Property/index access on a `JSONValue` returns another `JSONValue`.
-- Missing final properties behave like JavaScript `undefined`, so `data.user.name ?? "Anonymous"` can use the fallback when `user` exists but `name` is absent.
-- JSON `null` behaves as Besht nullish for `??`.
-- Accessing through a missing or null intermediate value should fail like JavaScript unless optional chaining is used. For example, `data.missing.name` should fail, while `data.missing?.name ?? "fallback"` should use the fallback.
-
-JSON scalar extraction should be driven by annotations or `as` assertions only when the source expression is JSON-backed:
-
-```ts
-let name: string = data.user.name
-let count = data.count as number
-let ok: boolean = data.enabled
-```
-
-Supported first-slice extraction targets:
-
-- `string`
-- `number`
-- `boolean`
-- `JSONValue`
-
-Extraction rules:
-
-- Missing final property and JSON `null` produce Besht nullish so `??` can handle them.
-- Non-null JSON values with the wrong asserted type fail loudly at runtime with a Besht-specific error.
-- Normal non-JSON `expr as Type` and `let x: Type = expr` remain compile-time-erased annotations. Do not introduce compile-time type mismatch errors.
-
-`JSON.stringify(value)` should always require `--opt-use-jq`, even for static values the compiler could theoretically fold without jq. First-slice accepted inputs:
-
-- `JSONValue`, canonicalized or passed through compactly with `jq -c .`;
-- strings, numbers, booleans, null/undefined;
-- scalar lists;
-- scalar object literals or named objects that the compiler can serialize safely.
-
-Reject commands, fetch responses, sets, and unsupported nested Besht values until a broader representation is designed. Use `jq` where it helps with dynamic escaping or assembly, but do not require every compiler-built JSON literal to be piped back through `jq` when direct emission is safe.
-
-Implementation plan:
-
-1. Add `UseJQ bool` to `codegen.Options`, wire `--opt-use-jq` through `cmd/besht/main.go`, usage text, CLI tests, README.md, AGENTS.md, and `skills/besht-scripting/SKILL.md`.
-2. Add `TypeJSON` / `JSONValue` representation support in AST type parsing, checker inference, module export/import type inference, and codegen `varTypeMap`.
-3. Teach parser/checker/codegen that `JSON.parse` and `JSON.stringify` are compiler-known builtins, and exempt `JSON` from module/class qualification like `Object`, `Array`, `Number`, and `Math`.
-4. Add semantic validation that rejects JSON builtins without `UseJQ`, while preserving the no compile-time type-checking policy.
-5. Track jq usage in codegen and extend runtime check generation so a jq check appears only when emitted shell calls jq and `NoCheck` is false.
-6. Implement `JSON.parse()` codegen with safe input handling, `jq -c .`, and Besht-specific parse failure output.
-7. Implement JSON path lowering for property and index access on `JSONValue`, including optional chaining and JS-like missing/intermediate behavior.
-8. Implement JSON scalar extraction/assertion for `string`, `number`, `boolean`, and `JSONValue` via both `as Type` and let/const annotations.
-9. Implement first-slice `JSON.stringify()` for safe scalar/list/object inputs and `JSONValue`.
-10. Add checker, codegen, integration, split-mode/runtime-check, and node-eq coverage where practical.
 
 ---
 
@@ -226,10 +138,10 @@ Future refactor: rename or split `internal/checker` into a semantic validation p
 **Status: first synchronous text-only slice implemented and intentionally kept as-is until Besht has promises.** Supported today:
 
 ```ts
-let body: string = fetch("https://example.com/data.txt").text()
+let body: string = fetch("https://example.com/data.txt").text();
 
-let response = fetch(url) // runs curl once
-let again: string = response.text() // reuses stored body
+let response = fetch(url); // runs curl once
+let again: string = response.text(); // reuses stored body
 ```
 
 This lowers to `curl -sS -- <url>` and returns stdout text. Keep this API frozen at the current text-only surface until a promise/async design exists in Besht. Do not incrementally add Node-style options, richer response fields, `.json()`, or `await fetch()` before promises are designed.
@@ -237,16 +149,16 @@ This lowers to `curl -sS -- <url>` and returns stdout text. Keep this API frozen
 When promises are implemented, revisit a richer Node.js-style `fetch()` design:
 
 ```ts
-let response = await fetch("https://api.example.com/data")
-let body: string = response.text()
+let response = await fetch("https://api.example.com/data");
+let body: string = response.text();
 
 let res = await fetch("https://api.example.com/submit", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ name: "Alice" })
-})
-console.log(res.status.toString())
-let json = res.json()
+  body: JSON.stringify({ name: "Alice" }),
+});
+console.log(res.status.toString());
+let json = res.json();
 ```
 
 Post-promises implementation considerations:
@@ -271,11 +183,11 @@ Recommended phases:
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
 - **Object:** `Object.keys()`, narrow scalar-value `Object.values()`, scalar-value `Object.entries()`, and `Object.hasOwn(obj, key)` are implemented over compiler-managed object key metadata. Future richer known-shape APIs should keep the same no-runtime-metadata boundary unless a broader object model is designed.
 - **Object copying:** evaluate `Object.assign()` and `Object.fromEntries()` after object alias/field metadata is reliable.
-- **JSON:** `JSON.stringify()` is implemented behind `--opt-use-jq` for scalar values, scalar lists, and scalar-valued compiler-managed objects. Future work is `JSON.parse()` or richer JSON extraction, which should remain deferred until there is a broader parser/jq design.
+- **JSON:** `JSON.parse()` and `JSON.stringify()` are implemented behind `--opt-use-jq` for the first jq-backed slice: compact `JSONValue` parsing, JSON property/index access, scalar extraction via annotations/assertions, `JSONValue` stringification, scalar values, scalar lists, and scalar-valued compiler-managed objects. Future work is richer JSON/Besht value interop, such as nested Besht object/list serialization beyond the current scalar-safe boundary.
 
 Implementation notes:
 
-- Static namespaces such as `Boolean` and `JSON` use parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, `Object.hasOwn()`, and opt-in `JSON.stringify()` slices are implemented.
+- Static namespaces such as `Boolean` and `JSON` use parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, `Object.hasOwn()`, and opt-in JSON slices are implemented.
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
 - Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Every added API needs checker, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.

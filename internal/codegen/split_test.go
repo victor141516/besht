@@ -81,6 +81,38 @@ console.log(pick(1))
 	assertContains(t, main, `grep -F`)
 }
 
+func TestSplit_RuntimeCheckCoversImportedJSONPath(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "lib.bsh", `export function readName(body: string): string {
+    let data = JSON.parse(body)
+    return data.user.name as string
+}
+`)
+	writeFile(t, dir, "main.bsh", `import { readName } from "./lib"
+console.log(readName("{\"user\":{\"name\":\"Ada\"}}"))
+`)
+	outDir := filepath.Join(dir, "out")
+	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), outDir, codegen.Options{UseJQ: true}); err != nil {
+		t.Fatalf("CompileFileSplit with JSON: %v", err)
+	}
+	mainBytes, err := os.ReadFile(filepath.Join(outDir, "main.sh"))
+	if err != nil {
+		t.Fatalf("read main.sh: %v", err)
+	}
+	main := string(mainBytes)
+	assertContains(t, main, `command -v jq`)
+
+	noCheckDir := filepath.Join(dir, "out-nocheck")
+	if err := codegen.CompileFileSplit(filepath.Join(dir, "main.bsh"), noCheckDir, codegen.Options{UseJQ: true, NoCheck: true}); err != nil {
+		t.Fatalf("CompileFileSplit with JSON NoCheck: %v", err)
+	}
+	noCheckMainBytes, err := os.ReadFile(filepath.Join(noCheckDir, "main.sh"))
+	if err != nil {
+		t.Fatalf("read nocheck main.sh: %v", err)
+	}
+	assertNotContains(t, string(noCheckMainBytes), `command -v jq`)
+}
+
 func TestSplit_EmptyPreambleUsesSingleBlankSeparator(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "main.bsh", `console.log("hello")

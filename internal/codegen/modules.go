@@ -96,8 +96,10 @@ func CheckFile(entryPath string, opts Options) error {
 		if err := checker.ValidateForEachSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
 			return err
 		}
-		if !opts.UseJQ && statementsUseJSONStringify(mod.Prog.Statements) {
-			return fmt.Errorf("JSON.stringify() requires --opt-use-jq")
+		if !opts.UseJQ {
+			if jsonName := firstJSONBuiltinUse(mod.Prog.Statements); jsonName != "" {
+				return fmt.Errorf("%s() requires --opt-use-jq", jsonName)
+			}
 		}
 		analysis := AnalyzeProgram(mod.Prog.Statements)
 		for _, w := range analysis.Warnings {
@@ -787,10 +789,15 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}}
 		case "Object.hasOwn", "Boolean", "Array.isArray", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
 			return &ast.Type{Kind: ast.TypeBoolean}
+		case "JSON.parse":
+			return &ast.Type{Kind: ast.TypeJSON}
 		case "JSON.stringify":
 			return &ast.Type{Kind: ast.TypeString}
 		}
 	case *ast.AsExpr:
+		if e.Type != nil {
+			return e.Type
+		}
 		return inferExportValueType(e.Expr)
 	case *ast.BinaryExpr:
 		switch e.Op {
@@ -830,6 +837,14 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeNumber}
 		default:
 			return &ast.Type{Kind: ast.TypeString}
+		}
+	case *ast.PropertyExpr:
+		if recv := inferExportValueType(e.Receiver); recv != nil && recv.Kind == ast.TypeJSON {
+			return &ast.Type{Kind: ast.TypeJSON}
+		}
+	case *ast.IndexExpr:
+		if recv := inferExportValueType(e.Expr); recv != nil && recv.Kind == ast.TypeJSON {
+			return &ast.Type{Kind: ast.TypeJSON}
 		}
 	}
 	if t := expr.GetType(); t != nil {

@@ -36,6 +36,7 @@ const (
 	TypeCommand // result of $() — lazy command pipeline
 	TypeObject
 	TypeFetchResponse
+	TypeJSON
 )
 
 // Type represents a besht type annotation.
@@ -79,6 +80,8 @@ func (t *Type) String() string {
 		return "object"
 	case TypeFetchResponse:
 		return "FetchResponse"
+	case TypeJSON:
+		return "JSONValue"
 	}
 	return "unknown"
 }
@@ -739,7 +742,7 @@ func IsBuiltin(name string) bool {
 	switch name {
 	case "fetch", "Boolean",
 		"Array.isArray", "Object.keys", "Object.values", "Object.entries", "Object.hasOwn",
-		"JSON.stringify", "console.log", "console.error":
+		"JSON.parse", "JSON.stringify", "console.log", "console.error":
 		return true
 	}
 	return false

@@ -149,7 +149,7 @@ go run ./cmd/besht/ compile <file.bsh> --opt-resolve-ts-imports
 # Allow explicit .sh imports outside the compiler root
 go run ./cmd/besht/ compile <file.bsh> --opt-allow-external-shell-imports
 
-# Opt in to jq-backed JSON.stringify() codegen
+# Opt in to jq-backed JSON codegen
 go run ./cmd/besht/ compile <file.bsh> --opt-use-jq
 ```
 
@@ -170,7 +170,7 @@ The preferred CLI shape is mode-first: `besht compile ...` or `besht visualize .
 | `--opt-no-source-map`          | Omit `# besht:file:line:col` source comments from compiled output        |
 | `--opt-resolve-ts-imports`     | Let extensionless imports fall back to `.ts` only when `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Allow explicit `.sh` imports outside the compiler root          |
-| `--opt-use-jq`               | Enable jq-backed `JSON.stringify()` codegen                     |
+| `--opt-use-jq`               | Enable jq-backed JSON codegen                                   |
 | `--version`                   | Print version                                                         |
 
 ### `--opt-*` flags
@@ -183,7 +183,7 @@ All flags that change how code is transformed or what is emitted share the `--op
 | `--opt-no-source-map`          | Do not emit `# besht:file:line:col` source comments in compiled output         |
 | `--opt-resolve-ts-imports`     | Resolve extensionless imports to `.bsh` first, then `.ts` if `.bsh` is absent |
 | `--opt-allow-external-shell-imports` | Permit explicit `.sh` imports outside the compiler root; `.bsh` imports remain root-confined |
-| `--opt-use-jq` | Permit generated JSON code to invoke `jq`; required for `JSON.stringify()` |
+| `--opt-use-jq` | Permit generated JSON code to invoke `jq`; required for `JSON.parse()`, JSON path/extraction code, and `JSON.stringify()` |
 
 Pass via `codegen.Options{NoCheck: true, NoSourceMap: true, ResolveTsImports: true, AllowExternalShellImports: true, UseJQ: true}` in Go code.
 
@@ -418,7 +418,7 @@ internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh 
 internal/viewer/viewer_test.go     # Side-by-side visualization renderer behavior
 ```
 
-`node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Focused API fixtures live under their language subdirectories, including `node-eq/tests/language/json/` for `JSON.stringify()` parity coverage. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Fixtures that need non-default compiler flags may include a top-of-file `// besht-compile-flags: ...` directive; the compare runner applies those flags only to that fixture. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.
+`node-eq/tests/` is organized by fixture purpose: `advent/`, `commands/`, `imports/`, `language/`, and `regressions/`. Focused API fixtures live under their language subdirectories, including `node-eq/tests/language/json/` for `JSON.parse()`/path/extraction/`JSON.stringify()` parity coverage. Run it recursively with `bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)`. Fixtures that need non-default compiler flags may include a top-of-file `// besht-compile-flags: ...` directive; the compare runner applies those flags only to that fixture. Keep imported fixture dependencies beside their importing `.bsh` files unless the import paths are updated in the same change.
 
 Tests use `go test ./...`. Coverage target: `make cover`. Current coverage: ~75%.
 
@@ -462,7 +462,9 @@ let objectKeys: string[] = Object.keys(user) // compiler-managed object key list
 let objectValues: string[] = Object.values(user) // object value list
 let objectEntries: string[][] = Object.entries(user) // packed [key, value] rows
 let objectHasName: boolean = Object.hasOwn(user, "name")
-let jsonUser: string = JSON.stringify(user) // scalar Besht values only; requires --opt-use-jq and jq
+let parsed: JSONValue = JSON.parse("{\"user\":{\"name\":\"Ada\"}}") // requires --opt-use-jq and jq
+let parsedName: string = parsed.user.name
+let jsonUser: string = JSON.stringify(user) // scalar Besht/object values only; requires --opt-use-jq and jq
 let jsonList: string = JSON.stringify(["a", "b"])
 
 // Constants (compile-time immutability)
@@ -996,6 +998,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 **Skill validation should cover static record idioms.** `node-eq/tests/language/objects/skill_object_data_idioms.bsh` is paired with a shell source that uses `awk -F:`, `cut`, `paste`, and membership probes over a literal colon-delimited table. The Besht fixture intentionally uses object literals, list callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`; keep it as a guardrail against agents preserving text-processing pipelines for static in-memory records.
 
 **JSON object values must preserve expression types.** `JSON.stringify({ count: items.length })` must pass `items.length` to jq as JSON number data, not as a string. Keep `inferReceiverType()` aware that `.length` on strings and lists is numeric so object-literal JSON codegen chooses `--argjson`.
+
+**JSONValue is compact JSON text, not an object/list mirror.** `JSON.parse()` returns internal `TypeJSON`/user-facing `JSONValue`; property and index access on it must stay jq-backed and return another `JSONValue`. Missing final JSON fields, out-of-range array indexes, and JSON `null` must become the Besht nullish sentinel for `??`; accessing through a missing/null intermediate should fail unless optional chaining short-circuits it. String/number/boolean extraction happens only when the JSON-backed expression is annotated or asserted with that target type, and non-JSON annotations remain erased.
 
 **`command` objects do not auto-coerce.** Unlike the old model, `command` no longer coerces to `string` on assignment. You must explicitly call `.run()` then `.readStdout()` to get a string. The Command Analysis pass enforces this.
 

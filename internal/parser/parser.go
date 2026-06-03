@@ -567,7 +567,9 @@ func (p *Parser) parseType() (*ast.Type, error) {
 			t = &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}, Pos: pos}
 		}
 	case lexer.TokIdent:
-		if alias, ok := p.typeAliases[tok.Literal]; ok {
+		if tok.Literal == "JSONValue" {
+			t = &ast.Type{Kind: ast.TypeJSON, Pos: pos}
+		} else if alias, ok := p.typeAliases[tok.Literal]; ok {
 			t = cloneType(alias)
 		} else if tok.Literal == "Set" && p.peekType() == lexer.TokLt {
 			p.advance()
@@ -2001,7 +2003,7 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 			return &ast.BuiltinCallExpr{Pos: pos, Name: "Array." + methodTok.Literal, Args: args}, nil
 		}
 
-		if name == "JSON" && p.peekType() == lexer.TokDot && p.peekN(1).Literal == "stringify" {
+		if name == "JSON" && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "parse" || p.peekN(1).Literal == "stringify") {
 			methodTok := p.peekN(1)
 			p.advance()
 			p.advance()

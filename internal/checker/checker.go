@@ -640,9 +640,9 @@ func (c *Checker) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 		if len(e.Args) != 2 {
 			return &CheckError{Pos: e.Pos, Message: "Object.hasOwn() takes 2 arguments"}
 		}
-	case "JSON.stringify":
+	case "JSON.parse", "JSON.stringify":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "JSON.stringify() takes 1 argument"}
+			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
 		}
 	}
 	return nil
@@ -1009,6 +1009,8 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 			return listStrType
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: listStrType}
+		case "JSON.parse":
+			return &ast.Type{Kind: ast.TypeJSON}
 		case "JSON.stringify":
 			return strType
 		case "console.log", "console.error":
@@ -1122,12 +1124,18 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeObject}
 		}
 		recvType := c.semanticExprType(e.Receiver)
+		if recvType != nil && recvType.Kind == ast.TypeJSON {
+			return &ast.Type{Kind: ast.TypeJSON}
+		}
 		if recvType != nil && (recvType.Kind == ast.TypeList || recvType.Kind == ast.TypeString) && e.Property == "length" {
 			return numType
 		}
 		return nil
 	case *ast.IndexExpr:
 		recvType := c.semanticExprType(e.Expr)
+		if recvType != nil && recvType.Kind == ast.TypeJSON {
+			return &ast.Type{Kind: ast.TypeJSON}
+		}
 		if recvType != nil && recvType.Kind == ast.TypeList && recvType.Elem != nil {
 			return recvType.Elem
 		}
@@ -1426,7 +1434,7 @@ func isJSONStringifyType(t *ast.Type) bool {
 		return true
 	}
 	switch t.Kind {
-	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean, ast.TypeObject:
+	case ast.TypeString, ast.TypeNumber, ast.TypeBoolean, ast.TypeObject, ast.TypeJSON:
 		return true
 	case ast.TypeList:
 		if t.Elem == nil {

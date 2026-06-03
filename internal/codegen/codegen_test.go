@@ -3502,6 +3502,13 @@ func TestCodegen_JSONStringifyRequiresJQOptIn(t *testing.T) {
 	}
 }
 
+func TestCodegen_JSONParseRequiresJQOptIn(t *testing.T) {
+	err := compileError(t, `let data = JSON.parse("{}")`)
+	if err == nil || !strings.Contains(err.Error(), "JSON.parse() requires --opt-use-jq") {
+		t.Fatalf("error = %v, want --opt-use-jq requirement", err)
+	}
+}
+
 func TestCodegen_JSONStringifyWithJQ(t *testing.T) {
 	out := compileWithOptions(t, `let user = { id: 1, name: "Victor", active: true }
 let json: string = JSON.stringify(user)
@@ -3518,4 +3525,19 @@ let ok: string = JSON.stringify(true)`, codegen.Options{UseJQ: true})
 	assertContains(t, out, `jq -Rsc 'split("\n")`)
 	assertContains(t, out, `counted=$(jq -cn --arg _k0 'count' --argjson _v0 2 '{($`)
 	assertContains(t, out, `ok=$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+}
+
+func TestCodegen_JSONParsePathExtractionWithJQ(t *testing.T) {
+	out := compileWithOptions(t, `let data = JSON.parse("{\"user\":{\"name\":\"Ada\"},\"items\":[1]}")
+let user = data.user
+let first: number = data.items[0]
+let name: string = user.name
+let json: string = JSON.stringify(user)`, codegen.Options{UseJQ: true})
+	assertContains(t, out, `command -v jq`)
+	assertContains(t, out, `jq -c .`)
+	assertContains(t, out, `--arg _k 'user'`)
+	assertContains(t, out, `--arg _i 0`)
+	assertContains(t, out, `jq -er 'if . == null then empty elif type == "number"`)
+	assertContains(t, out, `jq -er 'if . == null then empty elif type == "string"`)
+	assertContains(t, out, `JSON.stringify() failed`)
 }
