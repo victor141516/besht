@@ -3502,6 +3502,13 @@ func TestCodegen_JSONStringifyRequiresJQOptIn(t *testing.T) {
 	}
 }
 
+func TestCodegen_JSONParseRequiresJQOptIn(t *testing.T) {
+	err := compileError(t, `let data = JSON.parse("{}")`)
+	if err == nil || !strings.Contains(err.Error(), "JSON.parse() requires --opt-use-jq") {
+		t.Fatalf("error = %v, want --opt-use-jq requirement", err)
+	}
+}
+
 func TestCodegen_JSONStringifyWithJQ(t *testing.T) {
 	out := compileWithOptions(t, `let user = { id: 1, name: "Victor", active: true }
 let json: string = JSON.stringify(user)
@@ -3518,4 +3525,32 @@ let ok: string = JSON.stringify(true)`, codegen.Options{UseJQ: true})
 	assertContains(t, out, `jq -Rsc 'split("\n")`)
 	assertContains(t, out, `counted=$(jq -cn --arg _k0 'count' --argjson _v0 2 '{($`)
 	assertContains(t, out, `ok=$(if [ 1 = 1 ]; then printf true; else printf false; fi)`)
+}
+
+func TestCodegen_JSONParsePathExtractionWithJQ(t *testing.T) {
+	out := compileWithOptions(t, `let data = JSON.parse("{\"user\":{\"name\":\"Ada\"},\"items\":[1]}")
+let user = data.user
+let first: number = data.items[0]
+let name: string = user.name
+let json: string = JSON.stringify(user)`, codegen.Options{UseJQ: true})
+	assertContains(t, out, `command -v jq`)
+	assertContains(t, out, `_bst_json_canonical()`)
+	assertContains(t, out, `_bst_json_parse()`)
+	assertContains(t, out, `_bst_json_get_prop()`)
+	assertContains(t, out, `_bst_json_get_index()`)
+	assertContains(t, out, `_bst_json_cell_number()`)
+	assertContains(t, out, `_bst_json_cell_string()`)
+	assertNotContains(t, out, `_bst_json_cell_boolean()`)
+	assertContains(t, out, `jq -c .`)
+	assertContains(t, out, `data=$(_bst_json_parse`)
+	assertContains(t, out, `user=$(_bst_json_get_prop "$data" 'user')`)
+	assertContains(t, out, `first=$(_bst_json_cell_number "$(_bst_json_get_index`)
+	assertContains(t, out, `name=$(_bst_json_cell_string "$(_bst_json_get_prop "$user" 'name')")`)
+	assertContains(t, out, `json=$(_bst_json_compact "$user" 'JSON.stringify() failed')`)
+	if got := strings.Count(out, `if . == null then empty elif type == "number"`); got != 1 {
+		t.Fatalf("number JSON extraction program count = %d, want 1\n\n%s", got, out)
+	}
+	if got := strings.Count(out, `if . == null then empty elif type == "string"`); got != 1 {
+		t.Fatalf("string JSON extraction program count = %d, want 1\n\n%s", got, out)
+	}
 }

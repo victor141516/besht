@@ -1,0 +1,14 @@
+// besht-compile-flags: --opt-use-jq
+let body = "{\"user\":{\"name\":\"Ada\",\"active\":true,\"nick\":null},\"items\":[2,3]}"
+let data = JSON.parse(body)
+let name: string = data.user.name
+let active: boolean = data.user.active
+let first: number = data.items[0]
+let title: string = data.user.title ?? "Engineer"
+let nick: string = data.user.nick ?? "none"
+console.log(name)
+console.log(active)
+console.log(first)
+console.log(title)
+console.log(nick)
+console.log(JSON.stringify(data.items[1]))

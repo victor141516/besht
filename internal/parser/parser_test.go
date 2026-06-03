@@ -112,6 +112,19 @@ func TestParser_ObjectTypeAnnotation(t *testing.T) {
 	}
 }
 
+func TestParser_JSONValueTypeAnnotation(t *testing.T) {
+	prog := mustParse(t, `let data: JSONValue = JSON.parse("{}")
+let name = data.name as string`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	if decl.TypeAnnot == nil || decl.TypeAnnot.Kind != ast.TypeJSON {
+		t.Fatalf("type: got %v, want JSONValue", decl.TypeAnnot)
+	}
+	asExpr := prog.Statements[1].(*ast.LetDecl).Value.(*ast.AsExpr)
+	if asExpr.Type == nil || asExpr.Type.Kind != ast.TypeString {
+		t.Fatalf("assertion type: got %v, want string", asExpr.Type)
+	}
+}
+
 func TestParser_AsTypeAssertion(t *testing.T) {
 	prog := mustParse(t, `let xs = [] as string[]`)
 	decl := prog.Statements[0].(*ast.LetDecl)

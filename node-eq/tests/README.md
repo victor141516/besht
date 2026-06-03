@@ -6,7 +6,7 @@ The comparison fixtures are grouped by purpose:
 - `commands/` covers `$()` command behavior, pipes, and script args.
 - `imports/` keeps Besht and shell import fixtures beside their dependencies.
 - `language/` contains focused language and API parity coverage.
-- `language/json/` contains `JSON.stringify()` fixtures; each one opts in with `--opt-use-jq`.
+- `language/json/` contains JSON parse/path/extraction/stringify fixtures; each one opts in with `--opt-use-jq`.
 - `regressions/` tracks resolved or still-known parity gaps.
 
 Run the recursive suite with:

@@ -35,7 +35,7 @@ besht compile --check script.bsh
 # View source and compiled shell side by side in the terminal
 besht visualize script.bsh
 
-# Opt in to jq-backed JSON.stringify() support
+# Opt in to jq-backed JSON support
 besht compile script.bsh --opt-use-jq
 # Run directly
 besht compile script.bsh | sh
@@ -122,7 +122,7 @@ Files use the `.bsh` extension.
 - Static scalar list literals and variables bound to static scalar lists fold `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles to constants; dynamic searches keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold from compiler-managed metadata.
 - Direct reads of scalar properties from static object literal bindings compile to constants when the object is not assigned, computed-assigned, aliased, or passed to a function.
-- Object literals compile to per-property shell variables; `Object.keys(obj)` returns known compiler-managed object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership. `JSON.stringify(value)` is available for scalar Besht values when compiling with `--opt-use-jq`.
+- Object literals compile to per-property shell variables; `Object.keys(obj)` returns known compiler-managed object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership. `JSON.parse()` and `JSON.stringify(value)` are available when compiling with `--opt-use-jq`.
 - Static scalar list destructuring over literals and variables bound to them emits direct assignments; dynamic destructuring keeps the temp-and-`sed` path.
 - Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct `= 1` shell tests. Non-boolean property conditions keep generic JavaScript-style truthiness.
 - Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters.
@@ -145,7 +145,7 @@ Files use the `.bsh` extension.
 - Semicolons are optional (only required inside `for` headers).
 - `Array.from({ length })` differs from JavaScript: it creates the numeric list `0` through `length - 1` and does not support general iterables or mapper callbacks. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate for compiler-known list values and adds no runtime shape metadata.
 - `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` differ from JavaScript reflection: they use compiler-managed object key metadata, require Besht-compatible keys, and do not emit runtime helpers.
-- `JSON.stringify(value)` differs from JavaScript: it is opt-in through `--opt-use-jq`, invokes `jq` in generated code, and only supports strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects.
+- JSON support is opt-in through `--opt-use-jq` and invokes `jq` in generated code. `JSON.parse()` returns a compact `JSONValue`; property/index access on that value returns another `JSONValue`; `: string`, `: number`, `: boolean`, or `as ...` extract scalars with runtime validation. `JSON.stringify()` supports `JSONValue`, strings, numbers, booleans, null/undefined, scalar lists, and scalar-valued compiler-managed objects.
 - `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
 - Arrow functions can be stored in variables, passed to functions, called as function values, and passed to list callback APIs; direct list callbacks still support the compact inline forms and optional zero-based index parameter.
 - Generated shell elides string runtime helpers unless one-argument string `.includes()`, `.startsWith()`, or `.endsWith()` actually needs them.
@@ -928,13 +928,20 @@ JSON helper:
 
 | Function | Description |
 | -------- | ----------- |
-| `JSON.stringify(value)` | Encode strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects as JSON when compiled with `--opt-use-jq` |
+| `JSON.parse(value)` | Validate and compact JSON text as a `JSONValue` when compiled with `--opt-use-jq` |
+| `JSON.stringify(value)` | Encode `JSONValue`, strings, numbers, booleans, null/undefined, scalar lists, and scalar-valued compiler-managed objects as JSON when compiled with `--opt-use-jq` |
 
-`JSON.stringify()` intentionally differs from JavaScript. It requires the `--opt-use-jq` compiler flag, invokes `jq` in generated code, and supports only strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects. Without the flag, compiling a program that calls `JSON.stringify()` is an error. `JSON.parse()` is not implemented.
+JSON support requires the `--opt-use-jq` compiler flag and invokes `jq` in generated code. Without the flag, compiling a program that calls `JSON.parse()` or `JSON.stringify()` is an error. `JSON.parse(text)` validates immediately with `jq -c .`; invalid JSON prints `[besht] JSON.parse() failed` and exits nonzero. Property and index access on a `JSONValue` returns another `JSONValue`; missing final properties, out-of-range array indexes, and JSON `null` become Besht nullish values for `??`. Accessing through a missing/null intermediate fails unless optional chaining is used. Add `: string`, `: number`, `: boolean`, or `as ...` when you want a JSON scalar extracted into a normal Besht value; wrong non-null JSON types fail at runtime. Generated shell shares JSON path and scalar-extraction helper functions instead of inlining the same jq programs at every read.
 
 ```ts
+let data = JSON.parse("{\"user\":{\"name\":\"Ada\"},\"scores\":[7]}")
+let name: string = data.user.name
+let score = data.scores[0] as number
+let title: string = data.user.title ?? "Engineer"
+
 console.log(JSON.stringify({ id: 7, name: "Ada", active: true }))
 console.log(JSON.stringify(["Ada", "Grace"]))
+console.log(JSON.stringify(data.user))
 console.log(JSON.stringify(Number.parseInt("2a", 10)))
 ```
 
@@ -1110,7 +1117,7 @@ besht compile <file.bsh> --opt-no-add-binaries-check  Omit runtime utility self-
 besht compile <file.bsh> --opt-no-source-map           Omit source comments from compiled output
 besht compile <file.bsh> --opt-resolve-ts-imports      Resolve extensionless imports to .ts only when .bsh is absent
 besht compile <file.bsh> --opt-allow-external-shell-imports  Allow explicit .sh imports outside the compiler root
-besht compile <file.bsh> --opt-use-jq                  Enable jq-backed JSON.stringify() codegen
+besht compile <file.bsh> --opt-use-jq                  Enable jq-backed JSON codegen
 besht --version                     Show version
 besht --help                        Show usage
 ```
@@ -1130,7 +1137,7 @@ make test
 # Run node-eq parity fixtures
 bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests | sort)
 
-# Run only JSON.stringify parity fixtures
+# Run only JSON parity fixtures
 bun node-eq/compare $(rg --files -g '*.bsh' node-eq/tests/language/json | sort)
 
 # Run with coverage report (terminal)
