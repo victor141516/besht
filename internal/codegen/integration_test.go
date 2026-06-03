@@ -1919,6 +1919,20 @@ for (let file in files) {
 	assertContains(t, out, `$file`)
 }
 
+func TestIntegration_ForOfGenericCallbackRuntime(t *testing.T) {
+	out := runCompiledShell(t, `function a(list: Array<string>, cb: (x: string) => void) {
+    for (const element of list) {
+        cb(element)
+    }
+}
+
+a(["foo", "bar", "baz"], (x: string) => console.log(x))
+`)
+	if out != "foo\nbar\nbaz\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
 func TestIntegration_CmdEnv(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "main.bsh", `$("env").env("FOO", "bar").run()

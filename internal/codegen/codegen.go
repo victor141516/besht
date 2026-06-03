@@ -2396,7 +2396,14 @@ func (g *Generator) genArrowFunctionDecl(fnName string, arrow *ast.ArrowExpr, re
 
 	var err error
 	if arrow.Body != nil {
-		err = g.genReturn(&ast.ReturnStmt{Pos: arrow.Pos, Value: arrow.Body})
+		if retType != nil && retType.Kind == ast.TypeVoid {
+			err = g.genExprStmt(&ast.ExprStmt{Pos: arrow.Pos, Expr: arrow.Body})
+			if err == nil {
+				g.line("return 0")
+			}
+		} else {
+			err = g.genReturn(&ast.ReturnStmt{Pos: arrow.Pos, Value: arrow.Body})
+		}
 	} else if arrow.BlockBody != nil {
 		for _, stmt := range arrow.BlockBody.Statements {
 			if err = g.genStmt(stmt); err != nil {
@@ -2851,13 +2858,14 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 			return g.genForStaticList(s, words)
 		}
 	case *ast.IdentExpr:
-		if entries, ok := g.staticEntryListMap[g.resolveVarName(iter.Name)]; ok {
+		iterVar := g.resolveVarName(iter.Name)
+		if entries, ok := g.staticEntryListMap[iterVar]; ok {
 			return g.genForStaticEntryList(s, entries)
 		}
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
-		return g.genForList(s, fmt.Sprintf("\"$%s\"", iter.Name), g.listLengthExpr(iter))
+		return g.genForList(s, fmt.Sprintf("\"$%s\"", iterVar), g.listLengthExpr(iter))
 	case *ast.CmdExpr:
 		pipeline, redirect, err := g.genCmdPipeline(iter)
 		if err != nil {
@@ -7320,6 +7328,8 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeBoolean}
 		case "JSON.stringify":
 			return typeString
+		case "console.log", "console.error":
+			return &ast.Type{Kind: ast.TypeVoid}
 		case "Object.keys", "Object.values":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "Object.entries":

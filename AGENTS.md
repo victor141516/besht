@@ -587,7 +587,10 @@ for (let f in files) {
     $("echo", f).run()
 }
 
-// TypeScript for...of is not supported.
+// TypeScript for...of is accepted as the same value-iteration list loop.
+for (const f of files) {
+    $("echo", f).run()
+}
 
 // Break and continue
 for (f in files) {
@@ -1008,7 +1011,7 @@ Module rewriting must stay lexical-scope aware: `rewriteFnCalls` qualifies real 
 
 **`Array.from({ length })` is narrow by design.** It only supports an object literal with a numeric `length` field (including shorthand `{ length }`) and emits a zero-based numeric list. Do not broaden it to arbitrary iterables or mapper callbacks without adding parser/checker/codegen coverage and docs.
 
-**`of` is not a keyword.** Keep `of` tokenized as `TokIdent` so `Array.of()` and ordinary member/identifier parsing do not depend on a removed `for...of` syntax token. `parseFor()` should only special-case an identifier literal `of` after the loop variable to emit the explicit unsupported-syntax error.
+**`of` is not a keyword.** Keep `of` tokenized as `TokIdent` so `Array.of()` and ordinary member/identifier parsing continue to work. `parseFor()` special-cases an identifier literal `of` only in the loop-header slot and lowers `for (x of xs)`, `for (let x of xs)`, and `for (const x of xs)` to the same `ast.ForStmt` shape as Besht's value-iteration `for...in`.
 
 **`Array.isArray(value)` is static.** It returns true only when codegen can infer `value` as `TypeList`; otherwise it emits false. Do not add runtime array metadata or dynamic shape inspection for this API without a broader object/list representation design.
 
@@ -1020,7 +1023,7 @@ Module rewriting must stay lexical-scope aware: `rewriteFnCalls` qualifies real 
 
 **List predicate callbacks short-circuit in current-shell heredoc loops.** `list.some(callback)`, `list.every(callback)`, `list.find(callback)`, and `list.findIndex(callback)` use direct arrow callbacks with one item parameter or `(item, index)`. Keep callback params in `paramMap`, increment the optional index once per scalar element, and avoid pipeline loops when state must persist inside the generated predicate loop. `find()` must require the nullish runtime helper and initialize its result to `_BESHT_NULLISH_SENTINEL`; no-match must compose with `??`. Nested-list element decoding is not part of these scalar predicate methods yet.
 
-**List expression loops use `for (... in ...)` and run in the current shell.** `for (const move in moves.split("") as string[])` uses a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist. TypeScript `for...of` is rejected by the parser; keep tests and docs on the Besht `in` syntax.
+**List expression loops use value iteration and run in the current shell.** `for (const move in moves.split("") as string[])` and `for (const move of moves.split("") as string[])` use a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist. Keep `for...of` behavior in sync with the existing `for...in` list loop lowering.
 
 **Optional chaining uses flags on existing postfix AST nodes.** `IndexExpr`, `PropertyExpr`, and `MethodCallExpr` have `Optional bool`; keep all AST walkers descending into their receivers, indexes, and arguments. Codegen emits POSIX shell that stores the receiver once, compares it with `_BESHT_NULLISH_SENTINEL`, and returns that same sentinel on short-circuit so `??` can distinguish nullish from `""`, `0`, and `false`. Optional chaining guards nullish receivers only; do not add runtime shape/type checks. General `fn?.()`, `obj.method?.()`, and optional assignment targets remain unsupported.
 

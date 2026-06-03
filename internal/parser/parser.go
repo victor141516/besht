@@ -827,10 +827,7 @@ func (p *Parser) parseFor() (ast.Statement, error) {
 		// Save position, consume ident, peek next
 		nameTok := p.peek()
 		p.advance()
-		if p.peekType() == lexer.TokIdent && p.peek().Literal == "of" {
-			return nil, p.errorf(p.peek(), "for...of is not supported; use Besht list loops with 'in'")
-		}
-		if p.peekType() == lexer.TokIn {
+		if p.peekType() == lexer.TokIn || (p.peekType() == lexer.TokIdent && p.peek().Literal == "of") {
 			p.advance()
 			iter, err := p.parseExpr()
 			if err != nil {
@@ -902,10 +899,7 @@ func (p *Parser) parseDeclaredFor(pos ast.Pos) (ast.Statement, error) {
 			return nil, err
 		}
 	}
-	if p.peekType() == lexer.TokIdent && p.peek().Literal == "of" {
-		return nil, p.errorf(p.peek(), "for...of is not supported; use Besht list loops with 'in'")
-	}
-	if p.peekType() == lexer.TokIn {
+	if p.peekType() == lexer.TokIn || (p.peekType() == lexer.TokIdent && p.peek().Literal == "of") {
 		p.advance()
 		iter, err := p.parseExpr()
 		if err != nil {

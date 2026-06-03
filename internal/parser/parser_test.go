@@ -388,16 +388,32 @@ func TestParser_ForList(t *testing.T) {
 	}
 }
 
-func TestParser_ForOfListUnsupported(t *testing.T) {
-	expectParseErrorContains(t, `for (f of files) {
+func TestParser_ForOfList(t *testing.T) {
+	prog := mustParse(t, `for (f of files) {
     $("echo", f)
-}`, "for...of is not supported")
+}`)
+	stmt := prog.Statements[0].(*ast.ForStmt)
+	ident, ok := stmt.Iterator.(*ast.IdentExpr)
+	if !ok {
+		t.Fatalf("iterator: expected *ast.IdentExpr, got %T", stmt.Iterator)
+	}
+	if stmt.VarName != "f" || ident.Name != "files" {
+		t.Fatalf("for...of parsed wrong loop: var=%q iter=%q", stmt.VarName, ident.Name)
+	}
 }
 
-func TestParser_ForLetOfListUnsupported(t *testing.T) {
-	expectParseErrorContains(t, `for (let f of files) {
+func TestParser_ForDeclaredOfList(t *testing.T) {
+	prog := mustParse(t, `for (const f of files) {
     $("echo", f)
-}`, "for...of is not supported")
+}`)
+	stmt := prog.Statements[0].(*ast.ForStmt)
+	ident, ok := stmt.Iterator.(*ast.IdentExpr)
+	if !ok {
+		t.Fatalf("iterator: expected *ast.IdentExpr, got %T", stmt.Iterator)
+	}
+	if stmt.VarName != "f" || ident.Name != "files" {
+		t.Fatalf("for...of parsed wrong loop: var=%q iter=%q", stmt.VarName, ident.Name)
+	}
 }
 
 func TestParser_CompoundAssignment(t *testing.T) {

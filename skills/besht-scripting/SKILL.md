@@ -637,10 +637,14 @@ for (let f in files) {
   $("echo", f).run();
 }
 
+for (const f of files) {
+  $("echo", f).run();
+}
+
 for (f in files) $("echo", f).run()
 ```
 
-TypeScript `for...of` loops are not supported.
+TypeScript `for...of` loops are supported for list iteration and behave like Besht's value-iteration `for...in` loops.
 
 Static scalar list expressions, static scalar `Array.of(...)` calls, static `Array.from({ length: N })` calls, and variables bound to them compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
 

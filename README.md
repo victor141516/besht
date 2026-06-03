@@ -92,7 +92,7 @@ Files use the `.bsh` extension.
 
 - Type annotations and `as` assertions are accepted for TypeScript-compatible syntax, editor support, and occasional compiler representation hints. They never validate values or produce type mismatch errors.
 - Template literals support `${expr}`, not just `${name}`.
-- TypeScript `for...of` loops are not supported. Use Besht list loops with `for (item in items)` or `for (let item in items)`.
+- TypeScript `for...of` loops are supported as aliases for Besht list loops: `for (item of items)`, `for (const item of items)`, and `for (let item of items)` iterate values like `for (item in items)`.
 - Ternary expressions `cond ? a : b` and nullish coalescing `value ?? fallback` are supported.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
@@ -377,10 +377,14 @@ for (let fruit in fruits) {
   $("echo", fruit).run();
 }
 
+for (const fruit of fruits) {
+  $("echo", fruit).run();
+}
+
 for (fruit in fruits) $("echo", fruit).run()
 ```
 
-TypeScript `for...of` is not supported.
+`for...of` is accepted for TypeScript compatibility and behaves like Besht's value-iteration `for...in` list loop.
 
 **For — command output:**
 
