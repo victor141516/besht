@@ -32,6 +32,28 @@ When a user mentions something that would be a good future improvement but isn't
 >
 > Should I add it?
 
+## To-Do Task Completion Workflow
+
+Tasks in the to-do list must be completed fully before they are removed. Once a task is completely finished, delete it from the to-do list.
+
+If a user asks to work on a task and it is only partially completed because some parts are unclear, clearly explain:
+
+- what was completed
+- what is still pending
+- what questions or doubts need to be clarified
+
+If the task description is vague, tell the user exactly what information is missing and ask for the answers needed to finish the implementation. For example: if you give me these answers, I can complete the implementation.
+
+The only valid reason to stop working on a task is that the requirement is not clear. If the requirements are clear, continue working until the task is fully implemented.
+
+When the task is fully done:
+
+- remove it from the to-do list
+- tell the user that the item was removed from the to-do list
+- summarize the changes made
+- mention that the documentation was updated
+- mention the tests that were added or run
+
 ## Ongoing Skill Improvement Loop
 
 `todo.md` contains the canonical, never-ending process for improving `skills/besht-scripting/SKILL.md` through no-hints validation agents. When continuing that work, read the todo entry first, then use this AGENTS.md file for compiler internals, pitfalls, branch workflow, and test expectations. Keep the skill file itself limited to user-facing Besht syntax and practical examples; put validation process notes in `todo.md` and AGENTS.md.
