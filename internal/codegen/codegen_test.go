@@ -141,7 +141,8 @@ func TestCodegen_FnCallCapture(t *testing.T) {
     return msg
 }
 let r: string = shout("hello")`)
-	assertContains(t, out, `r=$(shout 'hello')`)
+	assertContains(t, out, `_BESHT_RETURN_SLOT='r'`)
+	assertContains(t, out, `shout 'hello'`)
 }
 
 func TestCodegen_IfSimple(t *testing.T) {
@@ -1145,7 +1146,8 @@ let body: string = response.text()`)
 func TestCodegen_FetchQuotesCommandSubstitutionURL(t *testing.T) {
 	out := compile(t, `function makeUrl(): string { return "file:///tmp/data file.txt" }
 let body: string = fetch(makeUrl()).text()`)
-	assertContains(t, out, `curl -sS -- "$(makeUrl)"`)
+	assertContains(t, out, `_BESHT_RETURN_SLOT='_bst_expr_2_26'`)
+	assertContains(t, out, `curl -sS -- "$_bst_expr_2_26"`)
 }
 
 func TestCodegen_PrintBuiltin(t *testing.T) {
@@ -1308,7 +1310,8 @@ func TestCodegen_DynamicLogicalValueExpressionIsNotBooleanWrapped(t *testing.T) 
     return "value"
 }
 console.log(pick() || "fallback")`)
-	assertContains(t, out, `printf '%s\n' "$( _l=$(pick);`)
+	assertContains(t, out, `_BESHT_RETURN_SLOT='_bst_expr_4_13'`)
+	assertContains(t, out, `_l="$_bst_expr_4_13"`)
 	assertNotContains(t, out, `if [ $( _l=$(pick)`)
 	assertNotContains(t, out, `then printf true; else printf false`)
 }
@@ -2108,7 +2111,8 @@ func TestCodegen_ListMapArrow(t *testing.T) {
 	out := compile(t, `let items = ["a", "b"]
 let mapped = items.map(x => x + "!")`)
 	assertContains(t, out, `while IFS= read -r _cb_2_24_x`)
-	assertContains(t, out, `printf '%s\n' "${_cb_2_24_x}!"`)
+	assertContains(t, out, `_map_2_19_append="${_cb_2_24_x}!"`)
+	assertContains(t, out, `done <<__BESHT_MAP_2_19`)
 	assertNotContains(t, out, `local `)
 }
 
@@ -2118,9 +2122,10 @@ let add = (x: string): string => x + suffix
 let out = add("a")`)
 	assertContains(t, out, `_bst_arrow_add_2_11() {`)
 	assertContains(t, out, `_bst_arrow_add_2_11_param_x="$1"`)
-	assertContains(t, out, `printf '%s' "${_bst_arrow_add_2_11_param_x}!"`)
+	assertContains(t, out, `_bst_return_value_2_11="${_bst_arrow_add_2_11_param_x}!"`)
 	assertContains(t, out, `add='_bst_arrow_add_2_11'`)
-	assertContains(t, out, `out=$("$add" 'a')`)
+	assertContains(t, out, `_BESHT_RETURN_SLOT='out'`)
+	assertContains(t, out, `_bst_call "$add" 'a'`)
 	assertNotContains(t, out, `local `)
 }
 
@@ -2128,7 +2133,8 @@ func TestCodegen_ListFilterArrow(t *testing.T) {
 	out := compile(t, `let items = ["a", "b"]
 let picked = items.filter(x => x.startsWith("a"))`)
 	assertContains(t, out, `_bst_starts_with "$_cb_2_27_x" 'a'`)
-	assertContains(t, out, `printf '%s\n' "$_cb_2_27_x"`)
+	assertContains(t, out, `_bst_expr_2_19="$_cb_2_27_x"`)
+	assertContains(t, out, `done <<__BESHT_FILTER_2_19`)
 }
 
 func TestCodegen_ListSomeEveryFindArrows(t *testing.T) {
@@ -2136,10 +2142,10 @@ func TestCodegen_ListSomeEveryFindArrows(t *testing.T) {
 let hasB = items.some((x, i) => x == "b" && i == 1)
 let allNamed = items.every(x => x != "")
 let found = items.find(x => x == "b")`)
-	assertContains(t, out, `_listpred_2_23_result=0`)
-	assertContains(t, out, `_listpred_3_28_result=1`)
+	assertContains(t, out, `_bst_expr_2_17=0`)
+	assertContains(t, out, `_bst_expr_3_21=1`)
 	assertContains(t, out, `break`)
-	assertContains(t, out, `_listfind_4_24_result=$_BESHT_NULLISH_SENTINEL`)
+	assertContains(t, out, `_bst_expr_4_18="$_BESHT_NULLISH_SENTINEL"`)
 	assertContains(t, out, `_BESHT_NULLISH_SENTINEL`)
 	assertNotContains(t, out, `local `)
 	assertNotContains(t, out, `[[`)
@@ -2159,9 +2165,12 @@ func TestCodegen_CallbackReceiversAreQuoted(t *testing.T) {
 let mapped = items.map(x => x + "!")
 let picked = items.filter(x => x.includes(" "))
 let joined = items.reduce((acc, x) => [...acc, x], [] as string[]).join("|")`)
-	assertContains(t, out, `printf '%s\n' "$items" | while IFS= read -r _cb_2_24_x`)
-	assertContains(t, out, `printf '%s\n' "$items" | while IFS= read -r _cb_3_27_x`)
+	assertContains(t, out, `_map_2_19_data="$items"`)
+	assertContains(t, out, `done <<__BESHT_MAP_2_19`)
+	assertContains(t, out, `_filter_3_19_data="$items"`)
+	assertContains(t, out, `done <<__BESHT_FILTER_3_19`)
 	assertContains(t, out, `$(printf '%s\n' "$items")`)
+	assertNotContains(t, out, `printf '%s\n' "$items" | while IFS= read -r`)
 }
 
 func TestCodegen_ComputedObjectKeysAreValidated(t *testing.T) {
@@ -2677,7 +2686,8 @@ func TestCodegen_CmdRedirectHostileTargetsQuoted(t *testing.T) {
 func TestCodegen_CmdWorkdirFunctionPathIsQuotedCommandSubstitution(t *testing.T) {
 	out := compile(t, `function getDir(): string { return "/" }
 $("pwd").workdir(getDir()).run()`)
-	assertContains(t, out, `_bst_workdir="$(getDir)"`)
+	assertContains(t, out, `_BESHT_RETURN_SLOT='_bst_expr_2_18'`)
+	assertContains(t, out, `_bst_workdir="$_bst_expr_2_18"`)
 	assertContains(t, out, `CDPATH= cd "$_bst_workdir" && pwd`)
 }
 
@@ -3315,7 +3325,7 @@ func TestCodegen_TemplateLitInterpolatesVar(t *testing.T) {
 
 func TestCodegen_TemplateLiteralEscapesShellSpecialDollars(t *testing.T) {
 	out := compile(t, "function marker(): string { return `$* $? $$` }\nconsole.log(marker() === `$* $? $$`)")
-	assertContains(t, out, `printf '%s' "\$* \$? \$\$"`)
+	assertContains(t, out, `_bst_return_value_1_29="\$* \$? \$\$"`)
 	assertContains(t, out, `_bst_right="\$* \$? \$\$"`)
 }
 
@@ -3346,7 +3356,7 @@ console.log(u.name)`)
 	assertContains(t, out, `User__set_name()`)
 	assertContains(t, out, `u='u'`)
 	assertContains(t, out, `User__constructor "$u" 'Alice'`)
-	assertContains(t, out, `$(User__greet "$u")`)
+	assertContains(t, out, `$(_BESHT_RETURN_SLOT=; User__greet "$u")`)
 	assertContains(t, out, `_obj_u_name='Bob'`)
 }
 
@@ -3397,10 +3407,10 @@ let kind: string = User.kind`)
 
 	assertContains(t, out, `User__get_label() {`)
 	assertContains(t, out, `User__set_label() {`)
-	assertContains(t, out, `before=$(User__get_label "$u")`)
+	assertContains(t, out, `before=$(_BESHT_RETURN_SLOT=; User__get_label "$u")`)
 	assertContains(t, out, `User__set_label "$u" 'Bob'`)
-	assertContains(t, out, `after=$(User__get_label "$u")`)
-	assertContains(t, out, `kind=$(User__get_kind)`)
+	assertContains(t, out, `after=$(_BESHT_RETURN_SLOT=; User__get_label "$u")`)
+	assertContains(t, out, `kind=$(_BESHT_RETURN_SLOT=; User__get_kind)`)
 	assertNotContains(t, out, `_obj_u_label=`)
 }
 
@@ -3413,7 +3423,7 @@ console.log(MathUtils.PI)
 console.log(MathUtils.round(2.7))`)
 	assertContains(t, out, `_class_MathUtils_PI=3.14159`)
 	assertContains(t, out, `MathUtils__round()`)
-	assertContains(t, out, `$(MathUtils__round 2.7)`)
+	assertContains(t, out, `$(_BESHT_RETURN_SLOT=; MathUtils__round 2.7)`)
 }
 
 func TestCodegen_TypeScriptClassStaticRecordAndLoopState(t *testing.T) {
@@ -3437,7 +3447,7 @@ func TestCodegen_TypeScriptClassStaticRecordAndLoopState(t *testing.T) {
 }`)
 	assertContains(t, out, `_obj__class_Game_Deltas_U=`)
 	assertContains(t, out, `_destructure_6_13=`)
-	assertContains(t, out, `_findidx_4_69=0`)
+	assertContains(t, out, `_bst_expr_4_58=-1`)
 	assertContains(t, out, `done <<__BESHT_FOR_12_5`)
 	assertContains(t, out, `__BESHT_FOR_12_5`)
 	assertNotContains(t, out, `| while IFS= read -r _run_move`)
@@ -3451,7 +3461,7 @@ let mapped = Array.from({ length: 3 }).map((_, i) => {
 })`)
 	assertNotContains(t, out, `_arrfrom_2_14=0`)
 	assertContains(t, out, "0\n1\n2")
-	assertContains(t, out, `_cb_2_45_i=$_cb_2_44_index`)
+	assertContains(t, out, `_cb_2_45_i=$_map_2_39_index`)
 	assertContains(t, out, `(count = count + 1)`)
 	assertContains(t, out, `continue`)
 	assertNotContains(t, out, `local `)

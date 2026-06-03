@@ -195,9 +195,6 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 		if _, ok := c.scope.lookup(s.Name); !ok {
 			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
 		}
-		if _, ok := s.Value.(*ast.ArrowExpr); ok {
-			return &CheckError{Pos: s.Pos, Message: "arrow expressions can only be used as list callbacks"}
-		}
 		return c.checkSemanticExpr(s.Value)
 	case *ast.IndexAssignStmt:
 		if c.consts[s.Name] {

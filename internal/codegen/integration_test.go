@@ -691,7 +691,8 @@ let result: number = double(5)
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `double()`)
-	assertContains(t, out, `result=$(main__double`)
+	assertContains(t, out, `_BESHT_RETURN_SLOT='result'`)
+	assertContains(t, out, `main__double 5`)
 }
 
 func TestIntegration_ControlFlowIfElse(t *testing.T) {
@@ -900,9 +901,9 @@ console.log(msg)
 	}
 	assertContains(t, out, `_BESHT_SHELL_LOADED_legacy_sh`)
 	assertContains(t, out, `. `+shellSingleQuoteForTest(legacyPath))
-	assertContains(t, out, `msg=$(legacy 'one' 'two words')`)
+	assertContains(t, out, `msg=$(_BESHT_RETURN_SLOT=; legacy 'one' 'two words')`)
 	assertNotContains(t, out, `legacy__legacy`)
-	if sourceIdx, callIdx := strings.Index(out, `. `+shellSingleQuoteForTest(legacyPath)), strings.Index(out, `msg=$(legacy 'one' 'two words')`); sourceIdx < 0 || callIdx < 0 || sourceIdx > callIdx {
+	if sourceIdx, callIdx := strings.Index(out, `. `+shellSingleQuoteForTest(legacyPath)), strings.Index(out, `msg=$(_BESHT_RETURN_SLOT=; legacy 'one' 'two words')`); sourceIdx < 0 || callIdx < 0 || sourceIdx > callIdx {
 		t.Fatalf("shell import source should appear before call\n--- script ---\n%s", out)
 	}
 	shPath := filepath.Join(dir, "main.sh")
@@ -1107,7 +1108,7 @@ func TestIntegration_EntryStdlibDeclarationAutoLoadedForBundledCompile(t *testin
 	if err != nil {
 		t.Fatalf("CompileFile with entry stdlib.d.bsh: %v", err)
 	}
-	assertContains(t, out, `name=$(externalName 'world')`)
+	assertContains(t, out, `name=$(_BESHT_RETURN_SLOT=; externalName 'world')`)
 	assertNotContains(t, out, `main__externalName`)
 	assertNotContains(t, out, `stdlib`)
 }
@@ -1756,7 +1757,9 @@ console.log(marked.join(","))
 `)
 	out := compileFile(t, path)
 	assertContains(t, out, `lib__fmt__bang`)
-	assertContains(t, out, `marked=$(printf '%s\n' "$items"`)
+	assertContains(t, out, `_map_3_19_data="$items"`)
+	assertContains(t, out, `lib__fmt__bang "$_cb_3_24_x"`)
+	assertContains(t, out, `marked="$_bst_expr_3_19"`)
 }
 
 func TestIntegration_ListMapFilterArrows(t *testing.T) {
@@ -1820,6 +1823,96 @@ values.forEach(add)
 console.log(total.toString())
 `)
 	if out != "6\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestIntegration_ReturnedClosureCallbacksRuntime(t *testing.T) {
+	out := runCompiledShell(t, `function makeCounter(start: number): () => string {
+    let n = start
+    return (): string => {
+        n = n + 1
+        return n.toString()
+    }
+}
+function makeStartsWith(prefix: string): (x: string) => boolean {
+    return (x: string): boolean => x.startsWith(prefix)
+}
+function apply(value: string, cb: (x: string) => boolean): string {
+    return cb(value).toString()
+}
+let a = makeCounter(0)
+let b = makeCounter(10)
+console.log(a())
+console.log(a())
+console.log(b())
+console.log(a() + "!")
+let items = ["apple", "banana", "apricot"]
+let startsA = makeStartsWith("a")
+console.log(items.filter(startsA).join(","))
+console.log(items.filter(makeStartsWith("b")).join(","))
+console.log(apply("apricot", makeStartsWith("a")))
+console.log(items.map(item => a() + item).join("|"))
+console.log(a())
+`)
+	want := "1\n2\n11\n3!\napple,apricot\nbanana\ntrue\n4apple|5banana|6apricot\n7\n"
+	if out != want {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestIntegration_ListCallbackExpressionsPreserveSideEffectsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `function makeCounter(start: number): () => string {
+    let n = start
+    return (): string => {
+        n = n + 1
+        return n.toString()
+    }
+}
+let next = makeCounter(0)
+let values = ["a", "b"]
+console.log(values.map(v => next() + v).join(","))
+console.log(next())
+console.log(values.filter(v => Number.parseInt(next(), 10) > 4).join(","))
+console.log(next())
+console.log(values.some(v => Number.parseInt(next(), 10) > 7))
+console.log(next())
+console.log(values.every(v => Number.parseInt(next(), 10) < 12))
+console.log(next())
+console.log(values.find(v => Number.parseInt(next(), 10) > 13) ?? "none")
+console.log(next())
+console.log(values.findIndex(v => Number.parseInt(next(), 10) > 16))
+console.log(next())
+
+let storedNext = makeCounter(30)
+let storedMark = (value: string): string => storedNext() + value
+console.log(values.map(storedMark).join(","))
+console.log(storedNext())
+`)
+	want := "1a,2b\n3\nb\n6\ntrue\n9\ntrue\n12\nb\n15\n1\n18\n31a,32b\n33\n"
+	if out != want {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestIntegration_ReduceStoredObjectCallbackRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let words = ["a", "b", "a"]
+let add = (acc: object, word: string): object => {
+    if (Object.hasOwn(acc, word)) {
+        acc[word] = (Number.parseInt(acc[word], 10) + 1).toString()
+    } else {
+        acc[word] = "1"
+    }
+    return acc
+}
+let counts = words.reduce(add, {})
+console.log(Object.keys(counts).join(","))
+console.log(Object.values(counts).join(","))
+console.log(Object.hasOwn(counts, "a"))
+console.log(Object.hasOwn(counts, "c"))
+`)
+	want := "a,b\n2,1\ntrue\nfalse\n"
+	if out != want {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }
@@ -2246,7 +2339,7 @@ console.log(MathUtils.PI)
 console.log(MathUtils.round(2.7))`)
 	out := compileFile(t, path)
 	assertContains(t, out, `classes__User__constructor "$u" 'Alice' 30`)
-	assertContains(t, out, `printf '%s\n' "$(classes__User__greet "$u")"`)
+	assertContains(t, out, `printf '%s\n' "$(_BESHT_RETURN_SLOT=; classes__User__greet "$u")"`)
 	assertContains(t, out, `_class_classes__MathUtils_PI=3.14159`)
 }
 

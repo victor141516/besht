@@ -31,3 +31,45 @@ let addIndexed = (value: string, index: number): void => {
 let values = ["2", "3"]
 values.forEach(addIndexed)
 console.log(total.toString())
+
+function makeCounter(start: number): () => string {
+  let n = start
+  return (): string => {
+    n = n + 1
+    return n.toString()
+  }
+}
+
+function makeStartsWith(prefix: string): (x: string) => boolean {
+  return (x: string): boolean => x.startsWith(prefix)
+}
+
+function applyPredicate(value: string, cb: (x: string) => boolean): string {
+  return cb(value).toString()
+}
+
+let counterA = makeCounter(0)
+let counterB = makeCounter(10)
+console.log(counterA())
+console.log(counterA())
+console.log(counterB())
+console.log(counterA() + "!")
+
+let startsA = makeStartsWith("a")
+console.log(items.filter(startsA).join(","))
+console.log(items.filter(makeStartsWith("b")).join(","))
+console.log(applyPredicate("apricot", makeStartsWith("a")))
+console.log(items.map(item => counterA() + item).join("|"))
+console.log(counterA())
+
+let countWord = (acc: object, word: string): object => {
+  if (Object.hasOwn(acc, word)) {
+    acc[word] = (Number.parseInt(acc[word], 10) + 1).toString()
+  } else {
+    acc[word] = "1"
+  }
+  return acc
+}
+let wordCounts = items.reduce(countWord, {})
+console.log(Object.keys(wordCounts).join(","))
+console.log(Object.values(wordCounts).join(","))

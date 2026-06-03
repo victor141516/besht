@@ -272,11 +272,32 @@ function applyName(name: string, cb: (name: string) => string): string {
 let called = applyName("bob", addBang)
 let markedNames = names.map(addBang)
 
+function makeCounter(start: number): () => string {
+    let n = start
+    return (): string => {
+        n = n + 1
+        return n.toString()
+    }
+}
+let next = makeCounter(0)
+console.log(next()) // 1
+console.log(next()) // 2
+
+function makePrefixFilter(prefix: string): (name: string) => boolean {
+    return (name: string): boolean => name.startsWith(prefix)
+}
+let aOnly = names.filter(makePrefixFilter("a"))
+
 // reduce with block body and object accumulator
 let counts = words.reduce((acc, word) => {
     acc[word] = (acc[word] || 0) + 1
     return acc
 }, {})
+let countWord = (acc: object, word: string): object => {
+    acc[word] = (acc[word] || 0) + 1
+    return acc
+}
+let storedCounts = words.reduce(countWord, {})
 
 // reduce with expression body
 let total = nums.reduce((acc, n) => acc + n, 0)
@@ -290,7 +311,7 @@ let labels = cleaned
     .join(", ")
 ```
 
-`Array.from({ length })` differs from JavaScript: it creates `[0, 1, ... length - 1]` and does not support general iterables or mapper callbacks. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows support expression or block bodies, and stored function callbacks support scalar/list accumulator returns. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Value-position function calls use the same stdout-return model as named Besht functions.
+`Array.from({ length })` differs from JavaScript: it creates `[0, 1, ... length - 1]` and does not support general iterables or mapper callbacks. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows and stored callbacks support scalar/list accumulators, and stored Besht callbacks can mutate object accumulators. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Returned arrows capture independent state, callback factories can be passed directly to list methods, and direct function-value calls in value position preserve captured mutations. List callback expressions used in value or condition position preserve assignment, `Set.add()`, and returned-closure side effects after `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` complete.
 
 Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants. Unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold from compiler-managed static object metadata; mutated or dynamic objects keep metadata-backed output so assignments stay visible.
 

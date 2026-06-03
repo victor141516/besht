@@ -723,6 +723,22 @@ function applyName(name: string, cb: (name: string) => string): string {
 let called = applyName("bob", addBang)
 let markedNames = names.map(addBang)
 
+function makeCounter(start: number): () => string {
+    let n = start
+    return (): string => {
+        n = n + 1
+        return n.toString()
+    }
+}
+let next = makeCounter(0)
+console.log(next()) // 1
+console.log(next()) // 2
+
+function makePrefixFilter(prefix: string): (name: string) => boolean {
+    return (name: string): boolean => name.startsWith(prefix)
+}
+let aOnly = names.filter(makePrefixFilter("a"))
+
 // reduce with expression body
 let total = nums.reduce((acc, n) => acc + n, 0)
 let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("\n")
@@ -739,10 +755,15 @@ let counts = words.reduce((acc, word) => {
     acc[word] = (acc[word] || 0) + 1
     return acc
 }, {})
+let countWord = (acc: object, word: string): object => {
+    acc[word] = (acc[word] || 0) + 1
+    return acc
+}
+let storedCounts = words.reduce(countWord, {})
 console.log(counts)
 ```
 
-`.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty list. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty list. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows support expression or block bodies, and stored function callbacks support scalar/list accumulator returns. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, runs stored callback calls in the current shell so outer assignments and `Set.add()` side effects persist, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Arrow values lower to generated shell functions; callback parameters use function-scoped shell names, and value-position function calls follow the same stdout-return model as named Besht functions.
+`.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty list. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty list. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows and stored callbacks support scalar/list accumulators, and stored Besht callbacks can mutate compiler-managed object accumulators. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, runs stored callback calls in the current shell so outer assignments and `Set.add()` side effects persist, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Arrow values lower to generated shell functions or closure ids; returned arrows get independent captured environments, callback factories can be passed directly to list methods, and direct function-value calls in value position use Besht's return-slot path so captured mutations persist. List callback expressions used in value or condition position run in the current shell, so assignment, `Set.add()`, and returned-closure mutations persist after `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` complete.
 
 ### List indexing
 

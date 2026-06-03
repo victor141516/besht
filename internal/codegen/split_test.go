@@ -157,7 +157,7 @@ func TestSplit_EntryStdlibDeclarationAutoLoadedWithoutOutput(t *testing.T) {
 	if _, ok := files["main.sh"]; !ok {
 		t.Fatalf("main.sh not found; got: %v", files)
 	}
-	assertContains(t, files["main.sh"], `name=$(externalName 'world')`)
+	assertContains(t, files["main.sh"], `name=$(_BESHT_RETURN_SLOT=; externalName 'world')`)
 	assertNotContains(t, files["main.sh"], `main__externalName`)
 	if _, ok := files["stdlib.sh"]; ok {
 		t.Fatal("stdlib.sh should not be emitted for stdlib.d.bsh")

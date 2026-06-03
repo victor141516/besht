@@ -200,7 +200,7 @@ func (c *Compiler) load(absPath string) error {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
 			if fn.Exported {
-				retType := inferFunctionReturnType(fn.Body.Statements)
+				retType := declaredOrInferredFunctionReturnType(fn)
 				qualName := modNameToPrefix(modName) + "__" + fn.Name
 				sig := &checker.FnSig{
 					Params:     fn.Params,
@@ -777,6 +777,26 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 		return &ast.Type{Kind: ast.TypeBoolean}
 	case *ast.ObjectLit:
 		return &ast.Type{Kind: ast.TypeObject}
+	case *ast.ArrowExpr:
+		var params []*ast.Type
+		for _, param := range e.Params {
+			if param.Type != nil {
+				params = append(params, param.Type)
+			} else {
+				params = append(params, &ast.Type{Kind: ast.TypeString})
+			}
+		}
+		ret := e.ReturnType
+		if ret == nil && e.Body != nil {
+			ret = inferExportValueType(e.Body)
+		}
+		if ret == nil && e.BlockBody != nil {
+			ret = inferFunctionReturnType(e.BlockBody.Statements)
+		}
+		if ret == nil {
+			ret = &ast.Type{Kind: ast.TypeVoid}
+		}
+		return &ast.Type{Kind: ast.TypeFunction, Params: params, Return: ret}
 	case *ast.BuiltinCallExpr:
 		switch e.Name {
 		case "fetch":
@@ -861,6 +881,13 @@ func inferFunctionReturnType(stmts []ast.Statement) *ast.Type {
 		return typ
 	}
 	return &ast.Type{Kind: ast.TypeVoid}
+}
+
+func declaredOrInferredFunctionReturnType(fn *ast.FnDecl) *ast.Type {
+	if fn.ReturnType != nil {
+		return fn.ReturnType
+	}
+	return inferFunctionReturnType(fn.Body.Statements)
 }
 
 func inferReturnTypeFromStatements(stmts []ast.Statement) (*ast.Type, bool) {
@@ -1350,6 +1377,7 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	}
 	g.fnReturnMap = make(map[string]*ast.Type)
 	g.fnValueMap = make(map[string]string)
+	g.generatedFnMap = make(map[string]bool)
 	for name, qualName := range importMap {
 		g.fnValueMap[name] = qualName
 		g.fnValueMap[qualName] = qualName
@@ -1390,12 +1418,14 @@ func (g *moduleGenerator) generateModule(prog *ast.Program) (string, error) {
 	for _, stmt := range prog.Statements {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
-			retType := inferFunctionReturnType(fn.Body.Statements)
+			retType := declaredOrInferredFunctionReturnType(fn)
 			qualName := g.qualifyFnName(fn.Name)
 			g.fnReturnMap[qualName] = retType
 			g.fnReturnMap[fn.Name] = retType
 			g.fnValueMap[fn.Name] = qualName
 			g.fnValueMap[qualName] = qualName
+			g.generatedFnMap[fn.Name] = true
+			g.generatedFnMap[qualName] = true
 			var pnames []string
 			for _, p := range fn.Params {
 				pnames = append(pnames, p.Name)
@@ -1548,19 +1578,26 @@ func (g *moduleGenerator) genModuleExprStmt(s *ast.ExprStmt) error {
 		if err != nil {
 			return err
 		}
+		fnName := qualName
+		if qualName == call.Name {
+			fnName, err = g.fnCallCommand(call.Name)
+			if err != nil {
+				return err
+			}
+		}
 		retType := g.fnReturnMap[call.Name]
 		isVoid := retType == nil || retType.Kind == ast.TypeVoid
 		if isVoid {
 			if len(argStrs) == 0 {
-				g.line(qualName)
+				g.line(fnName)
 			} else {
-				g.line(fmt.Sprintf("%s %s", qualName, strings.Join(argStrs, " ")))
+				g.line(fmt.Sprintf("%s %s", fnName, strings.Join(argStrs, " ")))
 			}
 		} else {
 			if len(argStrs) == 0 {
-				g.line(qualName)
+				g.line(fnName)
 			} else {
-				g.line(fmt.Sprintf("%s %s", qualName, strings.Join(argStrs, " ")))
+				g.line(fmt.Sprintf("%s %s", fnName, strings.Join(argStrs, " ")))
 			}
 		}
 		return nil
@@ -1637,19 +1674,26 @@ func (g *moduleGenerator) genModuleFnBodyStmt(stmt ast.Statement) error {
 			if err != nil {
 				return err
 			}
+			fnName := qualName
+			if qualName == call.Name {
+				fnName, err = g.fnCallCommand(call.Name)
+				if err != nil {
+					return err
+				}
+			}
 			retType := g.fnReturnMap[call.Name]
 			isVoid := retType == nil || retType.Kind == ast.TypeVoid
 			if isVoid {
 				if len(argStrs) == 0 {
-					g.line(qualName)
+					g.line(fnName)
 				} else {
-					g.line(fmt.Sprintf("%s %s", qualName, strings.Join(argStrs, " ")))
+					g.line(fmt.Sprintf("%s %s", fnName, strings.Join(argStrs, " ")))
 				}
 			} else {
 				if len(argStrs) == 0 {
-					g.line(fmt.Sprintf("$(%s)", qualName))
+					g.line(fmt.Sprintf("$(%s=; %s)", returnSlotVar, fnName))
 				} else {
-					g.line(fmt.Sprintf("$(%s %s)", qualName, strings.Join(argStrs, " ")))
+					g.line(fmt.Sprintf("$(%s=; %s %s)", returnSlotVar, fnName, strings.Join(argStrs, " ")))
 				}
 			}
 			return nil

@@ -105,8 +105,6 @@ Remaining future work:
 - The larger move away from `list<T>` terminology toward `Array<T>` / `T[]` as the preferred user-facing type in docs, examples, declarations, and diagnostics.
 - Expand object APIs only after preserving the current no-runtime-metadata boundary. Near candidates are `Object.assign()` and `Object.fromEntries()`; nested `Object.values()` / `Object.entries()` support requires a broader object/list representation design.
 - `JSON.parse()` and `JSON.stringify()` are implemented as opt-in jq-backed slices (`--opt-use-jq`). `JSON.parse()` returns compact `JSONValue` data with jq-backed path access and scalar extraction; `JSON.stringify()` handles `JSONValue`, strings, numbers, booleans, null/undefined, scalar lists, and scalar-valued compiler-managed objects.
-- General callback values have a first slice: arrows can be stored, called, passed to functions, and passed to list callback APIs. Full JavaScript closure semantics for returned callback instances and mutation persistence in every value-position call still need a broader return-slot/environment design.
-
 Implementation notes:
 
 - Parser/checker/codegen recognize `Besht.*`, `process.*`, `Array.*`, `Object.*`, `Boolean`, `Number`, `Math`, and other standard namespaces enough for the implemented slices. Future namespaces such as `JSON` must continue to be exempt from module qualification.
@@ -191,24 +189,3 @@ Implementation notes:
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
 - Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Every added API needs checker, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.
-
----
-
-## Arrow functions and callbacks
-
-**Status: first general function-value slice implemented.** Direct list callbacks remain supported, and arrow functions can now be stored in variables, passed to functions, called as `cb(value)`, and passed as stored callbacks to `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, scalar/list accumulator `.reduce()`, and statement-position `.forEach()`. Parenthesized arrows may include return hints such as `(x: string): string => x`.
-
-Continue expanding JavaScript/TypeScript callback syntax so general callback values can be implemented cleanly.
-
-Implemented decisions:
-
-- Arrow functions are function values, not only method-specific callback syntax.
-- Stored arrow callback parameters are mangled as `<function_name>_param_<param_name>`.
-- Stored `.forEach(callback)` invokes callbacks in the current shell so outer assignment and `Set.add()` side effects persist.
-- Module qualification is lexical-scope aware so `cb(value)` remains a function-value call when `cb` is a parameter or variable.
-
-Remaining future work:
-
-- Full JavaScript closure semantics for value-position calls and returned callback instances need a broader return-slot/environment design. Current value-position calls use the same stdout command-substitution model as named Besht functions, so mutation persistence is not guaranteed there.
-- Object-accumulator `.reduce(storedCallback, {})` is deferred; keep using a direct arrow callback for compiler-managed object accumulator mutations.
-- Callback-returning APIs and multiple independent closure instances still need dedicated representation work.

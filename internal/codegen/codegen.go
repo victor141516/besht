@@ -13,6 +13,7 @@ import (
 )
 
 const nullishSentinelVar = "_BESHT_NULLISH_SENTINEL"
+const returnSlotVar = "_BESHT_RETURN_SLOT"
 
 type Generator struct {
 	sb                   strings.Builder
@@ -20,6 +21,7 @@ type Generator struct {
 	currentFn            string
 	fnReturnMap          map[string]*ast.Type
 	fnValueMap           map[string]string
+	generatedFnMap       map[string]bool
 	varTypeMap           map[string]*ast.Type // codegen-level var -> inferred type (list detection)
 	inFunction           bool
 	inLoop               bool
@@ -63,6 +65,8 @@ type Generator struct {
 	cmdChains            map[string]ast.Expression
 	reduceReturns        []reduceReturnContext
 	mapReturns           []mapReturnContext
+	closureReturns       []closureReturnContext
+	deferFnCallPreEval   int
 	UseJQ                bool
 }
 
@@ -74,6 +78,18 @@ type reduceReturnContext struct {
 
 type mapReturnContext struct {
 	indexVar string
+}
+
+type closureReturnContext struct {
+	envVar   string
+	captures []closureCapture
+}
+
+type closureCapture struct {
+	name string
+	key  string
+	temp string
+	src  string
 }
 
 type staticEntryLoopFields struct {
@@ -160,6 +176,7 @@ func New() *Generator {
 	return &Generator{
 		fnReturnMap:          make(map[string]*ast.Type),
 		fnValueMap:           make(map[string]string),
+		generatedFnMap:       make(map[string]bool),
 		varTypeMap:           make(map[string]*ast.Type),
 		paramMap:             make(map[string]string),
 		globalVarMap:         make(map[string]string),
@@ -1180,6 +1197,24 @@ const (
 `
 	beshtRuntimeHelperIncludes = `_bst_includes()    { case "$1" in *"$2"*) return 0;; *) return 1;; esac; }
 `
+	beshtRuntimeHelperFunctionCall = `_bst_call() {
+  _bst_fn=$1
+  shift
+  case "$_bst_fn" in ''|*[!A-Za-z0-9_]*)
+    printf '[besht] invalid function value\n' >&2
+    return 127
+  esac
+  case "$_bst_fn" in
+    _bst_closure_*)
+      eval "_bst_body=\${_bst_closure_body_${_bst_fn}}"
+      "$_bst_body" "$_bst_fn" "$@"
+      ;;
+    *)
+      "$_bst_fn" "$@"
+      ;;
+  esac
+}
+`
 	beshtRuntimeHelperHexByte = `_bst_hex_byte() {
   awk -v _s="$1" -v _i="$2" 'BEGIN{_s=substr(_s,_i+1,2);sub(/^[[:space:]]+/,"",_s);_sign=1;if(substr(_s,1,1)=="+")_s=substr(_s,2);else if(substr(_s,1,1)=="-"){_sign=-1;_s=substr(_s,2)}if(substr(_s,1,2)=="0x"||substr(_s,1,2)=="0X")_s=substr(_s,3);_digits="0123456789abcdef";for(_j=1;_j<=length(_s);_j++){_d=index(_digits,tolower(substr(_s,_j,1)))-1;if(_d<0)break;_value=_value*16+_d;_seen++}printf "%d",(_seen?_sign*_value:0)}'
 }
@@ -1400,6 +1435,9 @@ func runtimeHelpersSource(helpers map[string]bool) string {
 	if helpers["includes"] {
 		sb.WriteString(beshtRuntimeHelperIncludes)
 	}
+	if helpers["functionCall"] {
+		sb.WriteString(beshtRuntimeHelperFunctionCall)
+	}
 	if helpers["hexByte"] {
 		sb.WriteString(beshtRuntimeHelperHexByte)
 	}
@@ -1526,9 +1564,11 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 	for _, stmt := range prog.Statements {
 		switch fn := stmt.(type) {
 		case *ast.FnDecl:
-			retType := inferFunctionReturnType(fn.Body.Statements)
+			retType := declaredOrInferredFunctionReturnType(fn)
 			g.fnReturnMap[fn.Name] = retType
 			g.fnValueMap[fn.Name] = mangle(fn.Name)
+			g.generatedFnMap[fn.Name] = true
+			g.generatedFnMap[mangle(fn.Name)] = true
 			var pnames []string
 			for _, p := range fn.Params {
 				pnames = append(pnames, p.Name)
@@ -1793,6 +1833,29 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 				return nil
 			}
 		}
+	}
+
+	if call, ok := unwrapAsExpr(s.Value).(*ast.FnCallExpr); ok && g.fnCallSupportsReturnSlot(call.Name) {
+		if err := g.genFnCallIntoVar(varName, call); err != nil {
+			return err
+		}
+		if s.TypeAnnot != nil {
+			g.varTypeMap[varName] = s.TypeAnnot
+		} else if inferred := g.inferReceiverType(s.Value); inferred != nil {
+			g.varTypeMap[varName] = inferred
+		}
+		delete(g.objAliasMap, s.Name)
+		delete(g.stringConstMap, varName)
+		delete(g.numConstMap, varName)
+		delete(g.boolConstMap, varName)
+		delete(g.staticListMap, varName)
+		delete(g.staticListValues, varName)
+		delete(g.staticSetMap, varName)
+		delete(g.staticNullishMap, varName)
+		if g.listLenMap != nil {
+			delete(g.listLenMap, varName)
+		}
+		return nil
 	}
 
 	refValue, hasObjectRefValue := g.objectRefValue(s.Value)
@@ -2248,6 +2311,201 @@ func (g *Generator) currentMapReturn() (mapReturnContext, bool) {
 	return g.mapReturns[len(g.mapReturns)-1], true
 }
 
+func (g *Generator) withDeferredFnCallPreEval(body func() error) error {
+	g.deferFnCallPreEval++
+	defer func() { g.deferFnCallPreEval-- }()
+	return body()
+}
+
+func (g *Generator) withClosureReturn(ctx closureReturnContext, body func() error) error {
+	g.closureReturns = append(g.closureReturns, ctx)
+	defer func() {
+		g.closureReturns = g.closureReturns[:len(g.closureReturns)-1]
+	}()
+	return body()
+}
+
+func (g *Generator) currentClosureReturn() (closureReturnContext, bool) {
+	if len(g.closureReturns) == 0 {
+		return closureReturnContext{}, false
+	}
+	return g.closureReturns[len(g.closureReturns)-1], true
+}
+
+func (g *Generator) emitClosureCaptureSync() {
+	ctx, ok := g.currentClosureReturn()
+	if !ok {
+		return
+	}
+	for _, cap := range ctx.captures {
+		g.line(fmt.Sprintf("eval \"_bst_closure_${%s}_%s=\\\"\\$%s\\\"\"", ctx.envVar, cap.key, cap.temp))
+	}
+}
+
+func (g *Generator) closureCaptures(arrow *ast.ArrowExpr) []closureCapture {
+	if len(g.paramMap) == 0 {
+		return nil
+	}
+	shadowed := make(map[string]bool, len(arrow.Params))
+	for _, param := range arrow.Params {
+		shadowed[param.Name] = true
+	}
+	names := make([]string, 0, len(g.paramMap))
+	for name := range g.paramMap {
+		if shadowed[name] {
+			continue
+		}
+		if global, ok := g.globalVarMap[name]; ok && global == g.paramMap[name] {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	captures := make([]closureCapture, 0, len(names))
+	for _, name := range names {
+		key := sanitizeShellIdentifier(name)
+		if key == "" {
+			continue
+		}
+		captures = append(captures, closureCapture{name: name, key: key, src: g.paramMap[name]})
+	}
+	return captures
+}
+
+func (g *Generator) genClosureBodyDecl(bodyName string, arrow *ast.ArrowExpr, retType *ast.Type, captures []closureCapture) error {
+	g.fnReturnMap[bodyName] = retType
+	g.fnValueMap[bodyName] = bodyName
+	g.generatedFnMap[bodyName] = true
+	g.line(fmt.Sprintf("%s() {", bodyName))
+	g.push()
+
+	prevFn := g.currentFn
+	prevInFn := g.inFunction
+	prevParamMap := g.paramMap
+	prevObjAliasMap := g.objAliasMap
+	prevFnParamTypes := g.fnParamTypes
+	prevObjFieldsMap := g.objFieldsMap
+	prevObjPropTypeMap := g.objPropTypeMap
+	prevStaticObjectMap := g.staticObjectMap
+	prevStaticObjectEntryMap := g.staticObjectEntryMap
+	prevStaticObjectValueMap := g.staticObjectValueMap
+	prevStaticNullishMap := g.staticNullishMap
+	prevObjectConstMap := g.objectConstMap
+	prevStringConstMap := g.stringConstMap
+	prevStaticSetMap := g.staticSetMap
+	prevBoolConstMap := g.boolConstMap
+	prevNumConstMap := g.numConstMap
+
+	envVar := bodyName + "_env"
+	caps := make([]closureCapture, len(captures))
+	copy(caps, captures)
+	g.currentFn = bodyName
+	g.inFunction = true
+	g.paramMap = cloneStringMap(prevParamMap)
+	g.objAliasMap = cloneObjectRefMap(prevObjAliasMap)
+	g.fnParamTypes = cloneTypeMap(prevFnParamTypes)
+	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
+	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
+	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
+	g.staticObjectValueMap = cloneObjectFieldsMap(prevStaticObjectValueMap)
+	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
+	g.objectConstMap = cloneStringMap(prevObjectConstMap)
+	g.stringConstMap = cloneStringMap(prevStringConstMap)
+	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
+	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
+	g.numConstMap = cloneNumberMap(prevNumConstMap)
+
+	g.line(fmt.Sprintf("%s=\"$1\"", envVar))
+	g.line("shift")
+	for i := range caps {
+		caps[i].temp = fmt.Sprintf("%s_capture_%s", bodyName, caps[i].key)
+		g.paramMap[caps[i].name] = caps[i].temp
+		delete(g.objAliasMap, caps[i].name)
+		if typ := prevFnParamTypes[caps[i].name]; typ != nil {
+			g.fnParamTypes[caps[i].name] = typ
+			g.varTypeMap[caps[i].temp] = typ
+		} else if typ := g.varTypeMap[caps[i].src]; typ != nil {
+			g.varTypeMap[caps[i].temp] = typ
+		}
+		g.line(fmt.Sprintf("eval \"%s=\\\"\\${_bst_closure_${%s}_%s}\\\"\"", caps[i].temp, envVar, caps[i].key))
+	}
+	for i, param := range arrow.Params {
+		varName := arrowParamVar(bodyName, param.Name)
+		g.paramMap[param.Name] = varName
+		delete(g.objAliasMap, param.Name)
+		if param.Type != nil {
+			g.fnParamTypes[param.Name] = param.Type
+			g.varTypeMap[varName] = param.Type
+		}
+		g.line(fmt.Sprintf("%s=\"$%d\"", varName, i+1))
+	}
+	if len(caps) > 0 || len(arrow.Params) > 0 {
+		g.line("")
+	}
+
+	var err error
+	ctx := closureReturnContext{envVar: envVar, captures: caps}
+	err = g.withClosureReturn(ctx, func() error {
+		if arrow.Body != nil {
+			if retType != nil && retType.Kind == ast.TypeVoid {
+				if err := g.genExprStmt(&ast.ExprStmt{Pos: arrow.Pos, Expr: arrow.Body}); err != nil {
+					return err
+				}
+				g.emitClosureCaptureSync()
+				g.line("return 0")
+				return nil
+			}
+			return g.genReturn(&ast.ReturnStmt{Pos: arrow.Pos, Value: arrow.Body})
+		}
+		if arrow.BlockBody != nil {
+			for _, stmt := range arrow.BlockBody.Statements {
+				if err := g.genStmt(stmt); err != nil {
+					return err
+				}
+			}
+			g.emitClosureCaptureSync()
+			g.line("return 0")
+		}
+		return nil
+	})
+
+	g.currentFn = prevFn
+	g.inFunction = prevInFn
+	g.paramMap = prevParamMap
+	g.objAliasMap = prevObjAliasMap
+	g.fnParamTypes = prevFnParamTypes
+	g.objFieldsMap = prevObjFieldsMap
+	g.objPropTypeMap = prevObjPropTypeMap
+	g.staticObjectMap = prevStaticObjectMap
+	g.staticObjectEntryMap = prevStaticObjectEntryMap
+	g.staticObjectValueMap = prevStaticObjectValueMap
+	g.staticNullishMap = prevStaticNullishMap
+	g.objectConstMap = prevObjectConstMap
+	g.stringConstMap = prevStringConstMap
+	g.staticSetMap = prevStaticSetMap
+	g.boolConstMap = prevBoolConstMap
+	g.numConstMap = prevNumConstMap
+
+	g.pop()
+	g.line("}")
+	g.line("")
+	return err
+}
+
+func (g *Generator) genClosureInstantiation(targetVar, bodyName string, captures []closureCapture, pos ast.Pos) {
+	g.requireRuntimeHelper("functionCall")
+	seqVar := fmt.Sprintf("_bst_closure_seq_%d_%d", pos.Line, pos.Column)
+	valueVar := fmt.Sprintf("_bst_closure_value_%d_%d", pos.Line, pos.Column)
+	g.line(fmt.Sprintf("%s=$(( ${%s:-0} + 1 ))", seqVar, seqVar))
+	g.line(fmt.Sprintf("%s=%s", targetVar, fmt.Sprintf("\"_bst_closure_%d_%d_${%s}\"", pos.Line, pos.Column, seqVar)))
+	g.line(fmt.Sprintf("%s=%s", valueVar, shellQuote(bodyName)))
+	g.line(fmt.Sprintf("eval \"_bst_closure_body_${%s}=\\$%s\"", targetVar, valueVar))
+	for _, cap := range captures {
+		g.line(fmt.Sprintf("eval \"_bst_closure_${%s}_%s=\\\"\\$%s\\\"\"", targetVar, cap.key, cap.src))
+	}
+}
+
 func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expression) error {
 	me := expr.(*ast.MethodCallExpr)
 	arrow, ok := callbackArrowArg(me.Args[0])
@@ -2334,21 +2592,39 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 
 func (g *Generator) genReduceFunctionLetDecl(varName, sourceName string, me *ast.MethodCallExpr) error {
 	initVal := me.Args[1]
-	if _, ok := initVal.(*ast.ObjectLit); ok {
-		return fmt.Errorf("reduce() object accumulator callbacks must be direct arrow expressions")
-	}
 	fn, err := g.callbackCommand(me.Args[0])
 	if err != nil {
 		return err
 	}
-	val, err := g.genExprRHS(initVal, nil)
-	if err != nil {
-		return err
-	}
-	g.line(varName + "=" + val)
-	g.varTypeMap[varName] = g.inferReceiverType(initVal)
-	if g.varTypeMap[varName] == nil {
-		g.varTypeMap[varName] = typeString
+	accIsObject := false
+	if obj, ok := unwrapAsExpr(initVal).(*ast.ObjectLit); ok {
+		var fields []string
+		for _, field := range obj.Fields {
+			if err := validateStaticObjectKey(field.Key); err != nil {
+				return err
+			}
+			fields = append(fields, field.Key)
+			val, err := g.genExprRHS(field.Value, nil)
+			if err != nil {
+				return err
+			}
+			g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
+		}
+		g.objFieldsMap[varName] = fields
+		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
+		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
+		g.emitObjectKeysInit(varName, fields)
+		accIsObject = true
+	} else {
+		val, err := g.genExprRHS(initVal, nil)
+		if err != nil {
+			return err
+		}
+		g.line(varName + "=" + val)
+		g.varTypeMap[varName] = g.inferReceiverType(initVal)
+		if g.varTypeMap[varName] == nil {
+			g.varTypeMap[varName] = typeString
+		}
 	}
 	g.paramMap[sourceName] = varName
 
@@ -2358,10 +2634,22 @@ func (g *Generator) genReduceFunctionLetDecl(varName, sourceName string, me *ast
 	}
 	recvArg := ensureArgSafe(recv)
 	curVar := fmt.Sprintf("_reduce_%d_%d_current", me.Pos.Line, me.Pos.Column)
+	retVar := fmt.Sprintf("_reduce_%d_%d_return", me.Pos.Line, me.Pos.Column)
 	heredocTag := fmt.Sprintf("_EOF_REDF_%d_%d", me.Pos.Line, me.Pos.Column)
 	g.line(fmt.Sprintf("while IFS= read -r %s; do", curVar))
 	g.push()
-	g.line(fmt.Sprintf("%s=$(%s \"$%s\" \"$%s\")", varName, fn, varName, curVar))
+	args := []string{fmt.Sprintf("\"$%s\"", varName), fmt.Sprintf("\"$%s\"", curVar)}
+	if g.callbackSupportsReturnSlot(me.Args[0]) {
+		g.emitCommandIntoVar(retVar, me.Pos, fn, args)
+		if !accIsObject {
+			g.line(fmt.Sprintf("%s=\"$%s\"", varName, retVar))
+		}
+	} else {
+		if accIsObject {
+			return fmt.Errorf("reduce() object accumulator stored callbacks must be Besht function values")
+		}
+		g.line(fmt.Sprintf("%s=$(%s=; %s %s)", varName, returnSlotVar, fn, strings.Join(args, " ")))
+	}
 	g.pop()
 	g.line("done << " + heredocTag)
 	g.line("$(printf '" + "%s" + "\\n' " + recvArg + ")")
@@ -2379,6 +2667,27 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 	g.deleteObjectStaticValues(varName)
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
 		return err
+	}
+
+	if call, ok := unwrapAsExpr(s.Value).(*ast.FnCallExpr); ok && g.fnCallSupportsReturnSlot(call.Name) {
+		if err := g.genFnCallIntoVar(varName, call); err != nil {
+			return err
+		}
+		if inferred := g.inferReceiverType(s.Value); inferred != nil {
+			g.varTypeMap[varName] = inferred
+		}
+		delete(g.stringConstMap, varName)
+		delete(g.numConstMap, varName)
+		delete(g.boolConstMap, varName)
+		delete(g.staticListMap, varName)
+		delete(g.staticListValues, varName)
+		delete(g.staticSetMap, varName)
+		delete(g.staticNullishMap, varName)
+		if g.listLenMap != nil {
+			delete(g.listLenMap, varName)
+		}
+		delete(g.objAliasMap, s.Name)
+		return nil
 	}
 
 	val, err := g.genExprRHS(s.Value, nil)
@@ -2471,6 +2780,22 @@ func (g *Generator) genArrowLetDecl(varName, sourceName string, arrow *ast.Arrow
 	fnName := arrowFunctionName(varName, arrow.Pos)
 	fnType := g.arrowFunctionType(arrow, annot)
 	g.varTypeMap[varName] = fnType
+	if captures := g.closureCaptures(arrow); len(captures) > 0 {
+		bodyName := arrowFunctionName(varName+"_body", arrow.Pos)
+		if err := g.genClosureBodyDecl(bodyName, arrow, fnType.Return, captures); err != nil {
+			return err
+		}
+		g.genClosureInstantiation(varName, bodyName, captures, arrow.Pos)
+		delete(g.objAliasMap, sourceName)
+		delete(g.stringConstMap, varName)
+		delete(g.numConstMap, varName)
+		delete(g.boolConstMap, varName)
+		delete(g.staticListMap, varName)
+		delete(g.staticListValues, varName)
+		delete(g.staticSetMap, varName)
+		delete(g.staticNullishMap, varName)
+		return nil
+	}
 	if err := g.genArrowFunctionDecl(fnName, arrow, fnType.Return); err != nil {
 		return err
 	}
@@ -2523,6 +2848,7 @@ func (g *Generator) inferArrowFunctionReturnType(arrow *ast.ArrowExpr) *ast.Type
 func (g *Generator) genArrowFunctionDecl(fnName string, arrow *ast.ArrowExpr, retType *ast.Type) error {
 	g.fnReturnMap[fnName] = retType
 	g.fnValueMap[fnName] = fnName
+	g.generatedFnMap[fnName] = true
 	g.line(fmt.Sprintf("%s() {", fnName))
 	g.push()
 
@@ -4323,6 +4649,7 @@ func (g *Generator) genReturn(s *ast.ReturnStmt) error {
 	}
 
 	if s.Value == nil {
+		g.emitClosureCaptureSync()
 		g.line("return 0")
 		return nil
 	}
@@ -4339,22 +4666,33 @@ func (g *Generator) genReturn(s *ast.ReturnStmt) error {
 		}
 	}
 
-	val, err := g.genExprRHS(s.Value, retType)
-	if err != nil {
-		return err
+	var val string
+	if call, ok := unwrapAsExpr(s.Value).(*ast.FnCallExpr); ok && g.fnCallSupportsReturnSlot(call.Name) {
+		tmp := fmt.Sprintf("_bst_return_value_%d_%d", s.Pos.Line, s.Pos.Column)
+		if err := g.genFnCallIntoVar(tmp, call); err != nil {
+			return err
+		}
+		val = fmt.Sprintf("\"$%s\"", tmp)
+	} else {
+		var err error
+		val, err = g.genExprRHS(s.Value, retType)
+		if err != nil {
+			return err
+		}
 	}
 
-	if retType != nil && (retType.Kind == ast.TypeString || retType.Kind == ast.TypeNumber || retType.Kind == ast.TypeList) {
-		if strings.HasPrefix(val, "$(") {
-			g.line(fmt.Sprintf("printf '%%s' \"%s\"", val))
-		} else if strings.HasPrefix(val, "\"") || strings.HasPrefix(val, "'") || strings.HasPrefix(val, "$") {
-			g.line(fmt.Sprintf("printf '%%s' %s", val))
-		} else {
-			g.line(fmt.Sprintf("printf '%%s' \"%s\"", val))
-		}
-	} else {
-		g.line(fmt.Sprintf("printf '%%s' %s", val))
-	}
+	g.emitClosureCaptureSync()
+	tmp := fmt.Sprintf("_bst_return_value_%d_%d", s.Pos.Line, s.Pos.Column)
+	g.line(fmt.Sprintf("%s=%s", tmp, val))
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", returnSlotVar))
+	g.push()
+	g.line(fmt.Sprintf("eval \"$%s=\\$%s\"", returnSlotVar, tmp))
+	g.pop()
+	g.line("else")
+	g.push()
+	g.line(fmt.Sprintf("printf '%%s' \"$%s\"", tmp))
+	g.pop()
+	g.line("fi")
 	g.line("return 0")
 	return nil
 }
@@ -5925,6 +6263,13 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 		}
 		return `""`, nil
 	case *ast.FnCallExpr:
+		if g.deferFnCallPreEval == 0 && g.fnCallSupportsReturnSlot(e.Name) {
+			valueVar := fmt.Sprintf("_bst_expr_%d_%d", e.Pos.Line, e.Pos.Column)
+			if err := g.genFnCallIntoVar(valueVar, e); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("\"$%s\"", valueVar), nil
+		}
 		return g.genFnCallCapture(e)
 	case *ast.BinaryExpr:
 		return g.genBinaryRHS(e, targetType)
@@ -5950,10 +6295,28 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 		if e.Optional {
 			return g.genOptionalMethodCall(e)
 		}
+		if g.deferFnCallPreEval == 0 {
+			valueVar := fmt.Sprintf("_bst_expr_%d_%d", e.Pos.Line, e.Pos.Column)
+			if ok, err := g.genListCallbackMethodIntoVar(valueVar, e); ok || err != nil {
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("\"$%s\"", valueVar), nil
+			}
+		}
 		return g.genMethodCall(e)
 	case *ast.ArrowExpr:
 		fnName := arrowFunctionName(fmt.Sprintf("anon_%d_%d", e.Pos.Line, e.Pos.Column), e.Pos)
 		fnType := g.arrowFunctionType(e, targetType)
+		if captures := g.closureCaptures(e); len(captures) > 0 {
+			bodyName := arrowFunctionName(fmt.Sprintf("anon_%d_%d_body", e.Pos.Line, e.Pos.Column), e.Pos)
+			if err := g.genClosureBodyDecl(bodyName, e, fnType.Return, captures); err != nil {
+				return "", err
+			}
+			valueVar := fmt.Sprintf("_bst_arrow_value_%d_%d", e.Pos.Line, e.Pos.Column)
+			g.genClosureInstantiation(valueVar, bodyName, captures, e.Pos)
+			return fmt.Sprintf("\"$%s\"", valueVar), nil
+		}
 		if err := g.genArrowFunctionDecl(fnName, e, fnType.Return); err != nil {
 			return "", err
 		}
@@ -6235,9 +6598,35 @@ func (g *Generator) genFnCallCapture(e *ast.FnCallExpr) (string, error) {
 		return "", err
 	}
 	if len(argStrs) == 0 {
-		return fmt.Sprintf("$(%s)", fnName), nil
+		return fmt.Sprintf("$(%s=; %s)", returnSlotVar, fnName), nil
 	}
-	return fmt.Sprintf("$(%s %s)", fnName, strings.Join(argStrs, " ")), nil
+	return fmt.Sprintf("$(%s=; %s %s)", returnSlotVar, fnName, strings.Join(argStrs, " ")), nil
+}
+
+func (g *Generator) genFnCallIntoVar(targetVar string, e *ast.FnCallExpr) error {
+	argStrs, err := g.genFnArgs(e.Args)
+	if err != nil {
+		return err
+	}
+	fnName, err := g.fnCallCommand(e.Name)
+	if err != nil {
+		return err
+	}
+	g.emitCommandIntoVar(targetVar, e.Pos, fnName, argStrs)
+	return nil
+}
+
+func (g *Generator) emitCommandIntoVar(targetVar string, pos ast.Pos, command string, argStrs []string) {
+	oldSlot := fmt.Sprintf("_bst_return_slot_%d_%d", pos.Line, pos.Column)
+	g.line(fmt.Sprintf("%s=\"$%s\"", oldSlot, returnSlotVar))
+	g.line(fmt.Sprintf("%s=%s", targetVar, shellQuote("")))
+	g.line(fmt.Sprintf("%s=%s", returnSlotVar, shellQuote(targetVar)))
+	if len(argStrs) == 0 {
+		g.line(command)
+	} else {
+		g.line(fmt.Sprintf("%s %s", command, strings.Join(argStrs, " ")))
+	}
+	g.line(fmt.Sprintf("%s=\"$%s\"", returnSlotVar, oldSlot))
 }
 
 func (g *Generator) fnCallCommand(name string) (string, error) {
@@ -6245,9 +6634,23 @@ func (g *Generator) fnCallCommand(name string) (string, error) {
 		return mangle(name), nil
 	}
 	if t := g.functionValueType(name); t != nil {
-		return fmt.Sprintf("\"$%s\"", g.resolveVarName(name)), nil
+		g.requireRuntimeHelper("functionCall")
+		return fmt.Sprintf("_bst_call \"$%s\"", g.resolveVarName(name)), nil
 	}
 	return mangle(name), nil
+}
+
+func (g *Generator) fnCallSupportsReturnSlot(name string) bool {
+	if g.functionValueType(name) != nil {
+		return true
+	}
+	if g.generatedFnMap[name] || g.generatedFnMap[mangle(name)] {
+		return true
+	}
+	if fnName, ok := g.fnValueMap[name]; ok && g.generatedFnMap[fnName] {
+		return true
+	}
+	return false
 }
 
 func (g *Generator) functionValueType(name string) *ast.Type {
@@ -6349,6 +6752,13 @@ func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
 func (g *Generator) genArgs(args []ast.Expression) ([]string, error) {
 	var out []string
 	for _, arg := range args {
+		if val, ok, err := g.genPreEvaluatedFnCallArg(arg); ok || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ensureArgSafe(val))
+			continue
+		}
 		if g.isBooleanExpr(arg) {
 			if val, ok := g.genStaticBooleanArg(arg); ok {
 				out = append(out, val)
@@ -6721,6 +7131,13 @@ func (g *Generator) staticTruthyValue(expr ast.Expression) (bool, bool) {
 func (g *Generator) genFnArgs(args []ast.Expression) ([]string, error) {
 	var out []string
 	for _, arg := range args {
+		if val, ok, err := g.genPreEvaluatedFnCallArg(arg); ok || err != nil {
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ensureArgSafe(val))
+			continue
+		}
 		val, err := g.genExprValue(arg)
 		if err != nil {
 			return nil, err
@@ -6728,6 +7145,21 @@ func (g *Generator) genFnArgs(args []ast.Expression) ([]string, error) {
 		out = append(out, ensureArgSafe(val))
 	}
 	return out, nil
+}
+
+func (g *Generator) genPreEvaluatedFnCallArg(arg ast.Expression) (string, bool, error) {
+	if g.deferFnCallPreEval > 0 {
+		return "", false, nil
+	}
+	call, ok := unwrapAsExpr(arg).(*ast.FnCallExpr)
+	if !ok || !g.fnCallSupportsReturnSlot(call.Name) {
+		return "", false, nil
+	}
+	valueVar := fmt.Sprintf("_bst_arg_%d_%d", call.Pos.Line, call.Pos.Column)
+	if err := g.genFnCallIntoVar(valueVar, call); err != nil {
+		return "", true, err
+	}
+	return fmt.Sprintf("\"$%s\"", valueVar), true, nil
 }
 
 func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (string, error) {
@@ -6758,6 +7190,33 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 		}
 	}
 
+	if e.Op == "??" {
+		g.requireRuntimeHelper("nullish")
+		rightStr, err := g.genExprValue(e.Right)
+		if err != nil {
+			return "", err
+		}
+		if targetType != nil {
+			rightStr, err = g.genExprRHS(e.Right, targetType)
+			if err != nil {
+				return "", err
+			}
+		}
+		var leftStr string
+		if targetType != nil && isJSONScalarExtractionTarget(targetType) && g.isJSONBackedExpr(e.Left) {
+			leftStr, err = g.genJSONExtract(e.Left, targetType)
+			if err != nil {
+				return "", err
+			}
+		} else {
+			leftStr, err = g.genNullishValue(e.Left)
+			if err != nil {
+				return "", err
+			}
+		}
+		return fmt.Sprintf("$(_bst_l=%s; if [ \"$_bst_l\" = \"$%s\" ]; then _bst_r=%s; printf '%%s' \"$_bst_r\"; else printf '%%s' \"$_bst_l\"; fi)", leftStr, nullishSentinelVar, rightStr), nil
+	}
+
 	leftStr, err := g.genExprValue(e.Left)
 	if err != nil {
 		return "", err
@@ -6774,26 +7233,6 @@ func (g *Generator) genBinaryRHS(e *ast.BinaryExpr, targetType *ast.Type) (strin
 			return "", err
 		}
 		return fmt.Sprintf("$(if %s; then printf 1; else printf 0; fi)", cond), nil
-	case "??":
-		g.requireRuntimeHelper("nullish")
-		if targetType != nil {
-			rightStr, err = g.genExprRHS(e.Right, targetType)
-			if err != nil {
-				return "", err
-			}
-		}
-		if targetType != nil && isJSONScalarExtractionTarget(targetType) && g.isJSONBackedExpr(e.Left) {
-			leftStr, err = g.genJSONExtract(e.Left, targetType)
-			if err != nil {
-				return "", err
-			}
-		} else {
-			leftStr, err = g.genNullishValue(e.Left)
-			if err != nil {
-				return "", err
-			}
-		}
-		return fmt.Sprintf("$(_bst_l=%s; if [ \"$_bst_l\" = \"$%s\" ]; then _bst_r=%s; printf '%%s' \"$_bst_r\"; else printf '%%s' \"$_bst_l\"; fi)", leftStr, nullishSentinelVar, rightStr), nil
 	case "||":
 		return "$( _l=" + leftStr + "; if [ -n \"$_l\" ] && [ \"$_l\" != \"0\" ]; then printf '%s' \"$_l\"; else printf '%s' " + rightStr + "; fi )", nil
 	case "&&":
@@ -7289,17 +7728,17 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 			return "", fmt.Errorf("this.%s used outside class method", e.Property)
 		}
 		if _, ok := classAccessor(g.classMap[g.currentClass], e.Property, ast.AccessorGet, false); ok {
-			return fmt.Sprintf("$(%s \"$%s\")", classMethodName(g.currentClass, "get_"+e.Property), g.currentThisVar), nil
+			return fmt.Sprintf("$(%s=; %s \"$%s\")", returnSlotVar, classMethodName(g.currentClass, "get_"+e.Property), g.currentThisVar), nil
 		}
 		if _, ok := classAccessor(g.classMap[g.currentClass], e.Property, ast.AccessorSet, false); ok {
 			return "", fmt.Errorf("property %q has a setter but no getter", e.Property)
 		}
-		return fmt.Sprintf("$(%s \"$%s\")", classMethodName(g.currentClass, "get_"+e.Property), g.currentThisVar), nil
+		return fmt.Sprintf("$(%s=; %s \"$%s\")", returnSlotVar, classMethodName(g.currentClass, "get_"+e.Property), g.currentThisVar), nil
 	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 		if classDecl := g.classMap[g.resolveClassName(ident.Name)]; classDecl != nil {
 			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorGet, true); ok {
-				return fmt.Sprintf("$(%s)", classMethodName(classDecl.Name, "get_"+e.Property)), nil
+				return fmt.Sprintf("$(%s=; %s)", returnSlotVar, classMethodName(classDecl.Name, "get_"+e.Property)), nil
 			}
 			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorSet, true); ok {
 				return "", fmt.Errorf("static property %q has a setter but no getter", e.Property)
@@ -7314,7 +7753,7 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 		if className, ok := g.varClassMap[varName]; ok {
 			classDecl := g.classMap[className]
 			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorGet, false); ok {
-				return fmt.Sprintf("$(%s \"$%s\")", classMethodName(className, "get_"+e.Property), varName), nil
+				return fmt.Sprintf("$(%s=; %s \"$%s\")", returnSlotVar, classMethodName(className, "get_"+e.Property), varName), nil
 			}
 			if _, ok := classAccessor(classDecl, e.Property, ast.AccessorSet, false); ok {
 				return "", fmt.Errorf("property %q has a setter but no getter", e.Property)
@@ -8472,9 +8911,9 @@ func (g *Generator) genClassMethodCall(className string, e *ast.MethodCallExpr) 
 		if classDecl := g.classMap[g.resolveClassName(ident.Name)]; classDecl != nil {
 			call := classMethodName(classDecl.Name, e.Method)
 			if len(args) == 0 {
-				return fmt.Sprintf("$(%s)", call), nil
+				return fmt.Sprintf("$(%s=; %s)", returnSlotVar, call), nil
 			}
-			return fmt.Sprintf("$(%s %s)", call, strings.Join(args, " ")), nil
+			return fmt.Sprintf("$(%s=; %s %s)", returnSlotVar, call, strings.Join(args, " ")), nil
 		}
 	}
 	recv, err := g.genExprValue(e.Receiver)
@@ -8482,7 +8921,7 @@ func (g *Generator) genClassMethodCall(className string, e *ast.MethodCallExpr) 
 		return "", err
 	}
 	callArgs := append([]string{recv}, args...)
-	return fmt.Sprintf("$(%s %s)", classMethodName(className, e.Method), strings.Join(callArgs, " ")), nil
+	return fmt.Sprintf("$(%s=; %s %s)", returnSlotVar, classMethodName(className, e.Method), strings.Join(callArgs, " ")), nil
 }
 
 func (g *Generator) genClassMethodStmt(className string, e *ast.MethodCallExpr) error {
@@ -8763,6 +9202,455 @@ func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bo
 		return "0", true, nil
 	}
 	return strconv.Itoa(index), true, nil
+}
+
+func (g *Generator) genListCallbackMethodIntoVar(targetVar string, e *ast.MethodCallExpr) (bool, error) {
+	if e.Optional {
+		return false, nil
+	}
+	recvType := g.inferReceiverType(e.Receiver)
+	if recvType == nil || recvType.Kind != ast.TypeList {
+		return false, nil
+	}
+	switch e.Method {
+	case "map", "filter", "some", "every", "find", "findIndex":
+	default:
+		return false, nil
+	}
+	recv, err := g.genExprValue(e.Receiver)
+	if err != nil {
+		return true, err
+	}
+	cb, err := g.listCallbackArg(e)
+	if err != nil {
+		return true, err
+	}
+	switch e.Method {
+	case "map":
+		return true, g.genListMapIntoVar(targetVar, recv, e, cb)
+	case "filter":
+		return true, g.genListFilterIntoVar(targetVar, recv, e, cb)
+	case "some":
+		return true, g.genListPredicateIntoVar(targetVar, recv, e, cb, true)
+	case "every":
+		return true, g.genListPredicateIntoVar(targetVar, recv, e, cb, false)
+	case "find":
+		return true, g.genListFindIntoVar(targetVar, recv, e, cb)
+	case "findIndex":
+		return true, g.genListFindIndexIntoVar(targetVar, recv, e, cb)
+	default:
+		return false, nil
+	}
+}
+
+func (g *Generator) appendVarToList(listVar, itemVar string) {
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", listVar))
+	g.push()
+	g.line(fmt.Sprintf("%s=$(printf '%%s\\n%%s' \"$%s\" \"$%s\")", listVar, listVar, itemVar))
+	g.pop()
+	g.line("else")
+	g.push()
+	g.line(fmt.Sprintf("%s=\"$%s\"", listVar, itemVar))
+	g.pop()
+	g.line("fi")
+}
+
+func (g *Generator) assignMapItemValue(itemVar string, valueExpr ast.Expression, value string) error {
+	if bodyType := g.inferReceiverType(valueExpr); bodyType != nil && bodyType.Kind == ast.TypeList {
+		g.line(fmt.Sprintf("%s=$(printf '%%s\\n' %s | awk 'NR>1{printf \"\\037\"}{printf \"%%s\",$0}')", itemVar, ensureArgSafe(value)))
+		return nil
+	}
+	g.line(fmt.Sprintf("%s=%s", itemVar, value))
+	return nil
+}
+
+func (g *Generator) genListMapIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
+	g.line(fmt.Sprintf("%s=%s", targetVar, shellQuote("")))
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return err
+		}
+		dataVar := fmt.Sprintf("_map_%d_%d_data", e.Pos.Line, e.Pos.Column)
+		itemVar := fmt.Sprintf("_map_%d_%d_item", e.Pos.Line, e.Pos.Column)
+		idxVar := fmt.Sprintf("_map_%d_%d_index", e.Pos.Line, e.Pos.Column)
+		retVar := fmt.Sprintf("_map_%d_%d_return", e.Pos.Line, e.Pos.Column)
+		appendVar := fmt.Sprintf("_map_%d_%d_append", e.Pos.Line, e.Pos.Column)
+		tag := fmt.Sprintf("__BESHT_MAP_%d_%d", e.Pos.Line, e.Pos.Column)
+		g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+		g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+		g.push()
+		g.line(fmt.Sprintf("%s=0", idxVar))
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+		g.push()
+		args := []string{fmt.Sprintf("\"$%s\"", itemVar), fmt.Sprintf("\"$%s\"", idxVar)}
+		if g.callbackSupportsReturnSlot(cb.Expr) {
+			g.emitCommandIntoVar(retVar, e.Pos, fn, args)
+		} else {
+			g.line(fmt.Sprintf("%s=$(%s=; %s %s)", retVar, returnSlotVar, fn, strings.Join(args, " ")))
+		}
+		if cb.ReturnType != nil && cb.ReturnType.Kind == ast.TypeList {
+			g.line(fmt.Sprintf("%s=$(printf '%%s\\n' \"$%s\" | awk 'NR>1{printf \"\\037\"}{printf \"%%s\",$0}')", appendVar, retVar))
+			g.appendVarToList(targetVar, appendVar)
+		} else {
+			g.appendVarToList(targetVar, retVar)
+		}
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		g.pop()
+		g.line("done <<" + tag)
+		g.raw(fmt.Sprintf("$%s\n", dataVar))
+		g.raw(tag + "\n")
+		g.pop()
+		g.line("fi")
+		return nil
+	}
+	arrow := cb.Arrow
+	return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+		param := ctx.ParamVars[0]
+		idxCounter := fmt.Sprintf("_map_%d_%d_index", e.Pos.Line, e.Pos.Column)
+		dataVar := fmt.Sprintf("_map_%d_%d_data", e.Pos.Line, e.Pos.Column)
+		appendVar := fmt.Sprintf("_map_%d_%d_append", e.Pos.Line, e.Pos.Column)
+		tag := fmt.Sprintf("__BESHT_MAP_%d_%d", e.Pos.Line, e.Pos.Column)
+		g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+		g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+		g.push()
+		if len(ctx.ParamVars) > 1 {
+			g.line(fmt.Sprintf("%s=0", idxCounter))
+		}
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", param))
+		g.push()
+		if len(ctx.ParamVars) > 1 {
+			g.line(fmt.Sprintf("%s=$%s", ctx.ParamVars[1], idxCounter))
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxCounter, idxCounter))
+		}
+		if arrow.BlockBody != nil {
+			if err := g.genMapCallbackBlockIntoVar(targetVar, appendVar, arrow.BlockBody); err != nil {
+				return err
+			}
+		} else {
+			value, err := g.genExprRHS(arrow.Body, nil)
+			if err != nil {
+				return err
+			}
+			if err := g.assignMapItemValue(appendVar, arrow.Body, value); err != nil {
+				return err
+			}
+			g.appendVarToList(targetVar, appendVar)
+		}
+		g.pop()
+		g.line("done <<" + tag)
+		g.raw(fmt.Sprintf("$%s\n", dataVar))
+		g.raw(tag + "\n")
+		g.pop()
+		g.line("fi")
+		return nil
+	})
+}
+
+func (g *Generator) genMapCallbackBlockIntoVar(targetVar, appendVar string, block *ast.Block) error {
+	if block == nil {
+		return nil
+	}
+	for _, stmt := range block.Statements {
+		if err := g.genMapCallbackStmtIntoVar(targetVar, appendVar, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *Generator) genMapCallbackStmtIntoVar(targetVar, appendVar string, stmt ast.Statement) error {
+	switch s := stmt.(type) {
+	case *ast.ReturnStmt:
+		if s.Value == nil {
+			g.line("continue")
+			return nil
+		}
+		value, err := g.genExprRHS(s.Value, nil)
+		if err != nil {
+			return err
+		}
+		if err := g.assignMapItemValue(appendVar, s.Value, value); err != nil {
+			return err
+		}
+		g.appendVarToList(targetVar, appendVar)
+		g.line("continue")
+		return nil
+	case *ast.IfStmt:
+		cond, err := g.genCondition(s.Condition)
+		if err != nil {
+			return err
+		}
+		g.line(fmt.Sprintf("if %s; then", cond))
+		g.push()
+		if err := g.genMapCallbackBlockIntoVar(targetVar, appendVar, s.Then); err != nil {
+			return err
+		}
+		g.pop()
+		for _, elseif := range s.ElseIfs {
+			elseifCond, err := g.genCondition(elseif.Condition)
+			if err != nil {
+				return err
+			}
+			g.line(fmt.Sprintf("elif %s; then", elseifCond))
+			g.push()
+			if err := g.genMapCallbackBlockIntoVar(targetVar, appendVar, elseif.Body); err != nil {
+				return err
+			}
+			g.pop()
+		}
+		if s.Else != nil {
+			g.line("else")
+			g.push()
+			if err := g.genMapCallbackBlockIntoVar(targetVar, appendVar, s.Else); err != nil {
+				return err
+			}
+			g.pop()
+		}
+		g.line("fi")
+		return nil
+	case *ast.Assignment:
+		val, err := g.genExprRHS(s.Value, nil)
+		if err != nil {
+			return err
+		}
+		g.line(fmt.Sprintf("%s=%s", g.resolveVarName(s.Name), val))
+		return nil
+	case *ast.ExprStmt:
+		return fmt.Errorf("unsupported expression statement in map callback: %T", s.Expr)
+	default:
+		return fmt.Errorf("unsupported statement in map callback: %T", stmt)
+	}
+}
+
+func (g *Generator) genListFilterIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
+	g.line(fmt.Sprintf("%s=%s", targetVar, shellQuote("")))
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return err
+		}
+		dataVar := fmt.Sprintf("_filter_%d_%d_data", e.Pos.Line, e.Pos.Column)
+		itemVar := fmt.Sprintf("_filter_%d_%d_item", e.Pos.Line, e.Pos.Column)
+		idxVar := fmt.Sprintf("_filter_%d_%d_index", e.Pos.Line, e.Pos.Column)
+		retVar := fmt.Sprintf("_filter_%d_%d_return", e.Pos.Line, e.Pos.Column)
+		tag := fmt.Sprintf("__BESHT_FILTER_%d_%d", e.Pos.Line, e.Pos.Column)
+		g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+		g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+		g.push()
+		g.line(fmt.Sprintf("%s=0", idxVar))
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+		g.push()
+		args := []string{fmt.Sprintf("\"$%s\"", itemVar), fmt.Sprintf("\"$%s\"", idxVar)}
+		if g.callbackSupportsReturnSlot(cb.Expr) {
+			g.emitCommandIntoVar(retVar, e.Pos, fn, args)
+		} else {
+			g.line(fmt.Sprintf("%s=$(%s=; %s %s)", retVar, returnSlotVar, fn, strings.Join(args, " ")))
+		}
+		g.line(fmt.Sprintf("if %s; then", truthyCondition(fmt.Sprintf("\"$%s\"", retVar))))
+		g.push()
+		g.appendVarToList(targetVar, itemVar)
+		g.pop()
+		g.line("fi")
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		g.pop()
+		g.line("done <<" + tag)
+		g.raw(fmt.Sprintf("$%s\n", dataVar))
+		g.raw(tag + "\n")
+		g.pop()
+		g.line("fi")
+		return nil
+	}
+	arrow := cb.Arrow
+	if arrow.BlockBody != nil {
+		return fmt.Errorf("filter() predicate callback must be expression-bodied")
+	}
+	return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+		param := ctx.ParamVars[0]
+		idxCounter := fmt.Sprintf("_filter_%d_%d_index", e.Pos.Line, e.Pos.Column)
+		dataVar := fmt.Sprintf("_filter_%d_%d_data", e.Pos.Line, e.Pos.Column)
+		tag := fmt.Sprintf("__BESHT_FILTER_%d_%d", e.Pos.Line, e.Pos.Column)
+		g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+		g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+		g.push()
+		if len(ctx.ParamVars) > 1 {
+			g.line(fmt.Sprintf("%s=0", idxCounter))
+		}
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", param))
+		g.push()
+		if len(ctx.ParamVars) > 1 {
+			g.line(fmt.Sprintf("%s=$%s", ctx.ParamVars[1], idxCounter))
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxCounter, idxCounter))
+		}
+		cond, err := g.genCondition(arrow.Body)
+		if err != nil {
+			return err
+		}
+		g.line(fmt.Sprintf("if %s; then", cond))
+		g.push()
+		g.appendVarToList(targetVar, param)
+		g.pop()
+		g.line("fi")
+		g.pop()
+		g.line("done <<" + tag)
+		g.raw(fmt.Sprintf("$%s\n", dataVar))
+		g.raw(tag + "\n")
+		g.pop()
+		g.line("fi")
+		return nil
+	})
+}
+
+func (g *Generator) genListPredicateIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef, some bool) error {
+	if cb.Arrow != nil && cb.Arrow.BlockBody != nil {
+		return fmt.Errorf("%s() predicate callback must be expression-bodied", e.Method)
+	}
+	initial := "1"
+	if some {
+		initial = "0"
+	}
+	g.line(fmt.Sprintf("%s=%s", targetVar, initial))
+	dataVar := fmt.Sprintf("_pred_%d_%d_data", e.Pos.Line, e.Pos.Column)
+	itemVar := fmt.Sprintf("_pred_%d_%d_item", e.Pos.Line, e.Pos.Column)
+	idxVar := fmt.Sprintf("_pred_%d_%d_index", e.Pos.Line, e.Pos.Column)
+	retVar := fmt.Sprintf("_pred_%d_%d_return", e.Pos.Line, e.Pos.Column)
+	tag := fmt.Sprintf("__BESHT_PRED_%d_%d", e.Pos.Line, e.Pos.Column)
+	g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+	g.push()
+	g.line(fmt.Sprintf("%s=0", idxVar))
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return err
+		}
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+		g.push()
+		args := []string{fmt.Sprintf("\"$%s\"", itemVar), fmt.Sprintf("\"$%s\"", idxVar)}
+		if g.callbackSupportsReturnSlot(cb.Expr) {
+			g.emitCommandIntoVar(retVar, e.Pos, fn, args)
+		} else {
+			g.line(fmt.Sprintf("%s=$(%s=; %s %s)", retVar, returnSlotVar, fn, strings.Join(args, " ")))
+		}
+		cond := truthyCondition(fmt.Sprintf("\"$%s\"", retVar))
+		if some {
+			g.line(fmt.Sprintf("if %s; then %s=1; break; fi", cond, targetVar))
+		} else {
+			g.line(fmt.Sprintf("if %s; then :; else %s=0; break; fi", cond, targetVar))
+		}
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		g.pop()
+	} else {
+		arrow := cb.Arrow
+		err := g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			param := ctx.ParamVars[0]
+			g.line(fmt.Sprintf("while IFS= read -r %s; do", param))
+			g.push()
+			if len(ctx.ParamVars) > 1 {
+				g.line(fmt.Sprintf("%s=$%s", ctx.ParamVars[1], idxVar))
+			}
+			cond, err := g.genCondition(arrow.Body)
+			if err != nil {
+				return err
+			}
+			if some {
+				g.line(fmt.Sprintf("if %s; then %s=1; break; fi", cond, targetVar))
+			} else {
+				g.line(fmt.Sprintf("if %s; then :; else %s=0; break; fi", cond, targetVar))
+			}
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+			g.pop()
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	g.line("done <<" + tag)
+	g.raw(fmt.Sprintf("$%s\n", dataVar))
+	g.raw(tag + "\n")
+	g.pop()
+	g.line("fi")
+	return nil
+}
+
+func (g *Generator) genListFindIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
+	if cb.Arrow != nil && cb.Arrow.BlockBody != nil {
+		return fmt.Errorf("find() predicate callback must be expression-bodied")
+	}
+	g.requireRuntimeHelper("nullish")
+	g.line(fmt.Sprintf("%s=\"$%s\"", targetVar, nullishSentinelVar))
+	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, false)
+}
+
+func (g *Generator) genListFindIndexIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
+	g.line(fmt.Sprintf("%s=-1", targetVar))
+	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, true)
+}
+
+func (g *Generator) genListFindLikeIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef, indexResult bool) error {
+	dataVar := fmt.Sprintf("_find_%d_%d_data", e.Pos.Line, e.Pos.Column)
+	itemVar := fmt.Sprintf("_find_%d_%d_item", e.Pos.Line, e.Pos.Column)
+	idxVar := fmt.Sprintf("_find_%d_%d_index", e.Pos.Line, e.Pos.Column)
+	retVar := fmt.Sprintf("_find_%d_%d_return", e.Pos.Line, e.Pos.Column)
+	tag := fmt.Sprintf("__BESHT_FIND_%d_%d", e.Pos.Line, e.Pos.Column)
+	g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+	g.push()
+	g.line(fmt.Sprintf("%s=0", idxVar))
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return err
+		}
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+		g.push()
+		args := []string{fmt.Sprintf("\"$%s\"", itemVar), fmt.Sprintf("\"$%s\"", idxVar)}
+		if g.callbackSupportsReturnSlot(cb.Expr) {
+			g.emitCommandIntoVar(retVar, e.Pos, fn, args)
+		} else {
+			g.line(fmt.Sprintf("%s=$(%s=; %s %s)", retVar, returnSlotVar, fn, strings.Join(args, " ")))
+		}
+		cond := truthyCondition(fmt.Sprintf("\"$%s\"", retVar))
+		if indexResult {
+			g.line(fmt.Sprintf("if %s; then %s=\"$%s\"; break; fi", cond, targetVar, idxVar))
+		} else {
+			g.line(fmt.Sprintf("if %s; then %s=\"$%s\"; break; fi", cond, targetVar, itemVar))
+		}
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		g.pop()
+	} else {
+		arrow := cb.Arrow
+		err := g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			param := ctx.ParamVars[0]
+			g.line(fmt.Sprintf("while IFS= read -r %s; do", param))
+			g.push()
+			if len(ctx.ParamVars) > 1 {
+				g.line(fmt.Sprintf("%s=$%s", ctx.ParamVars[1], idxVar))
+			}
+			cond, err := g.genCondition(arrow.Body)
+			if err != nil {
+				return err
+			}
+			if indexResult {
+				g.line(fmt.Sprintf("if %s; then %s=\"$%s\"; break; fi", cond, targetVar, idxVar))
+			} else {
+				g.line(fmt.Sprintf("if %s; then %s=\"$%s\"; break; fi", cond, targetVar, param))
+			}
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+			g.pop()
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	g.line("done <<" + tag)
+	g.raw(fmt.Sprintf("$%s\n", dataVar))
+	g.raw(tag + "\n")
+	g.pop()
+	g.line("fi")
+	return nil
 }
 
 func (g *Generator) staticListValuesWithoutNewlines(expr ast.Expression) ([]string, bool) {
@@ -9124,35 +10012,37 @@ func (g *Generator) genListMap(recv string, e *ast.MethodCallExpr) (string, erro
 	}
 	arrow := cb.Arrow
 	var out string
-	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
-		param := ctx.ParamVars[0]
-		prefix := ""
-		loopPrefix := ""
-		if len(ctx.ParamVars) > 1 {
-			counterVar := fmt.Sprintf("_cb_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
-			indexVar := ctx.ParamVars[1]
-			prefix = counterVar + "=0; "
-			loopPrefix = fmt.Sprintf("%s=$%s; %s=$(( %s + 1 )); ", indexVar, counterVar, counterVar, counterVar)
-		}
-		if arrow.BlockBody != nil {
-			body, err := g.genMapCallbackBlockSource(arrow.BlockBody, "")
+	err = g.withDeferredFnCallPreEval(func() error {
+		return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			param := ctx.ParamVars[0]
+			prefix := ""
+			loopPrefix := ""
+			if len(ctx.ParamVars) > 1 {
+				counterVar := fmt.Sprintf("_cb_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
+				indexVar := ctx.ParamVars[1]
+				prefix = counterVar + "=0; "
+				loopPrefix = fmt.Sprintf("%s=$%s; %s=$(( %s + 1 )); ", indexVar, counterVar, counterVar, counterVar)
+			}
+			if arrow.BlockBody != nil {
+				body, err := g.genMapCallbackBlockSource(arrow.BlockBody, "")
+				if err != nil {
+					return err
+				}
+				out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do %s%s done)", prefix, ensureArgSafe(recv), param, loopPrefix, body)
+				return nil
+			}
+			prelude, body, err := g.genDelayedExprSource(arrow.Body)
 			if err != nil {
 				return err
 			}
-			out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do %s%s done)", prefix, ensureArgSafe(recv), param, loopPrefix, body)
+			bodyType := g.inferReceiverType(arrow.Body)
+			if bodyType != nil && bodyType.Kind == ast.TypeList {
+				out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do %s%sprintf '%%s\\n' %s | awk 'NR>1{printf \"\\037\"}{printf \"%%s\",$0}'; printf '\\n'; done)", prefix, ensureArgSafe(recv), param, loopPrefix, prelude, ensureArgSafe(body))
+			} else {
+				out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do %s%sprintf '%%s\\n' %s; done)", prefix, ensureArgSafe(recv), param, loopPrefix, prelude, ensureArgSafe(body))
+			}
 			return nil
-		}
-		body, err := g.genExprValue(arrow.Body)
-		if err != nil {
-			return err
-		}
-		bodyType := g.inferReceiverType(arrow.Body)
-		if bodyType != nil && bodyType.Kind == ast.TypeList {
-			out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do %sprintf '%%s\\n' %s | awk 'NR>1{printf \"\\037\"}{printf \"%%s\",$0}'; printf '\\n'; done)", prefix, ensureArgSafe(recv), param, loopPrefix, ensureArgSafe(body))
-		} else {
-			out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do %sprintf '%%s\\n' %s; done)", prefix, ensureArgSafe(recv), param, loopPrefix, ensureArgSafe(body))
-		}
-		return nil
+		})
 	})
 	return out, err
 }
@@ -9175,24 +10065,26 @@ func (g *Generator) genListFilter(recv string, e *ast.MethodCallExpr) (string, e
 	}
 	arrow := cb.Arrow
 	var out string
-	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
-		cond, err := g.genCondition(arrow.Body)
-		if err != nil {
-			return err
-		}
-		param := ctx.ParamVars[0]
-		indexVar := ""
-		if len(ctx.ParamVars) > 1 {
-			indexVar = ctx.ParamVars[1]
-		}
-		prefix := ""
-		inc := ""
-		if indexVar != "" {
-			prefix = indexVar + "=0; "
-			inc = indexVar + "=$(( " + indexVar + " + 1 ))"
-		}
-		out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do if %s; then printf '%%s\\n' \"$%s\"; fi%s; done)", prefix, ensureArgSafe(recv), param, cond, param, shellSuffix(inc))
-		return nil
+	err = g.withDeferredFnCallPreEval(func() error {
+		return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			prelude, cond, err := g.genDelayedConditionSource(arrow.Body)
+			if err != nil {
+				return err
+			}
+			param := ctx.ParamVars[0]
+			indexVar := ""
+			if len(ctx.ParamVars) > 1 {
+				indexVar = ctx.ParamVars[1]
+			}
+			prefix := ""
+			inc := ""
+			if indexVar != "" {
+				prefix = indexVar + "=0; "
+				inc = indexVar + "=$(( " + indexVar + " + 1 ))"
+			}
+			out = fmt.Sprintf("$(%sprintf '%%s\\n' %s | while IFS= read -r %s; do %sif %s; then printf '%%s\\n' \"$%s\"; fi%s; done)", prefix, ensureArgSafe(recv), param, prelude, cond, param, shellSuffix(inc))
+			return nil
+		})
 	})
 	return out, err
 }
@@ -9216,20 +10108,22 @@ func (g *Generator) genListFindIndex(recv string, e *ast.MethodCallExpr) (string
 	}
 	arrow := cb.Arrow
 	var out string
-	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
-		cond, err := g.genCondition(arrow.Body)
-		if err != nil {
-			return err
-		}
-		param := ctx.ParamVars[0]
-		idx := fmt.Sprintf("_findidx_%d_%d", arrow.Pos.Line, arrow.Pos.Column)
-		dataVar := fmt.Sprintf("_finddata_%d_%d", arrow.Pos.Line, arrow.Pos.Column)
-		indexAssign := ""
-		if len(ctx.ParamVars) > 1 {
-			indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
-		}
-		out = fmt.Sprintf("$(%s=%s; %s=0; _found=-1; while IFS= read -r %s; do %sif [ $_found -lt 0 ] && %s; then _found=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_FIND_%d_%d\n$%s\n__BESHT_FIND_%d_%d\nprintf '%%s' \"$_found\")", dataVar, recv, idx, param, indexAssign, cond, idx, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column)
-		return nil
+	err = g.withDeferredFnCallPreEval(func() error {
+		return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			prelude, cond, err := g.genDelayedConditionSource(arrow.Body)
+			if err != nil {
+				return err
+			}
+			param := ctx.ParamVars[0]
+			idx := fmt.Sprintf("_findidx_%d_%d", arrow.Pos.Line, arrow.Pos.Column)
+			dataVar := fmt.Sprintf("_finddata_%d_%d", arrow.Pos.Line, arrow.Pos.Column)
+			indexAssign := ""
+			if len(ctx.ParamVars) > 1 {
+				indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
+			}
+			out = fmt.Sprintf("$(%s=%s; %s=0; _found=-1; while IFS= read -r %s; do %s%sif [ $_found -lt 0 ] && %s; then _found=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_FIND_%d_%d\n$%s\n__BESHT_FIND_%d_%d\nprintf '%%s' \"$_found\")", dataVar, recv, idx, param, indexAssign, prelude, cond, idx, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column)
+			return nil
+		})
 	})
 	return out, err
 }
@@ -9263,27 +10157,29 @@ func (g *Generator) genListSomeEvery(recv string, e *ast.MethodCallExpr, some bo
 		return "", fmt.Errorf("%s() predicate callback must be expression-bodied", e.Method)
 	}
 	var out string
-	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
-		cond, err := g.genCondition(arrow.Body)
-		if err != nil {
-			return err
-		}
-		param := ctx.ParamVars[0]
-		idx := fmt.Sprintf("_listpred_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
-		dataVar := fmt.Sprintf("_listpred_%d_%d_data", arrow.Pos.Line, arrow.Pos.Column)
-		resultVar := fmt.Sprintf("_listpred_%d_%d_result", arrow.Pos.Line, arrow.Pos.Column)
-		indexAssign := ""
-		if len(ctx.ParamVars) > 1 {
-			indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
-		}
-		initial := "1"
-		body := fmt.Sprintf("%sif %s; then :; else %s=0; break; fi;", indexAssign, cond, resultVar)
-		if some {
-			initial = "0"
-			body = fmt.Sprintf("%sif %s; then %s=1; break; fi;", indexAssign, cond, resultVar)
-		}
-		out = fmt.Sprintf("$(%s=%s; %s=%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s %s=$(( %s + 1 )); done <<__BESHT_LIST_PRED_%d_%d\n$%s\n__BESHT_LIST_PRED_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, initial, idx, dataVar, param, body, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column, resultVar)
-		return nil
+	err = g.withDeferredFnCallPreEval(func() error {
+		return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			prelude, cond, err := g.genDelayedConditionSource(arrow.Body)
+			if err != nil {
+				return err
+			}
+			param := ctx.ParamVars[0]
+			idx := fmt.Sprintf("_listpred_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
+			dataVar := fmt.Sprintf("_listpred_%d_%d_data", arrow.Pos.Line, arrow.Pos.Column)
+			resultVar := fmt.Sprintf("_listpred_%d_%d_result", arrow.Pos.Line, arrow.Pos.Column)
+			indexAssign := ""
+			if len(ctx.ParamVars) > 1 {
+				indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
+			}
+			initial := "1"
+			body := fmt.Sprintf("%s%sif %s; then :; else %s=0; break; fi;", indexAssign, prelude, cond, resultVar)
+			if some {
+				initial = "0"
+				body = fmt.Sprintf("%s%sif %s; then %s=1; break; fi;", indexAssign, prelude, cond, resultVar)
+			}
+			out = fmt.Sprintf("$(%s=%s; %s=%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s %s=$(( %s + 1 )); done <<__BESHT_LIST_PRED_%d_%d\n$%s\n__BESHT_LIST_PRED_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, initial, idx, dataVar, param, body, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column, resultVar)
+			return nil
+		})
 	})
 	return out, err
 }
@@ -9313,21 +10209,23 @@ func (g *Generator) genListFind(recv string, e *ast.MethodCallExpr) (string, err
 	}
 	g.requireRuntimeHelper("nullish")
 	var out string
-	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
-		cond, err := g.genCondition(arrow.Body)
-		if err != nil {
-			return err
-		}
-		param := ctx.ParamVars[0]
-		idx := fmt.Sprintf("_listfind_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
-		dataVar := fmt.Sprintf("_listfind_%d_%d_data", arrow.Pos.Line, arrow.Pos.Column)
-		resultVar := fmt.Sprintf("_listfind_%d_%d_result", arrow.Pos.Line, arrow.Pos.Column)
-		indexAssign := ""
-		if len(ctx.ParamVars) > 1 {
-			indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
-		}
-		out = fmt.Sprintf("$(%s=%s; %s=$%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %sif %s; then %s=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_LIST_FIND_%d_%d\n$%s\n__BESHT_LIST_FIND_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, nullishSentinelVar, idx, dataVar, param, indexAssign, cond, resultVar, param, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column, resultVar)
-		return nil
+	err = g.withDeferredFnCallPreEval(func() error {
+		return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			prelude, cond, err := g.genDelayedConditionSource(arrow.Body)
+			if err != nil {
+				return err
+			}
+			param := ctx.ParamVars[0]
+			idx := fmt.Sprintf("_listfind_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
+			dataVar := fmt.Sprintf("_listfind_%d_%d_data", arrow.Pos.Line, arrow.Pos.Column)
+			resultVar := fmt.Sprintf("_listfind_%d_%d_result", arrow.Pos.Line, arrow.Pos.Column)
+			indexAssign := ""
+			if len(ctx.ParamVars) > 1 {
+				indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
+			}
+			out = fmt.Sprintf("$(%s=%s; %s=$%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s%sif %s; then %s=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_LIST_FIND_%d_%d\n$%s\n__BESHT_LIST_FIND_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, nullishSentinelVar, idx, dataVar, param, indexAssign, prelude, cond, resultVar, param, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column, resultVar)
+			return nil
+		})
 	})
 	return out, err
 }
@@ -9373,6 +10271,251 @@ func (g *Generator) genSetMethod(e *ast.MethodCallExpr) (string, error) {
 	return "", fmt.Errorf("Set has no method %q", e.Method)
 }
 
+type delayedTempBinding struct {
+	name string
+	typ  *ast.Type
+}
+
+type delayedExprState struct {
+	prelude []string
+	temps   []delayedTempBinding
+}
+
+func (s *delayedExprState) source() string {
+	if len(s.prelude) == 0 {
+		return ""
+	}
+	return strings.Join(s.prelude, " ") + " "
+}
+
+func (g *Generator) commandIntoVarSource(targetVar string, pos ast.Pos, command string, argStrs []string) string {
+	oldSlot := fmt.Sprintf("_bst_return_slot_%d_%d", pos.Line, pos.Column)
+	call := command
+	if len(argStrs) > 0 {
+		call = fmt.Sprintf("%s %s", command, strings.Join(argStrs, " "))
+	}
+	return fmt.Sprintf("%s=\"$%s\"; %s=%s; %s=%s; %s; %s=\"$%s\";", oldSlot, returnSlotVar, targetVar, shellQuote(""), returnSlotVar, shellQuote(targetVar), call, returnSlotVar, oldSlot)
+}
+
+func (g *Generator) genDelayedExprSource(expr ast.Expression) (string, string, error) {
+	state := &delayedExprState{}
+	rewritten, err := g.rewriteDelayedExpr(expr, state)
+	if err != nil {
+		return "", "", err
+	}
+	var value string
+	err = g.withDelayedTempBindings(state.temps, func() error {
+		var err error
+		value, err = g.genExprValue(rewritten)
+		return err
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return state.source(), value, nil
+}
+
+func (g *Generator) genDelayedConditionSource(expr ast.Expression) (string, string, error) {
+	state := &delayedExprState{}
+	rewritten, err := g.rewriteDelayedExpr(expr, state)
+	if err != nil {
+		return "", "", err
+	}
+	var cond string
+	err = g.withDelayedTempBindings(state.temps, func() error {
+		var err error
+		cond, err = g.genCondition(rewritten)
+		return err
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return state.source(), cond, nil
+}
+
+func (g *Generator) withDelayedTempBindings(temps []delayedTempBinding, body func() error) error {
+	type oldBinding struct {
+		name     string
+		param    string
+		hadParam bool
+		typ      *ast.Type
+		hadType  bool
+	}
+	old := make([]oldBinding, 0, len(temps))
+	for _, temp := range temps {
+		param, hadParam := g.paramMap[temp.name]
+		typ, hadType := g.varTypeMap[temp.name]
+		old = append(old, oldBinding{name: temp.name, param: param, hadParam: hadParam, typ: typ, hadType: hadType})
+		g.paramMap[temp.name] = temp.name
+		if temp.typ != nil {
+			g.varTypeMap[temp.name] = temp.typ
+		}
+	}
+	defer func() {
+		for i := len(old) - 1; i >= 0; i-- {
+			binding := old[i]
+			if binding.hadParam {
+				g.paramMap[binding.name] = binding.param
+			} else {
+				delete(g.paramMap, binding.name)
+			}
+			if binding.hadType {
+				g.varTypeMap[binding.name] = binding.typ
+			} else {
+				delete(g.varTypeMap, binding.name)
+			}
+		}
+	}()
+	return body()
+}
+
+func (g *Generator) rewriteDelayedExpr(expr ast.Expression, state *delayedExprState) (ast.Expression, error) {
+	switch e := expr.(type) {
+	case *ast.FnCallExpr:
+		args := make([]ast.Expression, len(e.Args))
+		for i, arg := range e.Args {
+			rewritten, err := g.rewriteDelayedExpr(arg, state)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = rewritten
+		}
+		if !g.fnCallSupportsReturnSlot(e.Name) {
+			clone := *e
+			clone.Args = args
+			return &clone, nil
+		}
+		argStrs, err := g.genFnArgs(args)
+		if err != nil {
+			return nil, err
+		}
+		fnName, err := g.fnCallCommand(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		temp := fmt.Sprintf("_bst_delayed_%d_%d", e.Pos.Line, e.Pos.Column)
+		state.prelude = append(state.prelude, g.commandIntoVarSource(temp, e.Pos, fnName, argStrs))
+		state.temps = append(state.temps, delayedTempBinding{name: temp, typ: g.fnCallReturnType(e.Name)})
+		return &ast.IdentExpr{Pos: e.Pos, Name: temp}, nil
+	case *ast.BinaryExpr:
+		left, err := g.rewriteDelayedExpr(e.Left, state)
+		if err != nil {
+			return nil, err
+		}
+		right, err := g.rewriteDelayedExpr(e.Right, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Left = left
+		clone.Right = right
+		return &clone, nil
+	case *ast.TemplateLit:
+		clone := *e
+		clone.Exprs = make([]ast.Expression, len(e.Exprs))
+		for i, expr := range e.Exprs {
+			rewritten, err := g.rewriteDelayedExpr(expr, state)
+			if err != nil {
+				return nil, err
+			}
+			clone.Exprs[i] = rewritten
+		}
+		return &clone, nil
+	case *ast.MethodCallExpr:
+		recv, err := g.rewriteDelayedExpr(e.Receiver, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Receiver = recv
+		clone.Args = make([]ast.Expression, len(e.Args))
+		for i, arg := range e.Args {
+			rewritten, err := g.rewriteDelayedExpr(arg, state)
+			if err != nil {
+				return nil, err
+			}
+			clone.Args[i] = rewritten
+		}
+		return &clone, nil
+	case *ast.BuiltinCallExpr:
+		clone := *e
+		clone.Args = make([]ast.Expression, len(e.Args))
+		for i, arg := range e.Args {
+			rewritten, err := g.rewriteDelayedExpr(arg, state)
+			if err != nil {
+				return nil, err
+			}
+			clone.Args[i] = rewritten
+		}
+		return &clone, nil
+	case *ast.TernaryExpr:
+		cond, err := g.rewriteDelayedExpr(e.Condition, state)
+		if err != nil {
+			return nil, err
+		}
+		thenExpr, err := g.rewriteDelayedExpr(e.Then, state)
+		if err != nil {
+			return nil, err
+		}
+		elseExpr, err := g.rewriteDelayedExpr(e.Else, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Condition = cond
+		clone.Then = thenExpr
+		clone.Else = elseExpr
+		return &clone, nil
+	case *ast.UnaryExpr:
+		inner, err := g.rewriteDelayedExpr(e.Expr, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Expr = inner
+		return &clone, nil
+	case *ast.IndexExpr:
+		recv, err := g.rewriteDelayedExpr(e.Expr, state)
+		if err != nil {
+			return nil, err
+		}
+		idx, err := g.rewriteDelayedExpr(e.Index, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Expr = recv
+		clone.Index = idx
+		return &clone, nil
+	case *ast.PropertyExpr:
+		recv, err := g.rewriteDelayedExpr(e.Receiver, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Receiver = recv
+		return &clone, nil
+	case *ast.AsExpr:
+		inner, err := g.rewriteDelayedExpr(e.Expr, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Expr = inner
+		return &clone, nil
+	case *ast.SpreadExpr:
+		inner, err := g.rewriteDelayedExpr(e.Expr, state)
+		if err != nil {
+			return nil, err
+		}
+		clone := *e
+		clone.Expr = inner
+		return &clone, nil
+	default:
+		return expr, nil
+	}
+}
+
 func (g *Generator) genMapCallbackStmtSource(stmt ast.Statement, indexVar string) (string, error) {
 	switch s := stmt.(type) {
 	case *ast.ReturnStmt:
@@ -9383,13 +10526,13 @@ func (g *Generator) genMapCallbackStmtSource(stmt ast.Statement, indexVar string
 		if s.Value == nil {
 			return shellSuffix(inc) + "; continue", nil
 		}
-		val, err := g.genExprValue(s.Value)
+		prelude, val, err := g.genDelayedExprSource(s.Value)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("printf '%%s\\n' %s%s; continue;", ensureArgSafe(val), inc), nil
+		return fmt.Sprintf("%sprintf '%%s\\n' %s%s; continue;", prelude, ensureArgSafe(val), inc), nil
 	case *ast.IfStmt:
-		cond, err := g.genCondition(s.Condition)
+		prelude, cond, err := g.genDelayedConditionSource(s.Condition)
 		if err != nil {
 			return "", err
 		}
@@ -9397,9 +10540,9 @@ func (g *Generator) genMapCallbackStmtSource(stmt ast.Statement, indexVar string
 		if err != nil {
 			return "", err
 		}
-		pieces := []string{fmt.Sprintf("if %s; then %s", cond, thenSrc)}
+		pieces := []string{fmt.Sprintf("%sif %s; then %s", prelude, cond, thenSrc)}
 		for _, elseif := range s.ElseIfs {
-			elseifCond, err := g.genCondition(elseif.Condition)
+			elseifPrelude, elseifCond, err := g.genDelayedConditionSource(elseif.Condition)
 			if err != nil {
 				return "", err
 			}
@@ -9407,7 +10550,7 @@ func (g *Generator) genMapCallbackStmtSource(stmt ast.Statement, indexVar string
 			if err != nil {
 				return "", err
 			}
-			pieces = append(pieces, fmt.Sprintf("elif %s; then %s", elseifCond, body))
+			pieces = append(pieces, fmt.Sprintf("elif %s%s; then %s", elseifPrelude, elseifCond, body))
 		}
 		if s.Else != nil {
 			body, err := g.genMapCallbackBlockSource(s.Else, indexVar)
@@ -9421,11 +10564,11 @@ func (g *Generator) genMapCallbackStmtSource(stmt ast.Statement, indexVar string
 	case *ast.ExprStmt:
 		return "", fmt.Errorf("unsupported expression statement in map callback: %T", s.Expr)
 	case *ast.Assignment:
-		val, err := g.genExprRHS(s.Value, nil)
+		prelude, val, err := g.genDelayedExprSource(s.Value)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s=%s", g.resolveVarName(s.Name), val), nil
+		return fmt.Sprintf("%s%s=%s", prelude, g.resolveVarName(s.Name), val), nil
 	}
 	return "", fmt.Errorf("unsupported statement in map callback: %T", stmt)
 }
@@ -9545,14 +10688,47 @@ func (g *Generator) callbackCommand(expr ast.Expression) (string, error) {
 			return "", err
 		}
 		return shellQuote(fnName), nil
+	case *ast.FnCallExpr:
+		if g.fnCallSupportsReturnSlot(e.Name) {
+			valueVar := fmt.Sprintf("_bst_callback_%d_%d", e.Pos.Line, e.Pos.Column)
+			if err := g.genFnCallIntoVar(valueVar, e); err != nil {
+				return "", err
+			}
+			g.requireRuntimeHelper("functionCall")
+			return fmt.Sprintf("_bst_call \"$%s\"", valueVar), nil
+		}
+		return g.genExprValue(expr)
 	case *ast.IdentExpr:
 		if fnName, ok := g.namedFunctionValue(e.Name); ok {
 			return shellQuote(fnName), nil
+		}
+		if g.functionValueType(e.Name) != nil {
+			g.requireRuntimeHelper("functionCall")
+			return fmt.Sprintf("_bst_call \"$%s\"", g.resolveVarName(e.Name)), nil
 		}
 		return fmt.Sprintf("\"$%s\"", g.resolveVarName(e.Name)), nil
 	default:
 		return g.genExprValue(expr)
 	}
+}
+
+func (g *Generator) callbackSupportsReturnSlot(expr ast.Expression) bool {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.callbackSupportsReturnSlot(e.Expr)
+	case *ast.ArrowExpr:
+		return true
+	case *ast.IdentExpr:
+		if fnName, ok := g.namedFunctionValue(e.Name); ok {
+			return g.generatedFnMap[fnName]
+		}
+		return g.functionValueType(e.Name) != nil
+	default:
+		if typ := g.inferReceiverType(expr); typ != nil && typ.Kind == ast.TypeFunction {
+			return true
+		}
+	}
+	return false
 }
 
 func singleArrowArg(e *ast.MethodCallExpr) (*ast.ArrowExpr, error) {
@@ -10782,6 +11958,18 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 				return "", err
 			}
 			return nullishAwareTruthyCondition(val), nil
+		}
+		if g.deferFnCallPreEval == 0 {
+			valueVar := fmt.Sprintf("_bst_cond_%d_%d", e.Pos.Line, e.Pos.Column)
+			if ok, err := g.genListCallbackMethodIntoVar(valueVar, e); ok || err != nil {
+				if err != nil {
+					return "", err
+				}
+				if e.Method == "find" {
+					return nullishAwareTruthyCondition(fmt.Sprintf("\"$%s\"", valueVar)), nil
+				}
+				return truthyCondition(fmt.Sprintf("\"$%s\"", valueVar)), nil
+			}
 		}
 		return g.genMethodCondition(e)
 	case *ast.PropertyExpr:
