@@ -2112,6 +2112,18 @@ let mapped = items.map(x => x + "!")`)
 	assertNotContains(t, out, `local `)
 }
 
+func TestCodegen_ArrowFunctionValueDecl(t *testing.T) {
+	out := compile(t, `let suffix = "!"
+let add = (x: string): string => x + suffix
+let out = add("a")`)
+	assertContains(t, out, `_bst_arrow_add_2_11() {`)
+	assertContains(t, out, `_bst_arrow_add_2_11_param_x="$1"`)
+	assertContains(t, out, `printf '%s' "${_bst_arrow_add_2_11_param_x}!"`)
+	assertContains(t, out, `add='_bst_arrow_add_2_11'`)
+	assertContains(t, out, `out=$("$add" 'a')`)
+	assertNotContains(t, out, `local `)
+}
+
 func TestCodegen_ListFilterArrow(t *testing.T) {
 	out := compile(t, `let items = ["a", "b"]
 let picked = items.filter(x => x.startsWith("a"))`)

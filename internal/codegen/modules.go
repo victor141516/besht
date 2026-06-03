@@ -999,15 +999,50 @@ func (c *Compiler) buildImportedMaps() (map[string]map[string]string, map[string
 }
 
 func rewriteFnCalls(stmts []ast.Statement, importMap map[string]string, qualify func(string) string) {
+	rewriteFnCallsScoped(stmts, importMap, qualify, nil)
+}
+
+func rewriteFnCallsScoped(stmts []ast.Statement, importMap map[string]string, qualify func(string) string, parent map[string]bool) {
+	scope := cloneNameScope(parent)
+	collectValueNames(stmts, scope)
 	for _, s := range stmts {
-		rewriteStmt(s, importMap, qualify)
+		rewriteStmt(s, importMap, qualify, scope)
 	}
 }
 
-func rewriteStmt(stmt ast.Statement, importMap map[string]string, qualify func(string) string) {
+func cloneNameScope(parent map[string]bool) map[string]bool {
+	scope := make(map[string]bool)
+	for name, ok := range parent {
+		scope[name] = ok
+	}
+	return scope
+}
+
+func collectValueNames(stmts []ast.Statement, scope map[string]bool) {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.LetDecl:
+			scope[s.Name] = true
+		case *ast.DestructureDecl:
+			for _, name := range s.Names {
+				scope[name] = true
+			}
+		}
+	}
+}
+
+func addParamNames(scope map[string]bool, params []*ast.Param) {
+	for _, param := range params {
+		scope[param.Name] = true
+	}
+}
+
+func rewriteStmt(stmt ast.Statement, importMap map[string]string, qualify func(string) string, scope map[string]bool) {
 	switch s := stmt.(type) {
 	case *ast.FnDecl:
-		rewriteFnCalls(s.Body.Statements, importMap, qualify)
+		child := cloneNameScope(scope)
+		addParamNames(child, s.Params)
+		rewriteFnCallsScoped(s.Body.Statements, importMap, qualify, child)
 	case *ast.ClassDecl:
 		if qualName, ok := importMap[s.Name]; ok {
 			s.Name = qualName
@@ -1015,88 +1050,102 @@ func rewriteStmt(stmt ast.Statement, importMap map[string]string, qualify func(s
 			s.Name = qualify(s.Name)
 		}
 		if s.Constructor != nil {
-			rewriteFnCalls(s.Constructor.Body.Statements, importMap, qualify)
+			child := cloneNameScope(scope)
+			addParamNames(child, s.Constructor.Params)
+			rewriteFnCallsScoped(s.Constructor.Body.Statements, importMap, qualify, child)
 		}
 		for _, prop := range s.StaticProps {
 			if prop.Value != nil {
-				rewriteExpr(prop.Value, importMap, qualify)
+				rewriteExpr(prop.Value, importMap, qualify, scope)
 			}
 		}
 		for _, method := range s.Methods {
-			rewriteFnCalls(method.Body.Statements, importMap, qualify)
+			child := cloneNameScope(scope)
+			addParamNames(child, method.Params)
+			rewriteFnCallsScoped(method.Body.Statements, importMap, qualify, child)
 		}
 		for _, accessor := range s.Accessors {
-			rewriteFnCalls(accessor.Body.Statements, importMap, qualify)
+			child := cloneNameScope(scope)
+			addParamNames(child, accessor.Params)
+			rewriteFnCallsScoped(accessor.Body.Statements, importMap, qualify, child)
 		}
 	case *ast.Block:
-		rewriteFnCalls(s.Statements, importMap, qualify)
+		rewriteFnCallsScoped(s.Statements, importMap, qualify, scope)
 	case *ast.IfStmt:
-		rewriteExpr(s.Condition, importMap, qualify)
-		rewriteFnCalls(s.Then.Statements, importMap, qualify)
+		rewriteExpr(s.Condition, importMap, qualify, scope)
+		rewriteFnCallsScoped(s.Then.Statements, importMap, qualify, scope)
 		for _, ei := range s.ElseIfs {
-			rewriteExpr(ei.Condition, importMap, qualify)
-			rewriteFnCalls(ei.Body.Statements, importMap, qualify)
+			rewriteExpr(ei.Condition, importMap, qualify, scope)
+			rewriteFnCallsScoped(ei.Body.Statements, importMap, qualify, scope)
 		}
 		if s.Else != nil {
-			rewriteFnCalls(s.Else.Statements, importMap, qualify)
+			rewriteFnCallsScoped(s.Else.Statements, importMap, qualify, scope)
 		}
 	case *ast.ForStmt:
-		rewriteExpr(s.Iterator, importMap, qualify)
-		rewriteFnCalls(s.Body.Statements, importMap, qualify)
+		rewriteExpr(s.Iterator, importMap, qualify, scope)
+		child := cloneNameScope(scope)
+		child[s.VarName] = true
+		rewriteFnCallsScoped(s.Body.Statements, importMap, qualify, child)
 	case *ast.CStyleForStmt:
-		rewriteStmt(s.Init, importMap, qualify)
-		rewriteExpr(s.Condition, importMap, qualify)
-		rewriteStmt(s.Update, importMap, qualify)
-		rewriteFnCalls(s.Body.Statements, importMap, qualify)
+		rewriteStmt(s.Init, importMap, qualify, scope)
+		rewriteExpr(s.Condition, importMap, qualify, scope)
+		rewriteStmt(s.Update, importMap, qualify, scope)
+		rewriteFnCallsScoped(s.Body.Statements, importMap, qualify, scope)
 	case *ast.WhileStmt:
-		rewriteExpr(s.Condition, importMap, qualify)
-		rewriteFnCalls(s.Body.Statements, importMap, qualify)
+		rewriteExpr(s.Condition, importMap, qualify, scope)
+		rewriteFnCallsScoped(s.Body.Statements, importMap, qualify, scope)
 	case *ast.TryStmt:
-		rewriteFnCalls(s.Body.Statements, importMap, qualify)
-		rewriteFnCalls(s.Catch.Statements, importMap, qualify)
+		rewriteFnCallsScoped(s.Body.Statements, importMap, qualify, scope)
+		child := cloneNameScope(scope)
+		if s.CatchVar != "" {
+			child[s.CatchVar] = true
+		}
+		rewriteFnCallsScoped(s.Catch.Statements, importMap, qualify, child)
 	case *ast.LetDecl:
-		rewriteExpr(s.Value, importMap, qualify)
+		rewriteExpr(s.Value, importMap, qualify, scope)
 	case *ast.DestructureDecl:
-		rewriteExpr(s.Value, importMap, qualify)
+		rewriteExpr(s.Value, importMap, qualify, scope)
 	case *ast.Assignment:
-		rewriteExpr(s.Value, importMap, qualify)
+		rewriteExpr(s.Value, importMap, qualify, scope)
 	case *ast.IndexAssignStmt:
-		rewriteExpr(s.Index, importMap, qualify)
-		rewriteExpr(s.Value, importMap, qualify)
+		rewriteExpr(s.Index, importMap, qualify, scope)
+		rewriteExpr(s.Value, importMap, qualify, scope)
 	case *ast.PropertyAssignStmt:
-		rewriteExpr(s.Value, importMap, qualify)
+		rewriteExpr(s.Value, importMap, qualify, scope)
 	case *ast.SwitchStmt:
-		rewriteExpr(s.Value, importMap, qualify)
+		rewriteExpr(s.Value, importMap, qualify, scope)
 		for _, swCase := range s.Cases {
 			if !swCase.IsDefault {
-				rewriteExpr(swCase.Value, importMap, qualify)
+				rewriteExpr(swCase.Value, importMap, qualify, scope)
 			}
-			rewriteFnCalls(swCase.Body.Statements, importMap, qualify)
+			rewriteFnCallsScoped(swCase.Body.Statements, importMap, qualify, scope)
 		}
 	case *ast.ReturnStmt:
 		if s.Value != nil {
-			rewriteExpr(s.Value, importMap, qualify)
+			rewriteExpr(s.Value, importMap, qualify, scope)
 		}
 	case *ast.ExprStmt:
-		rewriteExpr(s.Expr, importMap, qualify)
+		rewriteExpr(s.Expr, importMap, qualify, scope)
 	case *ast.DeclareStmt:
 	case *ast.DeclareFnStmt:
 	}
 }
 
-func rewriteExpr(expr ast.Expression, importMap map[string]string, qualify func(string) string) {
+func rewriteExpr(expr ast.Expression, importMap map[string]string, qualify func(string) string, scope map[string]bool) {
 	switch e := expr.(type) {
 	case *ast.FnCallExpr:
-		if qualName, ok := importMap[e.Name]; ok {
-			e.Name = qualName
-		} else if _, ok := importMap[e.Name]; !ok {
-			qual := qualify(e.Name)
-			if qual != e.Name {
-				e.Name = qual
+		if !scope[e.Name] {
+			if qualName, ok := importMap[e.Name]; ok {
+				e.Name = qualName
+			} else if _, ok := importMap[e.Name]; !ok {
+				qual := qualify(e.Name)
+				if qual != e.Name {
+					e.Name = qual
+				}
 			}
 		}
 		for _, arg := range e.Args {
-			rewriteExpr(arg, importMap, qualify)
+			rewriteExpr(arg, importMap, qualify, scope)
 		}
 	case *ast.NewExpr:
 		if e.ClassName != "Set" {
@@ -1107,67 +1156,67 @@ func rewriteExpr(expr ast.Expression, importMap map[string]string, qualify func(
 			}
 		}
 		for _, arg := range e.Args {
-			rewriteExpr(arg, importMap, qualify)
+			rewriteExpr(arg, importMap, qualify, scope)
 		}
 	case *ast.BinaryExpr:
-		rewriteExpr(e.Left, importMap, qualify)
-		rewriteExpr(e.Right, importMap, qualify)
+		rewriteExpr(e.Left, importMap, qualify, scope)
+		rewriteExpr(e.Right, importMap, qualify, scope)
 	case *ast.TernaryExpr:
-		rewriteExpr(e.Condition, importMap, qualify)
-		rewriteExpr(e.Then, importMap, qualify)
-		rewriteExpr(e.Else, importMap, qualify)
+		rewriteExpr(e.Condition, importMap, qualify, scope)
+		rewriteExpr(e.Then, importMap, qualify, scope)
+		rewriteExpr(e.Else, importMap, qualify, scope)
 	case *ast.UnaryExpr:
-		rewriteExpr(e.Expr, importMap, qualify)
+		rewriteExpr(e.Expr, importMap, qualify, scope)
 	case *ast.UpdateExpr:
 	case *ast.CmdExpr:
 		for _, arg := range e.Args {
-			rewriteExpr(arg, importMap, qualify)
+			rewriteExpr(arg, importMap, qualify, scope)
 		}
 	case *ast.PropagateExpr:
-		rewriteExpr(e.Expr, importMap, qualify)
+		rewriteExpr(e.Expr, importMap, qualify, scope)
 	case *ast.IndexExpr:
-		rewriteExpr(e.Expr, importMap, qualify)
-		rewriteExpr(e.Index, importMap, qualify)
+		rewriteExpr(e.Expr, importMap, qualify, scope)
+		rewriteExpr(e.Index, importMap, qualify, scope)
 	case *ast.ListLit:
 		for _, elem := range e.Elements {
-			rewriteExpr(elem, importMap, qualify)
+			rewriteExpr(elem, importMap, qualify, scope)
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
-			rewriteExpr(field.Value, importMap, qualify)
+			rewriteExpr(field.Value, importMap, qualify, scope)
 		}
 	case *ast.TemplateLit:
 		for _, expr := range e.Exprs {
-			rewriteExpr(expr, importMap, qualify)
+			rewriteExpr(expr, importMap, qualify, scope)
 		}
 	case *ast.BuiltinCallExpr:
 		for _, arg := range e.Args {
-			rewriteExpr(arg, importMap, qualify)
+			rewriteExpr(arg, importMap, qualify, scope)
 		}
 	case *ast.MethodCallExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 			qualifyClassIdent(ident, importMap, qualify)
 		}
-		rewriteExpr(e.Receiver, importMap, qualify)
+		rewriteExpr(e.Receiver, importMap, qualify, scope)
 		for _, arg := range e.Args {
-			rewriteExpr(arg, importMap, qualify)
+			rewriteExpr(arg, importMap, qualify, scope)
 		}
 	case *ast.PropertyExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 			qualifyClassIdent(ident, importMap, qualify)
 		}
-		rewriteExpr(e.Receiver, importMap, qualify)
+		rewriteExpr(e.Receiver, importMap, qualify, scope)
 	case *ast.ArrowExpr:
-		rewriteExpr(e.Body, importMap, qualify)
+		child := cloneNameScope(scope)
+		addParamNames(child, e.Params)
+		rewriteExpr(e.Body, importMap, qualify, child)
 		if e.BlockBody != nil {
-			for _, stmt := range e.BlockBody.Statements {
-				rewriteStmt(stmt, importMap, qualify)
-			}
+			rewriteFnCallsScoped(e.BlockBody.Statements, importMap, qualify, child)
 		}
 	case *ast.SpreadExpr:
-		rewriteExpr(e.Expr, importMap, qualify)
+		rewriteExpr(e.Expr, importMap, qualify, scope)
 	case *ast.AsExpr:
-		rewriteExpr(e.Expr, importMap, qualify)
+		rewriteExpr(e.Expr, importMap, qualify, scope)
 	}
 }
 
@@ -1285,6 +1334,11 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 		exportedVarAliasMap: make(map[string]string),
 	}
 	g.fnReturnMap = make(map[string]*ast.Type)
+	g.fnValueMap = make(map[string]string)
+	for name, qualName := range importMap {
+		g.fnValueMap[name] = qualName
+		g.fnValueMap[qualName] = qualName
+	}
 	g.varTypeMap = make(map[string]*ast.Type)
 	g.floatVars = make(map[string]bool)
 	g.paramMap = make(map[string]string)
@@ -1325,6 +1379,8 @@ func (g *moduleGenerator) generateModule(prog *ast.Program) (string, error) {
 			qualName := g.qualifyFnName(fn.Name)
 			g.fnReturnMap[qualName] = retType
 			g.fnReturnMap[fn.Name] = retType
+			g.fnValueMap[fn.Name] = qualName
+			g.fnValueMap[qualName] = qualName
 			var pnames []string
 			for _, p := range fn.Params {
 				pnames = append(pnames, p.Name)

@@ -1,0 +1,7 @@
+function a(list: Array<string>, cb: (x: string) => void) {
+  for (const element of list) {
+    cb(element);
+  }
+}
+
+a(["foo", "bar", "baz"], (x: string) => console.log(x));

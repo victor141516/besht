@@ -19,6 +19,7 @@ type Generator struct {
 	indent               int
 	currentFn            string
 	fnReturnMap          map[string]*ast.Type
+	fnValueMap           map[string]string
 	varTypeMap           map[string]*ast.Type // codegen-level var -> inferred type (list detection)
 	inFunction           bool
 	inLoop               bool
@@ -140,6 +141,13 @@ type callbackBinding struct {
 	hadAlias bool
 }
 
+type listCallbackRef struct {
+	Arrow      *ast.ArrowExpr
+	Expr       ast.Expression
+	ReturnType *ast.Type
+	Pos        ast.Pos
+}
+
 type Options struct {
 	NoCheck                   bool
 	NoSourceMap               bool
@@ -151,6 +159,7 @@ type Options struct {
 func New() *Generator {
 	return &Generator{
 		fnReturnMap:          make(map[string]*ast.Type),
+		fnValueMap:           make(map[string]string),
 		varTypeMap:           make(map[string]*ast.Type),
 		paramMap:             make(map[string]string),
 		globalVarMap:         make(map[string]string),
@@ -1339,6 +1348,7 @@ func (g *Generator) generate(prog *ast.Program) (string, error) {
 		case *ast.FnDecl:
 			retType := inferFunctionReturnType(fn.Body.Statements)
 			g.fnReturnMap[fn.Name] = retType
+			g.fnValueMap[fn.Name] = mangle(fn.Name)
 			var pnames []string
 			for _, p := range fn.Params {
 				pnames = append(pnames, p.Name)
@@ -1475,6 +1485,10 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	g.paramMap[s.Name] = varName
 	delete(g.objAliasMap, s.Name)
 	delete(g.staticSetMap, varName)
+
+	if arrow, ok := unwrapAsExpr(s.Value).(*ast.ArrowExpr); ok {
+		return g.genArrowLetDecl(varName, s.Name, arrow, s.TypeAnnot)
+	}
 
 	if newExpr, ok := s.Value.(*ast.NewExpr); ok {
 		return g.genNewLetDecl(varName, s.Name, newExpr)
@@ -2056,9 +2070,9 @@ func (g *Generator) currentMapReturn() (mapReturnContext, bool) {
 
 func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expression) error {
 	me := expr.(*ast.MethodCallExpr)
-	arrow, ok := me.Args[0].(*ast.ArrowExpr)
+	arrow, ok := callbackArrowArg(me.Args[0])
 	if !ok {
-		return fmt.Errorf("reduce() callback must be an arrow expression")
+		return g.genReduceFunctionLetDecl(varName, sourceName, me)
 	}
 	if len(arrow.Params) != 2 {
 		return fmt.Errorf("reduce() callback must take 2 parameters")
@@ -2136,6 +2150,43 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 			return nil
 		})
 	})
+}
+
+func (g *Generator) genReduceFunctionLetDecl(varName, sourceName string, me *ast.MethodCallExpr) error {
+	initVal := me.Args[1]
+	if _, ok := initVal.(*ast.ObjectLit); ok {
+		return fmt.Errorf("reduce() object accumulator callbacks must be direct arrow expressions")
+	}
+	fn, err := g.callbackCommand(me.Args[0])
+	if err != nil {
+		return err
+	}
+	val, err := g.genExprRHS(initVal, nil)
+	if err != nil {
+		return err
+	}
+	g.line(varName + "=" + val)
+	g.varTypeMap[varName] = g.inferReceiverType(initVal)
+	if g.varTypeMap[varName] == nil {
+		g.varTypeMap[varName] = typeString
+	}
+	g.paramMap[sourceName] = varName
+
+	recv, err := g.genExprValue(me.Receiver)
+	if err != nil {
+		return err
+	}
+	recvArg := ensureArgSafe(recv)
+	curVar := fmt.Sprintf("_reduce_%d_%d_current", me.Pos.Line, me.Pos.Column)
+	heredocTag := fmt.Sprintf("_EOF_REDF_%d_%d", me.Pos.Line, me.Pos.Column)
+	g.line(fmt.Sprintf("while IFS= read -r %s; do", curVar))
+	g.push()
+	g.line(fmt.Sprintf("%s=$(%s \"$%s\" \"$%s\")", varName, fn, varName, curVar))
+	g.pop()
+	g.line("done << " + heredocTag)
+	g.line("$(printf '" + "%s" + "\\n' " + recvArg + ")")
+	g.line(heredocTag)
+	return nil
 }
 
 func (g *Generator) genAssignment(s *ast.Assignment) error {
@@ -2234,6 +2285,157 @@ func (g *Generator) genFetchResponseBinding(varName string, expr ast.Expression)
 		return true, nil
 	}
 	return false, nil
+}
+
+func (g *Generator) genArrowLetDecl(varName, sourceName string, arrow *ast.ArrowExpr, annot *ast.Type) error {
+	fnName := arrowFunctionName(varName, arrow.Pos)
+	fnType := g.arrowFunctionType(arrow, annot)
+	g.varTypeMap[varName] = fnType
+	if err := g.genArrowFunctionDecl(fnName, arrow, fnType.Return); err != nil {
+		return err
+	}
+	g.line(fmt.Sprintf("%s=%s", varName, shellQuote(fnName)))
+	delete(g.objAliasMap, sourceName)
+	delete(g.stringConstMap, varName)
+	delete(g.numConstMap, varName)
+	delete(g.boolConstMap, varName)
+	delete(g.staticListMap, varName)
+	delete(g.staticListValues, varName)
+	delete(g.staticSetMap, varName)
+	delete(g.staticNullishMap, varName)
+	return nil
+}
+
+func (g *Generator) arrowFunctionType(arrow *ast.ArrowExpr, annot *ast.Type) *ast.Type {
+	if annot != nil && annot.Kind == ast.TypeFunction {
+		return annot
+	}
+	var params []*ast.Type
+	for _, param := range arrow.Params {
+		if param.Type != nil {
+			params = append(params, param.Type)
+		} else {
+			params = append(params, typeString)
+		}
+	}
+	return &ast.Type{Kind: ast.TypeFunction, Params: params, Return: g.inferArrowFunctionReturnType(arrow)}
+}
+
+func (g *Generator) inferArrowFunctionReturnType(arrow *ast.ArrowExpr) *ast.Type {
+	if arrow == nil {
+		return typeString
+	}
+	if arrow.ReturnType != nil {
+		return arrow.ReturnType
+	}
+	if arrow.Body != nil {
+		if t := g.inferReceiverType(arrow.Body); t != nil {
+			return t
+		}
+		return typeString
+	}
+	if arrow.BlockBody != nil {
+		return inferFunctionReturnType(arrow.BlockBody.Statements)
+	}
+	return &ast.Type{Kind: ast.TypeVoid}
+}
+
+func (g *Generator) genArrowFunctionDecl(fnName string, arrow *ast.ArrowExpr, retType *ast.Type) error {
+	g.fnReturnMap[fnName] = retType
+	g.fnValueMap[fnName] = fnName
+	g.line(fmt.Sprintf("%s() {", fnName))
+	g.push()
+
+	prevFn := g.currentFn
+	prevInFn := g.inFunction
+	prevParamMap := g.paramMap
+	prevObjAliasMap := g.objAliasMap
+	prevFnParamTypes := g.fnParamTypes
+	prevObjFieldsMap := g.objFieldsMap
+	prevObjPropTypeMap := g.objPropTypeMap
+	prevStaticObjectMap := g.staticObjectMap
+	prevStaticObjectEntryMap := g.staticObjectEntryMap
+	prevStaticObjectValueMap := g.staticObjectValueMap
+	prevStaticNullishMap := g.staticNullishMap
+	prevObjectConstMap := g.objectConstMap
+	prevStringConstMap := g.stringConstMap
+	prevStaticSetMap := g.staticSetMap
+	prevBoolConstMap := g.boolConstMap
+	prevNumConstMap := g.numConstMap
+
+	g.currentFn = fnName
+	g.inFunction = true
+	g.paramMap = cloneStringMap(prevParamMap)
+	g.objAliasMap = cloneObjectRefMap(prevObjAliasMap)
+	g.fnParamTypes = cloneTypeMap(prevFnParamTypes)
+	g.objFieldsMap = cloneObjectFieldsMap(prevObjFieldsMap)
+	g.objPropTypeMap = cloneTypeMap(prevObjPropTypeMap)
+	g.staticObjectMap = cloneObjectFieldsMap(prevStaticObjectMap)
+	g.staticObjectEntryMap = cloneObjectFieldsMap(prevStaticObjectEntryMap)
+	g.staticObjectValueMap = cloneObjectFieldsMap(prevStaticObjectValueMap)
+	g.staticNullishMap = cloneBoolMap(prevStaticNullishMap)
+	g.objectConstMap = cloneStringMap(prevObjectConstMap)
+	g.stringConstMap = cloneStringMap(prevStringConstMap)
+	g.staticSetMap = cloneObjectFieldsMap(prevStaticSetMap)
+	g.boolConstMap = cloneBoolMap(prevBoolConstMap)
+	g.numConstMap = cloneNumberMap(prevNumConstMap)
+
+	for i, param := range arrow.Params {
+		varName := arrowParamVar(fnName, param.Name)
+		g.paramMap[param.Name] = varName
+		delete(g.objAliasMap, param.Name)
+		if param.Type != nil {
+			g.fnParamTypes[param.Name] = param.Type
+			g.varTypeMap[varName] = param.Type
+		}
+		g.line(fmt.Sprintf("%s=\"$%d\"", varName, i+1))
+	}
+	if len(arrow.Params) > 0 {
+		g.line("")
+	}
+
+	var err error
+	if arrow.Body != nil {
+		if retType != nil && retType.Kind == ast.TypeVoid {
+			err = g.genExprStmt(&ast.ExprStmt{Pos: arrow.Pos, Expr: arrow.Body})
+			if err == nil {
+				g.line("return 0")
+			}
+		} else {
+			err = g.genReturn(&ast.ReturnStmt{Pos: arrow.Pos, Value: arrow.Body})
+		}
+	} else if arrow.BlockBody != nil {
+		for _, stmt := range arrow.BlockBody.Statements {
+			if err = g.genStmt(stmt); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			g.line("return 0")
+		}
+	}
+
+	g.currentFn = prevFn
+	g.inFunction = prevInFn
+	g.paramMap = prevParamMap
+	g.objAliasMap = prevObjAliasMap
+	g.fnParamTypes = prevFnParamTypes
+	g.objFieldsMap = prevObjFieldsMap
+	g.objPropTypeMap = prevObjPropTypeMap
+	g.staticObjectMap = prevStaticObjectMap
+	g.staticObjectEntryMap = prevStaticObjectEntryMap
+	g.staticObjectValueMap = prevStaticObjectValueMap
+	g.staticNullishMap = prevStaticNullishMap
+	g.objectConstMap = prevObjectConstMap
+	g.stringConstMap = prevStringConstMap
+	g.staticSetMap = prevStaticSetMap
+	g.boolConstMap = prevBoolConstMap
+	g.numConstMap = prevNumConstMap
+
+	g.pop()
+	g.line("}")
+	g.line("")
+	return err
 }
 
 func (g *Generator) resolveVarName(name string) string {
@@ -2656,13 +2858,14 @@ func (g *Generator) genFor(s *ast.ForStmt) error {
 			return g.genForStaticList(s, words)
 		}
 	case *ast.IdentExpr:
-		if entries, ok := g.staticEntryListMap[g.resolveVarName(iter.Name)]; ok {
+		iterVar := g.resolveVarName(iter.Name)
+		if entries, ok := g.staticEntryListMap[iterVar]; ok {
 			return g.genForStaticEntryList(s, entries)
 		}
 		if values, ok := g.staticScalarListValuesWithoutNewlines(iter); ok {
 			return g.genForStaticList(s, staticWordsFromValues(values))
 		}
-		return g.genForList(s, fmt.Sprintf("\"$%s\"", iter.Name), g.listLengthExpr(iter))
+		return g.genForList(s, fmt.Sprintf("\"$%s\"", iterVar), g.listLengthExpr(iter))
 	case *ast.CmdExpr:
 		pipeline, redirect, err := g.genCmdPipeline(iter)
 		if err != nil {
@@ -4083,14 +4286,17 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 		g.line(val)
 		return nil
 	case *ast.FnCallExpr:
-		retType, hasRet := g.fnReturnMap[e.Name]
-		isVoid := !hasRet || (retType != nil && retType.Kind == ast.TypeVoid)
+		retType := g.fnCallReturnType(e.Name)
+		isVoid := retType == nil || retType.Kind == ast.TypeVoid
 
 		argStrs, err := g.genFnArgs(e.Args)
 		if err != nil {
 			return err
 		}
-		fnName := mangle(e.Name)
+		fnName, err := g.fnCallCommand(e.Name)
+		if err != nil {
+			return err
+		}
 		if isVoid {
 			g.line(fmt.Sprintf("%s %s", fnName, strings.Join(argStrs, " ")))
 		} else {
@@ -5382,6 +5588,9 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 		}
 		return `""`, nil
 	case *ast.IdentExpr:
+		if fnName, ok := g.namedFunctionValue(e.Name); ok {
+			return shellQuote(fnName), nil
+		}
 		varName := g.resolveVarName(e.Name)
 		return fmt.Sprintf("\"$%s\"", varName), nil
 	case *ast.CmdExpr:
@@ -5426,7 +5635,12 @@ func (g *Generator) genExprRHS(expr ast.Expression, targetType *ast.Type) (strin
 		}
 		return g.genMethodCall(e)
 	case *ast.ArrowExpr:
-		return "", fmt.Errorf("arrow expressions can only be used as list callbacks")
+		fnName := arrowFunctionName(fmt.Sprintf("anon_%d_%d", e.Pos.Line, e.Pos.Column), e.Pos)
+		fnType := g.arrowFunctionType(e, targetType)
+		if err := g.genArrowFunctionDecl(fnName, e, fnType.Return); err != nil {
+			return "", err
+		}
+		return shellQuote(fnName), nil
 	case *ast.PropertyExpr:
 		if e.Optional {
 			return g.genOptionalProperty(e)
@@ -5688,11 +5902,61 @@ func (g *Generator) genFnCallCapture(e *ast.FnCallExpr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fnName := mangle(e.Name)
+	fnName, err := g.fnCallCommand(e.Name)
+	if err != nil {
+		return "", err
+	}
 	if len(argStrs) == 0 {
 		return fmt.Sprintf("$(%s)", fnName), nil
 	}
 	return fmt.Sprintf("$(%s %s)", fnName, strings.Join(argStrs, " ")), nil
+}
+
+func (g *Generator) fnCallCommand(name string) (string, error) {
+	if _, ok := g.fnReturnMap[name]; ok {
+		return mangle(name), nil
+	}
+	if t := g.functionValueType(name); t != nil {
+		return fmt.Sprintf("\"$%s\"", g.resolveVarName(name)), nil
+	}
+	return mangle(name), nil
+}
+
+func (g *Generator) functionValueType(name string) *ast.Type {
+	varName := g.resolveVarName(name)
+	if t := g.varTypeMap[varName]; t != nil && t.Kind == ast.TypeFunction {
+		return t
+	}
+	if t := g.fnParamTypes[name]; t != nil && t.Kind == ast.TypeFunction {
+		return t
+	}
+	return nil
+}
+
+func (g *Generator) fnCallReturnType(name string) *ast.Type {
+	if ret, ok := g.fnReturnMap[name]; ok {
+		return ret
+	}
+	if t := g.functionValueType(name); t != nil {
+		return t.Return
+	}
+	return nil
+}
+
+func (g *Generator) namedFunctionValue(name string) (string, bool) {
+	if _, ok := g.paramMap[name]; ok {
+		return "", false
+	}
+	if _, ok := g.globalVarMap[name]; ok {
+		return "", false
+	}
+	if fnName, ok := g.fnValueMap[name]; ok {
+		return fnName, true
+	}
+	if _, ok := g.fnReturnMap[name]; ok {
+		return mangle(name), true
+	}
+	return "", false
 }
 
 func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
@@ -7016,6 +7280,15 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		if vt, ok := g.fnParamTypes[e.Name]; ok {
 			return vt
 		}
+		if ret, ok := g.fnReturnMap[e.Name]; ok {
+			return &ast.Type{Kind: ast.TypeFunction, Return: ret}
+		}
+	case *ast.ArrowExpr:
+		return g.arrowFunctionType(e, nil)
+	case *ast.FnCallExpr:
+		if ret := g.fnCallReturnType(e.Name); ret != nil {
+			return ret
+		}
 	case *ast.ListLit:
 		if t := e.GetType(); t != nil {
 			return t
@@ -7055,6 +7328,8 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeBoolean}
 		case "JSON.stringify":
 			return typeString
+		case "console.log", "console.error":
+			return &ast.Type{Kind: ast.TypeVoid}
 		case "Object.keys", "Object.values":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "Object.entries":
@@ -7340,7 +7615,7 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 			return true
 		}
 	case *ast.FnCallExpr:
-		if rt, ok := g.fnReturnMap[e.Name]; ok {
+		if rt := g.fnCallReturnType(e.Name); rt != nil {
 			return rt != nil && rt.Kind == ast.TypeBoolean
 		}
 	}
@@ -7356,7 +7631,12 @@ func (g *Generator) isFloatExpr(expr ast.Expression) bool {
 	case *ast.BinaryExpr:
 		return e.Op == "/" || g.isFloatExpr(e.Left) || g.isFloatExpr(e.Right)
 	case *ast.FnCallExpr:
-		return g.floatVars[e.Name]
+		if g.floatVars[e.Name] {
+			return true
+		}
+		if rt := g.fnCallReturnType(e.Name); rt != nil {
+			return rt.Kind == ast.TypeNumber
+		}
 	case *ast.MethodCallExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
 			return true
@@ -8166,10 +8446,14 @@ func (g *Generator) staticListValuesForSearch(expr ast.Expression) ([]string, bo
 }
 
 func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {
-	arrow, err := listArrowArg(e)
+	cb, err := g.listCallbackArg(e)
 	if err != nil {
 		return err
 	}
+	if cb.Arrow == nil {
+		return g.genListForEachFunctionStmt(e, cb)
+	}
+	arrow := cb.Arrow
 	if values, ok := g.staticScalarListValuesWithoutNewlines(e.Receiver); ok && staticForEachScalarValues(values) {
 		return g.genStaticListForEachStmt(e, arrow, values)
 	}
@@ -8247,6 +8531,55 @@ func (g *Generator) genListForEachStmt(e *ast.MethodCallExpr) error {
 	g.pop()
 	g.line("fi")
 	return err
+}
+
+func (g *Generator) genListForEachFunctionStmt(e *ast.MethodCallExpr, cb listCallbackRef) error {
+	fn, err := g.callbackCommand(cb.Expr)
+	if err != nil {
+		return err
+	}
+	if values, ok := g.staticScalarListValuesWithoutNewlines(e.Receiver); ok && staticForEachScalarValues(values) {
+		if len(values) == 0 {
+			return nil
+		}
+		words := make([]string, 0, len(values))
+		for _, value := range values {
+			words = append(words, shellQuote(value))
+		}
+		itemVar := fmt.Sprintf("_foreach_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+		idxVar := fmt.Sprintf("_foreach_idx_%d_%d", cb.Pos.Line, cb.Pos.Column)
+		g.line(fmt.Sprintf("%s=0", idxVar))
+		g.line(fmt.Sprintf("for %s in %s; do", itemVar, strings.Join(words, " ")))
+		g.push()
+		g.line(fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, idxVar))
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		g.pop()
+		g.line("done")
+		return nil
+	}
+	recv, err := g.genExprValue(e.Receiver)
+	if err != nil {
+		return err
+	}
+	dataVar := fmt.Sprintf("_foreach_%d_%d", e.Pos.Line, e.Pos.Column)
+	itemVar := fmt.Sprintf("_foreach_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+	idxVar := fmt.Sprintf("_foreach_idx_%d_%d", cb.Pos.Line, cb.Pos.Column)
+	tag := fmt.Sprintf("__BESHT_FOREACH_%d_%d", e.Pos.Line, e.Pos.Column)
+	g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+	g.push()
+	g.line(fmt.Sprintf("%s=0", idxVar))
+	g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+	g.push()
+	g.line(fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, idxVar))
+	g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+	g.pop()
+	g.line("done <<" + tag)
+	g.raw(fmt.Sprintf("$%s\n", dataVar))
+	g.raw(tag + "\n")
+	g.pop()
+	g.line("fi")
+	return nil
 }
 
 func staticForEachScalarValues(values []string) bool {
@@ -8415,10 +8748,24 @@ func shellSuffix(s string) string {
 }
 
 func (g *Generator) genListMap(recv string, e *ast.MethodCallExpr) (string, error) {
-	arrow, err := listArrowArg(e)
+	cb, err := g.listCallbackArg(e)
 	if err != nil {
 		return "", err
 	}
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return "", err
+		}
+		itemVar := fmt.Sprintf("_cb_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+		indexVar := fmt.Sprintf("_cb_%d_%d_index", cb.Pos.Line, cb.Pos.Column)
+		call := fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, indexVar)
+		if cb.ReturnType != nil && cb.ReturnType.Kind == ast.TypeList {
+			return fmt.Sprintf("$(%s=0; printf '%%s\\n' %s | while IFS= read -r %s; do printf '%%s\\n' \"$(%s)\" | awk 'NR>1{printf \"\\037\"}{printf \"%%s\",$0}'; printf '\\n'; %s=$(( %s + 1 )); done)", indexVar, ensureArgSafe(recv), itemVar, call, indexVar, indexVar), nil
+		}
+		return fmt.Sprintf("$(%s=0; printf '%%s\\n' %s | while IFS= read -r %s; do printf '%%s\\n' \"$(%s)\"; %s=$(( %s + 1 )); done)", indexVar, ensureArgSafe(recv), itemVar, call, indexVar, indexVar), nil
+	}
+	arrow := cb.Arrow
 	var out string
 	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
 		param := ctx.ParamVars[0]
@@ -8454,10 +8801,22 @@ func (g *Generator) genListMap(recv string, e *ast.MethodCallExpr) (string, erro
 }
 
 func (g *Generator) genListFilter(recv string, e *ast.MethodCallExpr) (string, error) {
-	arrow, err := listArrowArg(e)
+	cb, err := g.listCallbackArg(e)
 	if err != nil {
 		return "", err
 	}
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return "", err
+		}
+		itemVar := fmt.Sprintf("_cb_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+		indexVar := fmt.Sprintf("_cb_%d_%d_index", cb.Pos.Line, cb.Pos.Column)
+		call := fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, indexVar)
+		cond := truthyCondition("$(" + call + ")")
+		return fmt.Sprintf("$(%s=0; printf '%%s\\n' %s | while IFS= read -r %s; do if %s; then printf '%%s\\n' \"$%s\"; fi; %s=$(( %s + 1 )); done)", indexVar, ensureArgSafe(recv), itemVar, cond, itemVar, indexVar, indexVar), nil
+	}
+	arrow := cb.Arrow
 	var out string
 	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
 		cond, err := g.genCondition(arrow.Body)
@@ -8482,10 +8841,23 @@ func (g *Generator) genListFilter(recv string, e *ast.MethodCallExpr) (string, e
 }
 
 func (g *Generator) genListFindIndex(recv string, e *ast.MethodCallExpr) (string, error) {
-	arrow, err := listArrowArg(e)
+	cb, err := g.listCallbackArg(e)
 	if err != nil {
 		return "", err
 	}
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return "", err
+		}
+		itemVar := fmt.Sprintf("_cb_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+		idx := fmt.Sprintf("_findidx_%d_%d", cb.Pos.Line, cb.Pos.Column)
+		dataVar := fmt.Sprintf("_finddata_%d_%d", cb.Pos.Line, cb.Pos.Column)
+		call := fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, idx)
+		cond := truthyCondition("$(" + call + ")")
+		return fmt.Sprintf("$(%s=%s; %s=0; _found=-1; while IFS= read -r %s; do if [ $_found -lt 0 ] && %s; then _found=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_FIND_%d_%d\n$%s\n__BESHT_FIND_%d_%d\nprintf '%%s' \"$_found\")", dataVar, recv, idx, itemVar, cond, idx, idx, idx, cb.Pos.Line, cb.Pos.Column, dataVar, cb.Pos.Line, cb.Pos.Column), nil
+	}
+	arrow := cb.Arrow
 	var out string
 	err = g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
 		cond, err := g.genCondition(arrow.Body)
@@ -8506,10 +8878,30 @@ func (g *Generator) genListFindIndex(recv string, e *ast.MethodCallExpr) (string
 }
 
 func (g *Generator) genListSomeEvery(recv string, e *ast.MethodCallExpr, some bool) (string, error) {
-	arrow, err := listArrowArg(e)
+	cb, err := g.listCallbackArg(e)
 	if err != nil {
 		return "", err
 	}
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return "", err
+		}
+		itemVar := fmt.Sprintf("_cb_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+		idx := fmt.Sprintf("_listpred_%d_%d_index", cb.Pos.Line, cb.Pos.Column)
+		dataVar := fmt.Sprintf("_listpred_%d_%d_data", cb.Pos.Line, cb.Pos.Column)
+		resultVar := fmt.Sprintf("_listpred_%d_%d_result", cb.Pos.Line, cb.Pos.Column)
+		call := fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, idx)
+		cond := truthyCondition("$(" + call + ")")
+		initial := "1"
+		body := fmt.Sprintf("if %s; then :; else %s=0; break; fi;", cond, resultVar)
+		if some {
+			initial = "0"
+			body = fmt.Sprintf("if %s; then %s=1; break; fi;", cond, resultVar)
+		}
+		return fmt.Sprintf("$(%s=%s; %s=%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s %s=$(( %s + 1 )); done <<__BESHT_LIST_PRED_%d_%d\n$%s\n__BESHT_LIST_PRED_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, initial, idx, dataVar, itemVar, body, idx, idx, cb.Pos.Line, cb.Pos.Column, dataVar, cb.Pos.Line, cb.Pos.Column, resultVar), nil
+	}
+	arrow := cb.Arrow
 	if arrow.BlockBody != nil {
 		return "", fmt.Errorf("%s() predicate callback must be expression-bodied", e.Method)
 	}
@@ -8540,10 +8932,25 @@ func (g *Generator) genListSomeEvery(recv string, e *ast.MethodCallExpr, some bo
 }
 
 func (g *Generator) genListFind(recv string, e *ast.MethodCallExpr) (string, error) {
-	arrow, err := listArrowArg(e)
+	cb, err := g.listCallbackArg(e)
 	if err != nil {
 		return "", err
 	}
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return "", err
+		}
+		g.requireRuntimeHelper("nullish")
+		itemVar := fmt.Sprintf("_cb_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+		idx := fmt.Sprintf("_listfind_%d_%d_index", cb.Pos.Line, cb.Pos.Column)
+		dataVar := fmt.Sprintf("_listfind_%d_%d_data", cb.Pos.Line, cb.Pos.Column)
+		resultVar := fmt.Sprintf("_listfind_%d_%d_result", cb.Pos.Line, cb.Pos.Column)
+		call := fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, idx)
+		cond := truthyCondition("$(" + call + ")")
+		return fmt.Sprintf("$(%s=%s; %s=$%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do if %s; then %s=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_LIST_FIND_%d_%d\n$%s\n__BESHT_LIST_FIND_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, nullishSentinelVar, idx, dataVar, itemVar, cond, resultVar, itemVar, idx, idx, cb.Pos.Line, cb.Pos.Column, dataVar, cb.Pos.Line, cb.Pos.Column, resultVar), nil
+	}
+	arrow := cb.Arrow
 	if arrow.BlockBody != nil {
 		return "", fmt.Errorf("find() predicate callback must be expression-bodied")
 	}
@@ -8719,6 +9126,76 @@ func listArrowArg(e *ast.MethodCallExpr) (*ast.ArrowExpr, error) {
 		return nil, fmt.Errorf("arrow callbacks take 1 or 2 parameters")
 	}
 	return arrow, nil
+}
+
+func (g *Generator) listCallbackArg(e *ast.MethodCallExpr) (listCallbackRef, error) {
+	if len(e.Args) != 1 {
+		return listCallbackRef{}, fmt.Errorf("%s() takes 1 arrow callback", e.Method)
+	}
+	if arrow, ok := callbackArrowArg(e.Args[0]); ok {
+		if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
+			return listCallbackRef{}, fmt.Errorf("arrow callbacks take 1 or 2 parameters")
+		}
+		return listCallbackRef{Arrow: arrow, ReturnType: g.inferArrowFunctionReturnType(arrow), Pos: arrow.Pos}, nil
+	}
+	ret := g.callbackExprReturnType(e.Args[0])
+	return listCallbackRef{Expr: e.Args[0], ReturnType: ret, Pos: exprPos(e.Args[0])}, nil
+}
+
+func callbackArrowArg(expr ast.Expression) (*ast.ArrowExpr, bool) {
+	switch e := expr.(type) {
+	case *ast.ArrowExpr:
+		return e, true
+	case *ast.AsExpr:
+		return callbackArrowArg(e.Expr)
+	default:
+		return nil, false
+	}
+}
+
+func (g *Generator) callbackExprReturnType(expr ast.Expression) *ast.Type {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		if e.Type != nil && e.Type.Kind == ast.TypeFunction {
+			return e.Type.Return
+		}
+		return g.callbackExprReturnType(e.Expr)
+	case *ast.ArrowExpr:
+		return g.inferArrowFunctionReturnType(e)
+	case *ast.IdentExpr:
+		if ret, ok := g.fnReturnMap[e.Name]; ok {
+			return ret
+		}
+		if t := g.functionValueType(e.Name); t != nil {
+			return t.Return
+		}
+	default:
+		if t := g.inferReceiverType(expr); t != nil && t.Kind == ast.TypeFunction {
+			return t.Return
+		}
+	}
+	return typeString
+}
+
+func (g *Generator) callbackCommand(expr ast.Expression) (string, error) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.callbackCommand(e.Expr)
+	case *ast.ArrowExpr:
+		fnName := arrowFunctionName(fmt.Sprintf("anon_%d_%d", e.Pos.Line, e.Pos.Column), e.Pos)
+		fnType := g.arrowFunctionType(e, nil)
+		if err := g.genArrowFunctionDecl(fnName, e, fnType.Return); err != nil {
+			return "", err
+		}
+		return shellQuote(fnName), nil
+	case *ast.IdentExpr:
+		if fnName, ok := g.namedFunctionValue(e.Name); ok {
+			return shellQuote(fnName), nil
+		}
+		return fmt.Sprintf("\"$%s\"", g.resolveVarName(e.Name)), nil
+	default:
+		return g.genExprValue(expr)
+	}
 }
 
 func singleArrowArg(e *ast.MethodCallExpr) (*ast.ArrowExpr, error) {
@@ -10658,6 +11135,38 @@ func mangle(name string) string {
 	return name
 }
 
+func arrowFunctionName(varName string, pos ast.Pos) string {
+	base := sanitizeShellIdentifier(varName)
+	if base == "" {
+		base = fmt.Sprintf("anon_%d_%d", pos.Line, pos.Column)
+	}
+	return fmt.Sprintf("_bst_arrow_%s_%d_%d", base, pos.Line, pos.Column)
+}
+
+func arrowParamVar(fnName, paramName string) string {
+	return fmt.Sprintf("%s_param_%s", fnName, sanitizeShellIdentifier(paramName))
+}
+
+func sanitizeShellIdentifier(name string) string {
+	var b strings.Builder
+	for i, r := range name {
+		ok := r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (i > 0 && r >= '0' && r <= '9')
+		if ok {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return ""
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		out = "_" + out
+	}
+	return out
+}
+
 func fnParamVar(fnName, paramName string) string {
 	return fmt.Sprintf("_%s_%s", fnName, paramName)
 }
@@ -11376,6 +11885,68 @@ func stmtPos(stmt ast.Statement) ast.Pos {
 		return s.Pos
 	case *ast.ContinueStmt:
 		return s.Pos
+	}
+	return ast.Pos{}
+}
+
+func exprPos(expr ast.Expression) ast.Pos {
+	switch e := expr.(type) {
+	case *ast.IntLit:
+		return e.Pos
+	case *ast.FloatLit:
+		return e.Pos
+	case *ast.StringLit:
+		return e.Pos
+	case *ast.TemplateLit:
+		return e.Pos
+	case *ast.BoolLit:
+		return e.Pos
+	case *ast.UndefinedLit:
+		return e.Pos
+	case *ast.NullLit:
+		return e.Pos
+	case *ast.ListLit:
+		return e.Pos
+	case *ast.ObjectLit:
+		return e.Pos
+	case *ast.ArrowExpr:
+		return e.Pos
+	case *ast.IdentExpr:
+		return e.Pos
+	case *ast.NewExpr:
+		return e.Pos
+	case *ast.ThisExpr:
+		return e.Pos
+	case *ast.BinaryExpr:
+		return e.Pos
+	case *ast.TernaryExpr:
+		return e.Pos
+	case *ast.UnaryExpr:
+		return e.Pos
+	case *ast.UpdateExpr:
+		return e.Pos
+	case *ast.PipeExpr:
+		return e.Pos
+	case *ast.CmdExpr:
+		return e.Pos
+	case *ast.FnCallExpr:
+		return e.Pos
+	case *ast.BuiltinCallExpr:
+		return e.Pos
+	case *ast.MethodCallExpr:
+		return e.Pos
+	case *ast.PropertyExpr:
+		return e.Pos
+	case *ast.IndexExpr:
+		return e.Pos
+	case *ast.RangeExpr:
+		return e.Pos
+	case *ast.PropagateExpr:
+		return e.Pos
+	case *ast.SpreadExpr:
+		return e.Pos
+	case *ast.AsExpr:
+		return e.Pos
 	}
 	return ast.Pos{}
 }

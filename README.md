@@ -92,7 +92,7 @@ Files use the `.bsh` extension.
 
 - Type annotations and `as` assertions are accepted for TypeScript-compatible syntax, editor support, and occasional compiler representation hints. They never validate values or produce type mismatch errors.
 - Template literals support `${expr}`, not just `${name}`.
-- TypeScript `for...of` loops are not supported. Use Besht list loops with `for (item in items)` or `for (let item in items)`.
+- TypeScript `for...of` loops are supported as aliases for Besht list loops: `for (item of items)`, `for (const item of items)`, and `for (let item of items)` iterate values like `for (item in items)`.
 - Ternary expressions `cond ? a : b` and nullish coalescing `value ?? fallback` are supported.
 - Compound assignments `+=`, `-=`, and `*=` are supported.
 - Postfix `++`/`--` are supported in statement position; prefix `++name`/`--name` are supported in expression position.
@@ -147,7 +147,7 @@ Files use the `.bsh` extension.
 - `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` differ from JavaScript reflection: they use compiler-managed object key metadata, require Besht-compatible keys, and do not emit runtime helpers.
 - `JSON.stringify(value)` differs from JavaScript: it is opt-in through `--opt-use-jq`, invokes `jq` in generated code, and only supports strings, numbers, booleans, scalar lists, and scalar-valued compiler-managed objects.
 - `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
-- Arrow callbacks support expression and block bodies for list `.map()`, `.reduce()`, and statement-position `.forEach()`; `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, and `.forEach()` callbacks may also receive a zero-based index parameter.
+- Arrow functions can be stored in variables, passed to functions, called as function values, and passed to list callback APIs; direct list callbacks still support the compact inline forms and optional zero-based index parameter.
 - Generated shell elides string runtime helpers unless one-argument string `.includes()`, `.startsWith()`, or `.endsWith()` actually needs them.
 
 ### Variables
@@ -377,10 +377,14 @@ for (let fruit in fruits) {
   $("echo", fruit).run();
 }
 
+for (const fruit of fruits) {
+  $("echo", fruit).run();
+}
+
 for (fruit in fruits) $("echo", fruit).run()
 ```
 
-TypeScript `for...of` is not supported.
+`for...of` is accepted for TypeScript compatibility and behaves like Besht's value-iteration `for...in` list loop.
 
 **For — command output:**
 
@@ -685,7 +689,7 @@ if (visited.has("0,0")) {
 
 ### Arrow callbacks
 
-Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-list predicate callbacks for `.some()`, `.every()`, `.find()`, and `.findIndex()` are direct arrow expressions with one item parameter or `(item, index)`.
+Arrow functions can be stored in variables, passed to functions, called as function values, and passed to list callback APIs. Direct arrows support expression-bodied and block-bodied forms for list `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-list predicate callbacks for `.some()`, `.every()`, `.find()`, and `.findIndex()` may be direct arrow expressions or stored callbacks.
 
 When translating shell pipelines that process already-known text or numbers, prefer native Besht data operations over spawning `sed`/`awk`/`grep`/`tr`. Use `map`, `filter`, `reduce`, `forEach((item, index) => ...)`, `join`, and string methods such as `trim()`, `startsWith()`, and `toUpperCase()` for in-memory transformations. Keep command pipelines for external data sources and tool-specific work.
 
@@ -712,6 +716,13 @@ let labeled = names.map((name, i) => {
     return i.toString() + ":" + name
 })
 
+let addBang = (name: string): string => name + "!"
+function applyName(name: string, cb: (name: string) => string): string {
+    return cb(name)
+}
+let called = applyName("bob", addBang)
+let markedNames = names.map(addBang)
+
 // reduce with expression body
 let total = nums.reduce((acc, n) => acc + n, 0)
 let lines = nums.reduce((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("\n")
@@ -731,7 +742,7 @@ let counts = words.reduce((acc, word) => {
 console.log(counts)
 ```
 
-`.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty list. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty list. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` is statement-only, takes a direct arrow callback with `(item)` or `(item, index)`, compiles static scalar receivers to compact `for` loops, runs in the current shell so outer assignments and `Set.add()` side effects persist, and rejects callback `return`, `break`, `continue`, and pure value expressions. Arrows are not general function values and cannot be stored in variables; general arrow function values are still future work.
+`.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty list. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty list. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows support expression or block bodies, and stored function callbacks support scalar/list accumulator returns. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, runs stored callback calls in the current shell so outer assignments and `Set.add()` side effects persist, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Arrow values lower to generated shell functions; callback parameters use function-scoped shell names, and value-position function calls follow the same stdout-return model as named Besht functions.
 
 ### List indexing
 

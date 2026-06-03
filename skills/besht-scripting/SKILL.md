@@ -238,7 +238,7 @@ switch (mode) {
 
 ## Arrow Callbacks
 
-Arrow callbacks support both expression-bodied and block-bodied forms for list `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-list `.some()`, `.every()`, `.find()`, and `.findIndex()` use direct expression-bodied arrow predicates.
+Arrow functions can be stored in variables, passed to functions, called as function values, and passed to list callback APIs. Direct arrows support expression-bodied and block-bodied forms for list `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-list `.some()`, `.every()`, `.find()`, and `.findIndex()` may use direct arrow predicates or stored callbacks.
 
 When translating shell pipelines that transform already-known text or numbers, prefer native Besht lists and methods over external `sed`/`awk`/`grep`/`tr` commands. For example, a shell pipeline that trims lines, filters by prefix, uppercases, joins labels, sums numbers, or prints `NR - 1` indexes is usually clearer as `list.map(...)`, `filter(...)`, `word.trim()`, `startsWith(...)`, `toUpperCase()`, `join(...)`, `reduce(...)`, and `forEach((item, index) => ...)`. Reserve command pipelines for real external data sources or operations that need an external tool.
 
@@ -265,6 +265,13 @@ let labeled = names.map((name, i) => {
     return i.toString() + ":" + name
 })
 
+let addBang = (name: string): string => name + "!"
+function applyName(name: string, cb: (name: string) => string): string {
+    return cb(name)
+}
+let called = applyName("bob", addBang)
+let markedNames = names.map(addBang)
+
 // reduce with block body and object accumulator
 let counts = words.reduce((acc, word) => {
     acc[word] = (acc[word] || 0) + 1
@@ -283,7 +290,7 @@ let labels = cleaned
     .join(", ")
 ```
 
-`Array.from({ length })` differs from JavaScript: it creates `[0, 1, ... length - 1]` and does not support general iterables or mapper callbacks. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter arrow (accumulator, current) with either expression or block body, plus an initial value. `.forEach()` is statement-only, takes a direct arrow callback with `(item)` or `(item, index)`, compiles static scalar receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Defer general arrow function values.
+`Array.from({ length })` differs from JavaScript: it creates `[0, 1, ... length - 1]` and does not support general iterables or mapper callbacks. `Array.of(...)` creates a list from the given values. `Array.isArray(value)` is a static predicate: it returns true for values Besht can infer as lists and false otherwise, without runtime shape metadata. `.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the loop. Block-bodied `.map()` currently supports `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some(callback)` returns true for the first truthy callback result and false for an empty list. `.every(callback)` returns false for the first falsey callback result and true for an empty list. `.find(callback)` returns the first matching scalar element, or nullish when no item matches so `??` fallbacks work. `.findIndex(callback)` returns the zero-based index of the first truthy callback result or `-1`. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows support expression or block bodies, and stored function callbacks support scalar/list accumulator returns. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, preserves outer assignment and `Set.add()` side effects, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Type assertions such as `[] as string[]` are erased and are useful for empty list accumulators. List literal spread such as `[...items, extra]` is supported generically. Value-position function calls use the same stdout-return model as named Besht functions.
 
 Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants. Unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold from compiler-managed static object metadata; mutated or dynamic objects keep metadata-backed output so assignments stay visible.
 
@@ -630,10 +637,14 @@ for (let f in files) {
   $("echo", f).run();
 }
 
+for (const f of files) {
+  $("echo", f).run();
+}
+
 for (f in files) $("echo", f).run()
 ```
 
-TypeScript `for...of` loops are not supported.
+TypeScript `for...of` loops are supported for list iteration and behave like Besht's value-iteration `for...in` loops.
 
 Static scalar list expressions, static scalar `Array.of(...)` calls, static `Array.from({ length: N })` calls, and variables bound to them compile to compact shell `for` loops when elements do not contain newlines. Dynamic lists use Besht's newline-safe read loop.
 

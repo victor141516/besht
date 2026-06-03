@@ -479,6 +479,36 @@ func (p *Parser) parseType() (*ast.Type, error) {
 	pos := p.pos2ast(tok)
 	var t *ast.Type
 	switch tok.Type {
+	case lexer.TokLParen:
+		var params []*ast.Type
+		if p.peekType() != lexer.TokRParen {
+			for {
+				if isIdentifierName(p.peekType()) && p.peekN(1).Type == lexer.TokColon {
+					p.advance()
+					p.advance()
+				}
+				paramType, err := p.parseType()
+				if err != nil {
+					return nil, err
+				}
+				params = append(params, paramType)
+				if p.peekType() != lexer.TokComma {
+					break
+				}
+				p.advance()
+			}
+		}
+		if _, err := p.expect(lexer.TokRParen); err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(lexer.TokArrow); err != nil {
+			return nil, err
+		}
+		ret, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		t = &ast.Type{Kind: ast.TypeFunction, Params: params, Return: ret, Pos: pos}
 	case lexer.TokLBracket:
 		var first *ast.Type
 		for p.peekType() != lexer.TokRBracket && p.peekType() != lexer.TokEOF {
@@ -569,6 +599,8 @@ func (p *Parser) parseType() (*ast.Type, error) {
 			t = &ast.Type{Kind: ast.TypeObject, Elem: elem, Pos: pos}
 		} else if tok.Literal == "object" {
 			t = &ast.Type{Kind: ast.TypeObject, Pos: pos}
+		} else if tok.Literal == "void" {
+			t = &ast.Type{Kind: ast.TypeVoid, Pos: pos}
 		} else if tok.Literal == "undefined" {
 			t = &ast.Type{Kind: ast.TypeString, Pos: pos}
 		} else {
@@ -600,6 +632,13 @@ func cloneType(t *ast.Type) *ast.Type {
 	}
 	clone := *t
 	clone.Elem = cloneType(t.Elem)
+	clone.Return = cloneType(t.Return)
+	if len(t.Params) > 0 {
+		clone.Params = make([]*ast.Type, len(t.Params))
+		for i, param := range t.Params {
+			clone.Params[i] = cloneType(param)
+		}
+	}
 	return &clone
 }
 
@@ -788,10 +827,7 @@ func (p *Parser) parseFor() (ast.Statement, error) {
 		// Save position, consume ident, peek next
 		nameTok := p.peek()
 		p.advance()
-		if p.peekType() == lexer.TokIdent && p.peek().Literal == "of" {
-			return nil, p.errorf(p.peek(), "for...of is not supported; use Besht list loops with 'in'")
-		}
-		if p.peekType() == lexer.TokIn {
+		if p.peekType() == lexer.TokIn || (p.peekType() == lexer.TokIdent && p.peek().Literal == "of") {
 			p.advance()
 			iter, err := p.parseExpr()
 			if err != nil {
@@ -863,10 +899,7 @@ func (p *Parser) parseDeclaredFor(pos ast.Pos) (ast.Statement, error) {
 			return nil, err
 		}
 	}
-	if p.peekType() == lexer.TokIdent && p.peek().Literal == "of" {
-		return nil, p.errorf(p.peek(), "for...of is not supported; use Besht list loops with 'in'")
-	}
-	if p.peekType() == lexer.TokIn {
+	if p.peekType() == lexer.TokIn || (p.peekType() == lexer.TokIdent && p.peek().Literal == "of") {
 		p.advance()
 		iter, err := p.parseExpr()
 		if err != nil {
@@ -1535,7 +1568,31 @@ func (p *Parser) hasParenArrowAhead() bool {
 		case lexer.TokRParen:
 			depth--
 			if depth == 0 {
-				return p.peekN(i-p.pos+1).Type == lexer.TokArrow
+				next := i - p.pos + 1
+				if p.peekN(next).Type == lexer.TokArrow {
+					return true
+				}
+				if p.peekN(next).Type != lexer.TokColon {
+					return false
+				}
+				typeDepth := 0
+				for j := p.pos + next + 1; j < len(p.tokens); j++ {
+					switch p.tokens[j].Type {
+					case lexer.TokLParen, lexer.TokLBracket, lexer.TokLt:
+						typeDepth++
+					case lexer.TokRParen, lexer.TokRBracket, lexer.TokRAngle:
+						if typeDepth > 0 {
+							typeDepth--
+						}
+					case lexer.TokArrow:
+						return typeDepth == 0
+					case lexer.TokComma, lexer.TokSemicolon, lexer.TokAssign:
+						if typeDepth == 0 {
+							return false
+						}
+					}
+				}
+				return false
 			}
 		case lexer.TokEOF:
 			return false
@@ -1573,6 +1630,15 @@ func (p *Parser) parseParenArrow() (ast.Expression, error) {
 	if _, err := p.expect(lexer.TokRParen); err != nil {
 		return nil, err
 	}
+	var returnType *ast.Type
+	if p.peekType() == lexer.TokColon {
+		p.advance()
+		var err error
+		returnType, err = p.parseType()
+		if err != nil {
+			return nil, err
+		}
+	}
 	if _, err := p.expect(lexer.TokArrow); err != nil {
 		return nil, err
 	}
@@ -1581,13 +1647,13 @@ func (p *Parser) parseParenArrow() (ast.Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ast.ArrowExpr{Pos: pos, Params: params, BlockBody: block}, nil
+		return &ast.ArrowExpr{Pos: pos, Params: params, ReturnType: returnType, BlockBody: block}, nil
 	}
 	body, err := p.parseExpr()
 	if err != nil {
 		return nil, err
 	}
-	return &ast.ArrowExpr{Pos: pos, Params: params, Body: body}, nil
+	return &ast.ArrowExpr{Pos: pos, Params: params, ReturnType: returnType, Body: body}, nil
 }
 
 func (p *Parser) parseTernary() (ast.Expression, error) {
