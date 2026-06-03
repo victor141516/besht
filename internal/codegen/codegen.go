@@ -1186,6 +1186,108 @@ const (
 `
 	beshtRuntimeHelperNullish = `_BESHT_NULLISH_SENTINEL=__BESHT_NULLISH_$$
 `
+	beshtRuntimeHelperJSONCore = `_bst_json_fail() {
+  printf '[besht] %s\n' "$1" >&2
+  kill -TERM "$$"
+  exit 1
+}
+_bst_json_canonical() {
+  _bst_json_msg=$1
+  _bst_json_input=$2
+  if _bst_json_out=$(printf '%s' "$_bst_json_input" | jq -c . 2>/dev/null); then
+    printf '%s' "$_bst_json_out"
+  else
+    _bst_json_fail "$_bst_json_msg"
+  fi
+}
+`
+	beshtRuntimeHelperJSONParse = `_bst_json_parse() {
+  _bst_json_canonical 'JSON.parse() failed' "$1"
+}
+`
+	beshtRuntimeHelperJSONCompact = `_bst_json_compact() {
+  _bst_json_input=$1
+  _bst_json_msg=$2
+  if [ "$_bst_json_input" = "$_BESHT_NULLISH_SENTINEL" ]; then
+    printf null
+    return
+  fi
+  _bst_json_canonical "$_bst_json_msg" "$_bst_json_input"
+}
+`
+	beshtRuntimeHelperJSONNullish = `_bst_json_to_nullish() {
+  _bst_json_input=$1
+  if [ "$_bst_json_input" = "$_BESHT_NULLISH_SENTINEL" ] || [ "$_bst_json_input" = null ]; then
+    printf '%s' "$_BESHT_NULLISH_SENTINEL"
+  else
+    printf '%s' "$_bst_json_input"
+  fi
+}
+`
+	beshtRuntimeHelperJSONPathCore = `_bst_json_path_emit() {
+  if [ -n "$1" ]; then
+    printf '%s' "$1"
+  else
+    printf '%s' "$_BESHT_NULLISH_SENTINEL"
+  fi
+}
+_bst_json_require_receiver() {
+  _bst_json_msg=$1
+  _bst_json_recv=$2
+  if [ "$_bst_json_recv" = "$_BESHT_NULLISH_SENTINEL" ] || [ "$_bst_json_recv" = null ]; then
+    _bst_json_fail "$_bst_json_msg"
+  fi
+}
+`
+	beshtRuntimeHelperJSONProp = `_bst_json_get_prop() {
+  _bst_json_recv=$1
+  _bst_json_key=$2
+  _bst_json_msg='JSON property access failed'
+  _bst_json_require_receiver "$_bst_json_msg" "$_bst_json_recv"
+  if _bst_json_out=$(printf '%s' "$_bst_json_recv" | jq -c --arg _k "$_bst_json_key" 'if type == "object" then .[$_k] elif ($_k == "length" and (type == "array" or type == "string")) then length else error("not object") end | if . == null then empty else . end' 2>/dev/null); then
+    _bst_json_path_emit "$_bst_json_out"
+  else
+    _bst_json_fail "$_bst_json_msg"
+  fi
+}
+`
+	beshtRuntimeHelperJSONIndex = `_bst_json_get_index() {
+  _bst_json_recv=$1
+  _bst_json_index=$2
+  _bst_json_msg='JSON index access failed'
+  _bst_json_require_receiver "$_bst_json_msg" "$_bst_json_recv"
+  if _bst_json_out=$(printf '%s' "$_bst_json_recv" | jq -c --arg _i "$_bst_json_index" '($_i | tonumber) as $n | if type == "array" then .[$n] else error("not array") end | if . == null then empty else . end' 2>/dev/null); then
+    _bst_json_path_emit "$_bst_json_out"
+  else
+    _bst_json_fail "$_bst_json_msg"
+  fi
+}
+`
+	beshtRuntimeHelperJSONScalar = `_bst_json_scalar() {
+  _bst_json_msg=$1
+  _bst_json_program=$2
+  _bst_json_input=$3
+  if [ "$_bst_json_input" = "$_BESHT_NULLISH_SENTINEL" ] || [ "$_bst_json_input" = null ]; then
+    printf '%s' "$_BESHT_NULLISH_SENTINEL"
+  elif _bst_json_out=$(printf '%s' "$_bst_json_input" | jq -er "$_bst_json_program" 2>/dev/null); then
+    printf '%s' "$_bst_json_out"
+  else
+    _bst_json_fail "$_bst_json_msg"
+  fi
+}
+`
+	beshtRuntimeHelperJSONCellString = `_bst_json_cell_string() {
+  _bst_json_scalar 'JSON string extraction failed' 'if . == null then empty elif type == "string" then . else error("expected string") end' "$1"
+}
+`
+	beshtRuntimeHelperJSONCellNumber = `_bst_json_cell_number() {
+  _bst_json_scalar 'JSON number extraction failed' 'if . == null then empty elif type == "number" then . else error("expected number") end' "$1"
+}
+`
+	beshtRuntimeHelperJSONCellBoolean = `_bst_json_cell_boolean() {
+  _bst_json_scalar 'JSON boolean extraction failed' 'if . == null then empty elif type == "boolean" then if . then "1" else "0" end else error("expected boolean") end' "$1"
+}
+`
 	beshtRuntimeHelperArgs = `_bst_args_has() { case "
 $1
 " in *"
@@ -1285,6 +1387,10 @@ func (g *Generator) requireRuntimeHelper(name string) {
 
 func runtimeHelpersSource(helpers map[string]bool) string {
 	var sb strings.Builder
+	jsonScalar := helpers["jsonScalar"] || helpers["jsonCellString"] || helpers["jsonCellNumber"] || helpers["jsonCellBoolean"]
+	jsonPath := helpers["jsonProp"] || helpers["jsonIndex"]
+	jsonCore := helpers["jsonParse"] || helpers["jsonCompact"] || helpers["jsonNullish"] || jsonPath || jsonScalar
+	jsonNeedsNullish := helpers["jsonCompact"] || helpers["jsonNullish"] || jsonPath || jsonScalar
 	if helpers["startsWith"] {
 		sb.WriteString(beshtRuntimeHelperStartsWith)
 	}
@@ -1297,8 +1403,41 @@ func runtimeHelpersSource(helpers map[string]bool) string {
 	if helpers["hexByte"] {
 		sb.WriteString(beshtRuntimeHelperHexByte)
 	}
-	if helpers["nullish"] || helpers["args"] {
+	if helpers["nullish"] || helpers["args"] || jsonNeedsNullish {
 		sb.WriteString(beshtRuntimeHelperNullish)
+	}
+	if jsonCore {
+		sb.WriteString(beshtRuntimeHelperJSONCore)
+	}
+	if helpers["jsonParse"] {
+		sb.WriteString(beshtRuntimeHelperJSONParse)
+	}
+	if helpers["jsonCompact"] {
+		sb.WriteString(beshtRuntimeHelperJSONCompact)
+	}
+	if helpers["jsonNullish"] {
+		sb.WriteString(beshtRuntimeHelperJSONNullish)
+	}
+	if jsonPath {
+		sb.WriteString(beshtRuntimeHelperJSONPathCore)
+	}
+	if helpers["jsonProp"] {
+		sb.WriteString(beshtRuntimeHelperJSONProp)
+	}
+	if helpers["jsonIndex"] {
+		sb.WriteString(beshtRuntimeHelperJSONIndex)
+	}
+	if jsonScalar {
+		sb.WriteString(beshtRuntimeHelperJSONScalar)
+	}
+	if helpers["jsonCellString"] {
+		sb.WriteString(beshtRuntimeHelperJSONCellString)
+	}
+	if helpers["jsonCellNumber"] {
+		sb.WriteString(beshtRuntimeHelperJSONCellNumber)
+	}
+	if helpers["jsonCellBoolean"] {
+		sb.WriteString(beshtRuntimeHelperJSONCellBoolean)
 	}
 	if helpers["args"] {
 		sb.WriteString(beshtRuntimeHelperArgs)
@@ -5108,67 +5247,66 @@ func (g *Generator) requireJQFeature(feature string) error {
 	return nil
 }
 
-func jsonFatalShell(message string) string {
-	return fmt.Sprintf("printf '%%s\\n' %s >&2; kill -TERM \"$$\"; exit 1", shellQuote("[besht] "+message))
-}
-
-func jsonTemp(prefix string, pos ast.Pos) string {
-	return fmt.Sprintf("%s_%d_%d", prefix, pos.Line, pos.Column)
+func (g *Generator) requireJSONRuntime(feature string, helpers ...string) error {
+	if err := g.requireJQFeature(feature); err != nil {
+		return err
+	}
+	for _, helper := range helpers {
+		g.requireRuntimeHelper(helper)
+	}
+	return nil
 }
 
 func (g *Generator) genJSONParse(expr ast.Expression) (string, error) {
-	if err := g.requireJQFeature("JSON.parse()"); err != nil {
+	if err := g.requireJSONRuntime("JSON.parse()", "jsonParse"); err != nil {
 		return "", err
 	}
 	val, err := g.genExprValue(expr)
 	if err != nil {
 		return "", err
 	}
-	inVar := jsonTemp("_bst_json_in", jsonExprPos(expr))
-	outVar := jsonTemp("_bst_json_out", jsonExprPos(expr))
-	return fmt.Sprintf("$(%s=%s; if %s=$(printf '%%s' \"$%s\" | jq -c . 2>/dev/null); then printf '%%s' \"$%s\"; else %s; fi)", inVar, val, outVar, inVar, outVar, jsonFatalShell("JSON.parse() failed")), nil
+	return fmt.Sprintf("$(_bst_json_parse %s)", ensureArgSafe(val)), nil
 }
 
 func (g *Generator) genJSONCompact(expr ast.Expression, message string) (string, error) {
-	if err := g.requireJQFeature("JSON.stringify()"); err != nil {
+	if err := g.requireJSONRuntime("JSON.stringify()", "jsonCompact"); err != nil {
 		return "", err
 	}
 	val, err := g.genExprValue(expr)
 	if err != nil {
 		return "", err
 	}
-	return g.genJSONCompactValue(val, jsonExprPos(expr), message), nil
+	return g.genJSONCompactValue(val, message), nil
 }
 
-func (g *Generator) genJSONCompactValue(val string, pos ast.Pos, message string) string {
-	inVar := jsonTemp("_bst_json_in", pos)
-	outVar := jsonTemp("_bst_json_out", pos)
-	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ]; then printf null; elif %s=$(printf '%%s' \"$%s\" | jq -c . 2>/dev/null); then printf '%%s' \"$%s\"; else %s; fi)", inVar, val, inVar, nullishSentinelVar, outVar, inVar, outVar, jsonFatalShell(message))
+func (g *Generator) genJSONCompactValue(val string, message string) string {
+	return fmt.Sprintf("$(_bst_json_compact %s %s)", ensureArgSafe(val), shellQuote(message))
 }
 
 func (g *Generator) genJSONNullishValue(expr ast.Expression) (string, error) {
+	if err := g.requireJSONRuntime("JSON nullish conversion", "jsonNullish"); err != nil {
+		return "", err
+	}
 	val, err := g.genExprValue(expr)
 	if err != nil {
 		return "", err
 	}
-	tmp := jsonTemp("_bst_json_nullish", jsonExprPos(expr))
-	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ] || [ \"$%s\" = null ]; then printf '%%s' \"$%s\"; else printf '%%s' \"$%s\"; fi)", tmp, val, tmp, nullishSentinelVar, tmp, nullishSentinelVar, tmp), nil
+	return fmt.Sprintf("$(_bst_json_to_nullish %s)", ensureArgSafe(val)), nil
 }
 
 func (g *Generator) genJSONProperty(e *ast.PropertyExpr) (string, error) {
-	if err := g.requireJQFeature("JSON property access"); err != nil {
+	if err := g.requireJSONRuntime("JSON property access", "jsonProp"); err != nil {
 		return "", err
 	}
 	recv, err := g.genExprValue(e.Receiver)
 	if err != nil {
 		return "", err
 	}
-	program := `if type == "object" then .[$_k] elif ($_k == "length" and (type == "array" or type == "string")) then length else error("not object") end | if . == null then empty else . end`
-	return g.genJSONPathValue(recv, e.Pos, "--arg _k "+shellQuote(e.Property), program, "JSON property access failed"), nil
+	return fmt.Sprintf("$(_bst_json_get_prop %s %s)", ensureArgSafe(recv), shellQuote(e.Property)), nil
 }
 
 func (g *Generator) genJSONIndex(e *ast.IndexExpr) (string, error) {
-	if err := g.requireJQFeature("JSON index access"); err != nil {
+	if err := g.requireJSONRuntime("JSON index access", "jsonIndex"); err != nil {
 		return "", err
 	}
 	recv, err := g.genExprValue(e.Expr)
@@ -5179,14 +5317,7 @@ func (g *Generator) genJSONIndex(e *ast.IndexExpr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	program := `($_i | tonumber) as $n | if type == "array" then .[$n] else error("not array") end | if . == null then empty else . end`
-	return g.genJSONPathValue(recv, e.Pos, "--arg _i "+ensureArgSafe(index), program, "JSON index access failed"), nil
-}
-
-func (g *Generator) genJSONPathValue(recv string, pos ast.Pos, jqArgs, jqProgram, message string) string {
-	recvVar := jsonTemp("_bst_json_recv", pos)
-	outVar := jsonTemp("_bst_json_out", pos)
-	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ] || [ \"$%s\" = null ]; then %s; fi; if %s=$(printf '%%s' \"$%s\" | jq -c %s %s 2>/dev/null); then if [ -n \"$%s\" ]; then printf '%%s' \"$%s\"; else printf '%%s' \"$%s\"; fi; else %s; fi)", recvVar, recv, recvVar, nullishSentinelVar, recvVar, jsonFatalShell(message), outVar, recvVar, jqArgs, shellQuote(jqProgram), outVar, outVar, nullishSentinelVar, jsonFatalShell(message))
+	return fmt.Sprintf("$(_bst_json_get_index %s %s)", ensureArgSafe(recv), ensureArgSafe(index)), nil
 }
 
 func isJSONScalarExtractionTarget(t *ast.Type) bool {
@@ -5210,31 +5341,29 @@ func (g *Generator) isJSONBackedExpr(expr ast.Expression) bool {
 }
 
 func (g *Generator) genJSONExtract(expr ast.Expression, target *ast.Type) (string, error) {
-	if err := g.requireJQFeature("JSON scalar extraction"); err != nil {
+	var fn string
+	var helper string
+	switch target.Kind {
+	case ast.TypeString:
+		fn = "_bst_json_cell_string"
+		helper = "jsonCellString"
+	case ast.TypeNumber:
+		fn = "_bst_json_cell_number"
+		helper = "jsonCellNumber"
+	case ast.TypeBoolean:
+		fn = "_bst_json_cell_boolean"
+		helper = "jsonCellBoolean"
+	default:
+		return g.genExprValue(expr)
+	}
+	if err := g.requireJSONRuntime("JSON scalar extraction", helper); err != nil {
 		return "", err
 	}
 	val, err := g.genExprValue(expr)
 	if err != nil {
 		return "", err
 	}
-	var program string
-	var message string
-	switch target.Kind {
-	case ast.TypeString:
-		program = `if . == null then empty elif type == "string" then . else error("expected string") end`
-		message = "JSON string extraction failed"
-	case ast.TypeNumber:
-		program = `if . == null then empty elif type == "number" then . else error("expected number") end`
-		message = "JSON number extraction failed"
-	case ast.TypeBoolean:
-		program = `if . == null then empty elif type == "boolean" then if . then "1" else "0" end else error("expected boolean") end`
-		message = "JSON boolean extraction failed"
-	default:
-		return g.genExprValue(expr)
-	}
-	inVar := jsonTemp("_bst_json_extract", jsonExprPos(expr))
-	outVar := jsonTemp("_bst_json_out", jsonExprPos(expr))
-	return fmt.Sprintf("$(%s=%s; if [ \"$%s\" = \"$%s\" ] || [ \"$%s\" = null ]; then printf '%%s' \"$%s\"; elif %s=$(printf '%%s' \"$%s\" | jq -er %s 2>/dev/null); then printf '%%s' \"$%s\"; else %s; fi)", inVar, val, inVar, nullishSentinelVar, inVar, nullishSentinelVar, outVar, inVar, shellQuote(program), outVar, jsonFatalShell(message)), nil
+	return fmt.Sprintf("$(%s %s)", fn, ensureArgSafe(val)), nil
 }
 
 func (g *Generator) genJSONStringify(expr ast.Expression) (string, error) {
