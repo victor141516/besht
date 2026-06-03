@@ -167,9 +167,6 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 		}
 		return nil
 	case *ast.LetDecl:
-		if _, ok := s.Value.(*ast.ArrowExpr); ok {
-			return &CheckError{Pos: s.Pos, Message: "arrow expressions can only be used as list callbacks"}
-		}
 		if err := c.checkSemanticExpr(s.Value); err != nil {
 			return err
 		}
@@ -437,6 +434,9 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 		if isSemanticGlobalIdent(e.Name) {
 			return nil
 		}
+		if _, ok := c.fns[e.Name]; ok {
+			return nil
+		}
 		if _, ok := c.scope.lookup(e.Name); !ok {
 			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("variable %q not declared", e.Name)}
 		}
@@ -469,7 +469,9 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 		}
 	case *ast.FnCallExpr:
 		if _, ok := c.fns[e.Name]; !ok {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("function %q not declared", e.Name)}
+			if _, ok := c.scope.lookup(e.Name); !ok {
+				return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("function %q not declared", e.Name)}
+			}
 		}
 		for _, arg := range e.Args {
 			if err := c.checkSemanticExpr(arg); err != nil {
@@ -569,8 +571,10 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 		return c.checkSemanticExpr(e.Expr)
 	case *ast.ArrowExpr:
 		prev := c.scope
+		prevInFunction := c.inFunction
 		prevInCallback := c.inCallback
 		c.scope = newScope(prev)
+		c.inFunction = true
 		c.inCallback = true
 		for _, param := range e.Params {
 			c.scope.define(param.Name, param.Type)
@@ -582,6 +586,7 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 			err = c.checkSemanticBlock(e.BlockBody)
 		}
 		c.scope = prev
+		c.inFunction = prevInFunction
 		c.inCallback = prevInCallback
 		return err
 	case *ast.SpreadExpr:
@@ -811,42 +816,75 @@ func (c *Checker) checkListMethodArity(e *ast.MethodCallExpr) error {
 		if len(e.Args) != 1 {
 			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
 		}
-		arrow, ok := e.Args[0].(*ast.ArrowExpr)
-		if !ok {
+		arrow, ok := callbackArrowExpr(e.Args[0])
+		if !ok && !c.isCallbackValue(e.Args[0]) {
 			return &CheckError{Pos: e.Pos, Message: "list callback must be an arrow expression"}
 		}
-		if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
-			return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
-		}
-		if (e.Method == "some" || e.Method == "every" || e.Method == "find") && arrow.BlockBody != nil {
-			return &CheckError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
+		if ok {
+			if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
+				return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+			}
+			if (e.Method == "some" || e.Method == "every" || e.Method == "find") && arrow.BlockBody != nil {
+				return &CheckError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
+			}
 		}
 	case "forEach":
 		if len(e.Args) != 1 {
 			return &CheckError{Pos: e.Pos, Message: "forEach() takes 1 arrow callback"}
 		}
-		arrow, ok := e.Args[0].(*ast.ArrowExpr)
-		if !ok {
+		arrow, ok := callbackArrowExpr(e.Args[0])
+		if !ok && !c.isCallbackValue(e.Args[0]) {
 			return &CheckError{Pos: e.Pos, Message: "forEach() callback must be an arrow expression"}
 		}
-		if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
-			return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+		if ok {
+			if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
+				return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+			}
 		}
 	case "reduce":
 		if len(e.Args) != 2 {
 			return &CheckError{Pos: e.Pos, Message: "reduce() takes 2 arguments: callback and initial value"}
 		}
-		arrow, ok := e.Args[0].(*ast.ArrowExpr)
-		if !ok {
+		arrow, ok := callbackArrowExpr(e.Args[0])
+		if !ok && !c.isCallbackValue(e.Args[0]) {
 			return &CheckError{Pos: e.Pos, Message: "reduce() callback must be an arrow expression"}
 		}
-		if len(arrow.Params) != 2 {
-			return &CheckError{Pos: arrow.Pos, Message: "reduce() callback must take 2 parameters (accumulator, current)"}
+		if ok {
+			if len(arrow.Params) != 2 {
+				return &CheckError{Pos: arrow.Pos, Message: "reduce() callback must take 2 parameters (accumulator, current)"}
+			}
 		}
 	default:
 		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("list has no method %q", e.Method)}
 	}
 	return nil
+}
+
+func callbackArrowExpr(expr ast.Expression) (*ast.ArrowExpr, bool) {
+	switch e := expr.(type) {
+	case *ast.ArrowExpr:
+		return e, true
+	case *ast.AsExpr:
+		return callbackArrowExpr(e.Expr)
+	default:
+		return nil, false
+	}
+}
+
+func (c *Checker) isCallbackValue(expr ast.Expression) bool {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return c.isCallbackValue(e.Expr)
+	case *ast.IdentExpr:
+		if _, ok := c.fns[e.Name]; ok {
+			return true
+		}
+		_, ok := c.scope.lookup(e.Name)
+		return ok
+	default:
+		t := c.semanticExprType(expr)
+		return t != nil && t.Kind == ast.TypeFunction
+	}
 }
 
 func (c *Checker) checkStringMethodArity(e *ast.MethodCallExpr) error {
@@ -923,6 +961,9 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 		if typ, ok := c.scope.lookup(e.Name); ok {
 			return typ
 		}
+		if sig, ok := c.fns[e.Name]; ok {
+			return &ast.Type{Kind: ast.TypeFunction, Return: sig.ReturnType}
+		}
 		return strType
 	case *ast.ListLit:
 		elemType := strType
@@ -951,6 +992,9 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 	case *ast.FnCallExpr:
 		if sig, ok := c.fns[e.Name]; ok && sig.ReturnType != nil {
 			return sig.ReturnType
+		}
+		if typ, ok := c.scope.lookup(e.Name); ok && typ != nil && typ.Kind == ast.TypeFunction {
+			return typ.Return
 		}
 		return strType
 	case *ast.BuiltinCallExpr:
@@ -1038,6 +1082,11 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 			case "find":
 				return recvType.Elem
 			case "map":
+				if len(e.Args) == 1 {
+					if t := c.callbackReturnType(e.Args[0]); t != nil && t.Kind != ast.TypeVoid {
+						return &ast.Type{Kind: ast.TypeList, Elem: t}
+					}
+				}
 				return &ast.Type{Kind: ast.TypeList, Elem: strType}
 			case "pop", "shift", "push", "unshift", "concat", "slice", "filter", "reverse":
 				return recvType
@@ -1110,13 +1159,92 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 		}
 		return c.semanticExprType(e.Expr)
 	case *ast.ArrowExpr:
-		return strType
+		var params []*ast.Type
+		for _, param := range e.Params {
+			if param.Type != nil {
+				params = append(params, param.Type)
+			} else {
+				params = append(params, strType)
+			}
+		}
+		return &ast.Type{Kind: ast.TypeFunction, Params: params, Return: c.arrowReturnType(e)}
 	case *ast.SpreadExpr:
 		return c.semanticExprType(e.Expr)
 	case *ast.RangeExpr:
 		return &ast.Type{Kind: ast.TypeList, Elem: numType}
 	}
 	return strType
+}
+
+func (c *Checker) callbackReturnType(expr ast.Expression) *ast.Type {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		if e.Type != nil && e.Type.Kind == ast.TypeFunction {
+			return e.Type.Return
+		}
+		return c.callbackReturnType(e.Expr)
+	case *ast.ArrowExpr:
+		return c.arrowReturnType(e)
+	case *ast.IdentExpr:
+		if sig, ok := c.fns[e.Name]; ok {
+			return sig.ReturnType
+		}
+		if typ, ok := c.scope.lookup(e.Name); ok && typ != nil && typ.Kind == ast.TypeFunction {
+			return typ.Return
+		}
+	default:
+		if typ := c.semanticExprType(expr); typ != nil && typ.Kind == ast.TypeFunction {
+			return typ.Return
+		}
+	}
+	return nil
+}
+
+func (c *Checker) arrowReturnType(e *ast.ArrowExpr) *ast.Type {
+	if e == nil {
+		return &ast.Type{Kind: ast.TypeString}
+	}
+	if e.ReturnType != nil {
+		return e.ReturnType
+	}
+	if e.Body != nil {
+		if t := c.semanticExprType(e.Body); t != nil {
+			return t
+		}
+		return &ast.Type{Kind: ast.TypeString}
+	}
+	if t := c.blockReturnType(e.BlockBody); t != nil {
+		return t
+	}
+	return &ast.Type{Kind: ast.TypeVoid}
+}
+
+func (c *Checker) blockReturnType(block *ast.Block) *ast.Type {
+	if block == nil {
+		return nil
+	}
+	for _, stmt := range block.Statements {
+		switch s := stmt.(type) {
+		case *ast.ReturnStmt:
+			if s.Value == nil {
+				return &ast.Type{Kind: ast.TypeVoid}
+			}
+			return c.semanticExprType(s.Value)
+		case *ast.IfStmt:
+			if t := c.blockReturnType(s.Then); t != nil {
+				return t
+			}
+			for _, elseif := range s.ElseIfs {
+				if t := c.blockReturnType(elseif.Body); t != nil {
+					return t
+				}
+			}
+			if t := c.blockReturnType(s.Else); t != nil {
+				return t
+			}
+		}
+	}
+	return nil
 }
 
 func collectFnSigs(stmts []ast.Statement, fns map[string]*FnSig) {

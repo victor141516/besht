@@ -1118,6 +1118,24 @@ let picked = items.filter((x: string) => x.startsWith("a"))`)
 	}
 }
 
+func TestParser_ArrowFunctionValueTypes(t *testing.T) {
+	prog := mustParse(t, `let cb: (x: string) => string = (x: string): string => x + "!"`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	if decl.TypeAnnot == nil || decl.TypeAnnot.Kind != ast.TypeFunction {
+		t.Fatalf("expected function type annotation, got %#v", decl.TypeAnnot)
+	}
+	if len(decl.TypeAnnot.Params) != 1 || decl.TypeAnnot.Params[0].Kind != ast.TypeString {
+		t.Fatalf("expected one string function param, got %#v", decl.TypeAnnot.Params)
+	}
+	if decl.TypeAnnot.Return == nil || decl.TypeAnnot.Return.Kind != ast.TypeString {
+		t.Fatalf("expected string function return, got %#v", decl.TypeAnnot.Return)
+	}
+	arrow := decl.Value.(*ast.ArrowExpr)
+	if arrow.ReturnType == nil || arrow.ReturnType.Kind != ast.TypeString {
+		t.Fatalf("expected arrow return type, got %#v", arrow.ReturnType)
+	}
+}
+
 func TestParser_ArrayFromAndPrefixUpdateInBlockMap(t *testing.T) {
 	prog := mustParse(t, `let count = 0
 let mapped = Array.from({ length: 3 }).map((_, i) => {

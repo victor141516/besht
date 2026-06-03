@@ -1,0 +1,33 @@
+let suffix = "!"
+let add = (x: string): string => x + suffix
+console.log(add("a"))
+
+function apply(value: string, cb: (x: string) => string): string {
+  return cb(value)
+}
+console.log(apply("b", add))
+
+let items = ["apple", "banana", "apricot"]
+let mark = (x: string, i: number): string => i.toString() + ":" + x.toUpperCase()
+let startsWithA = (x: string): boolean => x.startsWith("a")
+let initials = (acc: string, item: string): string => acc + item.charAt(0)
+
+let mapped = items.map(mark)
+let picked = items.filter(startsWithA)
+let reduced = items.reduce(initials, "")
+
+console.log(mapped.join("|"))
+console.log(picked.join(","))
+console.log(items.some(startsWithA))
+console.log(items.every(startsWithA))
+console.log(items.find(startsWithA) ?? "missing")
+console.log(items.findIndex(startsWithA))
+console.log(reduced)
+
+let total = 0
+let addIndexed = (value: string, index: number): void => {
+  total = total + Number.parseInt(value, 10) + index
+}
+let values = ["2", "3"]
+values.forEach(addIndexed)
+console.log(total.toString())

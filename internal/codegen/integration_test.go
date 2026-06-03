@@ -1748,6 +1748,58 @@ console.log(picked.join(","))
 	assertNotContains(t, out, `local `)
 }
 
+func TestIntegration_ArrowFunctionValuesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let suffix = "!"
+let add = (x: string): string => x + suffix
+function apply(value: string, cb: (x: string) => string): string {
+    return cb(value)
+}
+console.log(add("a"))
+console.log(apply("b", add))
+`)
+	if out != "a!\nb!\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestIntegration_ListStoredCallbacksRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let items = ["apple", "banana", "apricot"]
+let mark = (x: string, i: number): string => i.toString() + ":" + x.toUpperCase()
+let startsWithA = (x: string): boolean => x.startsWith("a")
+function add(acc: string, item: string): string {
+    return acc + item.charAt(0)
+}
+let mapped = items.map(mark)
+let picked = items.filter(startsWithA)
+let reduced = items.reduce(add, "")
+console.log(mapped.join("|"))
+console.log(picked.join(","))
+console.log(items.some(startsWithA))
+console.log(items.every(startsWithA))
+console.log(items.find(startsWithA) ?? "missing")
+console.log(items.findIndex(startsWithA))
+console.log(reduced)
+`)
+	want := "0:APPLE|1:BANANA|2:APRICOT\napple,apricot\ntrue\nfalse\napple\n0\naba\n"
+	if out != want {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestIntegration_ForEachStoredCallbackSideEffectsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let total = 0
+let add = (value: string, index: number): void => {
+    total = total + Number.parseInt(value, 10) + index
+}
+let values = ["2", "3"]
+values.forEach(add)
+console.log(total.toString())
+`)
+	if out != "6\n" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
 func TestIntegration_ListSomeEveryFindRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let items = ["apple", "banana", "apricot"]
 let empty: string[] = []

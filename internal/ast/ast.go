@@ -1,7 +1,10 @@
 // Package ast defines the Abstract Syntax Tree node types for the besht language.
 package ast
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ─── Position ─────────────────────────────────────────────────────────────────
 
@@ -29,6 +32,7 @@ const (
 	TypeVoid
 	TypeList
 	TypeSet
+	TypeFunction
 	TypeCommand // result of $() — lazy command pipeline
 	TypeObject
 	TypeFetchResponse
@@ -36,9 +40,11 @@ const (
 
 // Type represents a besht type annotation.
 type Type struct {
-	Kind TypeKind
-	Elem *Type
-	Pos  Pos
+	Kind   TypeKind
+	Elem   *Type
+	Params []*Type
+	Return *Type
+	Pos    Pos
 }
 
 func (t *Type) String() string {
@@ -57,6 +63,16 @@ func (t *Type) String() string {
 		return fmt.Sprintf("list<%s>", t.Elem)
 	case TypeSet:
 		return fmt.Sprintf("Set<%s>", t.Elem)
+	case TypeFunction:
+		var params []string
+		for _, p := range t.Params {
+			params = append(params, p.String())
+		}
+		ret := "void"
+		if t.Return != nil {
+			ret = t.Return.String()
+		}
+		return fmt.Sprintf("(%s) => %s", strings.Join(params, ", "), ret)
 	case TypeCommand:
 		return "command"
 	case TypeObject:
@@ -79,6 +95,20 @@ func (t *Type) Equal(other *Type) bool {
 	}
 	if t.Kind == TypeList || t.Kind == TypeSet {
 		return t.Elem.Equal(other.Elem)
+	}
+	if t.Kind == TypeFunction {
+		if len(t.Params) != len(other.Params) {
+			return false
+		}
+		for i := range t.Params {
+			if !t.Params[i].Equal(other.Params[i]) {
+				return false
+			}
+		}
+		if t.Return == nil || other.Return == nil {
+			return t.Return == other.Return
+		}
+		return t.Return.Equal(other.Return)
 	}
 	return true
 }
@@ -497,10 +527,11 @@ func (n *ObjectLit) exprNode()    {}
 
 type ArrowExpr struct {
 	baseExpr
-	Pos       Pos
-	Params    []*Param
-	Body      Expression // expression body (nil if BlockBody is set)
-	BlockBody *Block     // block body (nil if expression body)
+	Pos        Pos
+	Params     []*Param
+	ReturnType *Type
+	Body       Expression // expression body (nil if BlockBody is set)
+	BlockBody  *Block     // block body (nil if expression body)
 }
 
 func (n *ArrowExpr) nodePos() Pos { return n.Pos }

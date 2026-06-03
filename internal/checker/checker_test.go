@@ -921,8 +921,13 @@ func TestChecker_CmdExprEnvRejectsInvalidName(t *testing.T) {
 	}
 }
 
-func TestChecker_StandaloneArrowUnsupported(t *testing.T) {
-	expectError(t, `let cb = x => x`, "arrow expressions can only be used as list callbacks")
+func TestChecker_ArrowFunctionValues(t *testing.T) {
+	mustCheck(t, `let cb = (x: string): string => x`)
+	mustCheck(t, `let cb = (x: string) => x + "!"
+console.log(cb("a"))`)
+	mustCheck(t, `let cb: (x: string) => string = x => x + "!"
+let items: string[] = ["a"]
+let mapped = items.map(cb)`)
 }
 
 func TestChecker_ListMapArrow(t *testing.T) {

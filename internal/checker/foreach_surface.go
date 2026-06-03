@@ -266,9 +266,9 @@ func (v *forEachSurfaceValidator) validateForEachCall(call *ast.MethodCallExpr) 
 	if len(call.Args) != 1 {
 		return &CheckError{Pos: call.Pos, Message: "forEach() takes 1 arrow callback"}
 	}
-	arrow, ok := call.Args[0].(*ast.ArrowExpr)
+	arrow, ok := callbackArrowExpr(call.Args[0])
 	if !ok {
-		return &CheckError{Pos: call.Pos, Message: "forEach() callback must be an arrow expression"}
+		return v.expr(call.Args[0])
 	}
 	if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
 		return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
