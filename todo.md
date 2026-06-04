@@ -44,6 +44,9 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 - `node-eq/tests/language/callbacks/skill_native_data_idioms.*`: translating static text/number pipelines into native arrays, callbacks, string transforms, joins, reductions, and indexed `forEach`.
 - `node-eq/tests/commands/skill_args_env_predicates.*`: translating shell argument parsers, environment defaults, file predicates, and string predicates into `Besht.args`, `process.env`, `Besht.fs`, and `Besht.strings`.
 - `node-eq/tests/language/objects/skill_object_data_idioms.*`: translating static delimiter-separated records into objects, callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`.
+- `node-eq/tests/language/core/skill_control_flow_idioms.*`: translating shell `for`/`case` loop filters, counters, `continue`, `break`, and empty-input branches into native arrays, string methods, and ordinary Besht flow control.
+
+Suggested next slice after the control-flow guardrail: modules and declarations, especially `.d.bsh` imports, exported helpers, split output, and TypeScript import fallback flags.
 
 ### Feature families to keep probing
 

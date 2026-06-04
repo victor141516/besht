@@ -421,6 +421,17 @@ for (f in files) {
 }
 ```
 
+Shell `case "$item" in *"$query"*) ... ;; *) continue ;; esac` filters inside loops usually translate to string methods and normal flow control:
+
+```ts
+for (item in items) {
+  if (!item.includes(query)) continue
+  console.log(item)
+}
+```
+
+Use `switch` for fixed alternatives such as modes or subcommands; use `if`, string methods, `continue`, and `break` for loop filters and limits.
+
 **Switch / case / default** — compiles to shell `case/esac`:
 
 ```ts

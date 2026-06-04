@@ -751,12 +751,24 @@ for (line in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
 
 **Break and continue:**
 
-````ts
+```ts
 for (f in files) {
     if (Besht.strings.isEmpty(f)) { continue }
     if (f == "STOP") { break }
     $("echo", f).run()
 }
+```
+
+Shell `case "$item" in *"$query"*) ... ;; *) continue ;; esac` filters inside loops usually translate to ordinary string conditions:
+
+```ts
+for (item in items) {
+    if (!item.includes(query)) continue
+    console.log(item)
+}
+```
+
+Use `switch` for fixed alternatives such as modes or subcommands; use `if`, string methods, `continue`, and `break` for loop filters and limits.
 
 ## Array Indexing
 
@@ -770,7 +782,7 @@ args[1] = "BETA"              // index assignment
 let empty: string[] = []      // empty array
 let cell: string = matrix[row][col]
 let width: number = matrix[0].length
-````
+```
 
 Static scalar array indexes with known in-range integer indexes and static nested-array indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row extraction path.
 
