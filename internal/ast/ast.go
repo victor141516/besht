@@ -514,9 +514,10 @@ func (n *ListLit) nodePos() Pos { return n.Pos }
 func (n *ListLit) exprNode()    {}
 
 type ObjectField struct {
-	Pos   Pos
-	Key   string
-	Value Expression
+	Pos    Pos
+	Key    string
+	Value  Expression
+	Spread Expression
 }
 
 type ObjectLit struct {

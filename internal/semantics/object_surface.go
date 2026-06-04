@@ -195,6 +195,18 @@ func (v *objectSurfaceValidator) expr(expr ast.Expression) error {
 		return nil
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				if err := v.expr(field.Spread); err != nil {
+					return err
+				}
+				if v.isProcessEnvValue(field.Spread) || !v.isObjectValue(field.Spread) {
+					return &SemanticError{Pos: field.Pos, Message: "object spread requires an object literal or named object"}
+				}
+				if v.hasUnsupportedObjectValue(field.Spread) {
+					return &SemanticError{Pos: field.Pos, Message: "object spread only supports scalar object values"}
+				}
+				continue
+			}
 			if err := validateObjectKey(field.Key); err != nil {
 				return &SemanticError{Pos: field.Pos, Message: err.Error()}
 			}
@@ -470,7 +482,18 @@ func (v *objectSurfaceValidator) hasUnsupportedObjectValue(expr ast.Expression) 
 	case *ast.AsExpr:
 		return v.hasUnsupportedObjectValue(e.Expr)
 	case *ast.ObjectLit:
-		return objectSurfaceHasUnsupportedValue(e)
+		for _, field := range e.Fields {
+			if field.Spread != nil {
+				if v.hasUnsupportedObjectValue(field.Spread) {
+					return true
+				}
+				continue
+			}
+			if objectSurfaceValueUnsupported(field.Value) {
+				return true
+			}
+		}
+		return false
 	case *ast.IdentExpr:
 		return v.objectValuesWithUnsupportedData[v.objectRootForName(e.Name)]
 	case *ast.BuiltinCallExpr:
@@ -581,6 +604,9 @@ func objectSurfaceHasUnsupportedValue(expr ast.Expression) bool {
 		return false
 	}
 	for _, field := range obj.Fields {
+		if field.Spread != nil {
+			continue
+		}
 		if objectSurfaceValueUnsupported(field.Value) {
 			return true
 		}

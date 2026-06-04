@@ -311,6 +311,10 @@ func (ca *CmdAnalysis) phase1Expr(expr ast.Expression, scope *cmdScope, bindName
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				ca.phase1Expr(field.Spread, scope, "")
+				continue
+			}
 			ca.phase1Expr(field.Value, scope, "")
 		}
 	case *ast.NewExpr:
@@ -516,6 +520,10 @@ func (ca *CmdAnalysis) phase2Expr(expr ast.Expression, scope *cmdScope) {
 			}
 		case *ast.ObjectLit:
 			for _, field := range e.Fields {
+				if field.Spread != nil {
+					ca.phase2Expr(field.Spread, scope)
+					continue
+				}
 				ca.phase2Expr(field.Value, scope)
 			}
 		case *ast.NewExpr:

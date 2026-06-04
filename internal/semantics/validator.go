@@ -451,6 +451,12 @@ func (c *Validator) checkSemanticExpr(expr ast.Expression) error {
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				if err := c.checkSemanticExpr(field.Spread); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := c.checkSemanticExpr(field.Value); err != nil {
 				return err
 			}
@@ -1415,6 +1421,9 @@ func beshtReceiverName(expr ast.Expression) string {
 func (c *Validator) validateJSONStringifyArg(pos ast.Pos, expr ast.Expression) error {
 	if obj, ok := unwrapJSONStringifyAs(expr).(*ast.ObjectLit); ok {
 		for _, field := range obj.Fields {
+			if field.Spread != nil {
+				continue
+			}
 			if unsupportedJSONStringifyObjectValue(c.semanticExprType(field.Value)) {
 				return &SemanticError{Pos: pos, Message: "JSON.stringify() only supports scalar object values"}
 			}
