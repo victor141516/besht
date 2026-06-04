@@ -898,6 +898,8 @@ legacy_log("from besht");
 
 Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Default shell imports are rejected. Imported shell functions are unchecked varargs and return `string` in value position. `--check` validates imports and unsupported fetch response APIs. By default shell imports must stay inside the compiler root; pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root.
 
+When translating a shell project that sources helper files, make script-owned helpers `.bsh` modules with `export`/`import`. Preserve a `.sh` helper with an asserted shell import when it is genuinely existing shell code or depends on shell behavior you do not want to rewrite. If the helper is just simple text or data manipulation, rewriting it as Besht with string/array methods is usually cleaner.
+
 ## Comments
 
 ```ts

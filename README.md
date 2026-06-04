@@ -1077,6 +1077,8 @@ legacy_log("from besht");
 
 `--check` validates imports using the same module resolver as compilation and rejects unsupported fetch response APIs such as `.status` and `.json()`. Shell imports require a `.sh` path and `assert { type: "shell" }`. They are named-only; default shell imports are rejected. Besht does not parse the shell file or infer exports, so imported shell functions are unchecked varargs and return `string` when used in value position. By default, shell imports must stay inside the compiler root. Pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root. Bundled output sources the resolved `.sh` file with a guard. Split output copies in-root `.sh` dependencies into the output tree and sources them through `_BESHT_ROOT`; external opt-in shell imports are sourced from their original absolute path. Shell import guards use unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
 
+When translating a shell project that sources helper files, turn helpers owned by the script into `.bsh` modules with `export`/`import`. Keep a helper as `.sh` with an asserted shell import when it is genuinely existing shell code or relies on shell behavior you do not want to rewrite. If a helper only performs simple text or data manipulation, rewriting it as Besht with string/array methods is usually clearer.
+
 ### Comments
 
 ```ts

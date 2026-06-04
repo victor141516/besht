@@ -45,8 +45,9 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 - `node-eq/tests/commands/skill_args_env_predicates.*`: translating shell argument parsers, environment defaults, file predicates, and string predicates into `Besht.args`, `process.env`, `Besht.fs`, and `Besht.strings`.
 - `node-eq/tests/language/objects/skill_object_data_idioms.*`: translating static delimiter-separated records into objects, callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`.
 - `node-eq/tests/language/core/skill_control_flow_idioms.*`: translating shell `for`/`case` loop filters, counters, `continue`, `break`, and empty-input branches into native arrays, string methods, and ordinary Besht flow control.
+- `node-eq/tests/imports/skill_module_idioms.*`: translating sourced shell helper files into `.bsh` modules with named/default exports for script-owned helpers and asserted `.sh` imports for preserved shell helpers.
 
-Suggested next slice after the control-flow guardrail: modules and declarations, especially `.d.bsh` imports, exported helpers, split output, and TypeScript import fallback flags.
+Suggested next slice after the module-boundary guardrail: classes, especially constructors, methods, getters/setters, static members, `this`, and unsupported inheritance/modifier boundaries.
 
 ### Feature families to keep probing
 

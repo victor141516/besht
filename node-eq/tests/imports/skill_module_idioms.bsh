@@ -1,0 +1,12 @@
+import names, { formatLabel, printInfo, runDone } from "./skill_module_idioms_report"
+import { legacy_upper } from "./skill_module_idioms_legacy_text.sh" assert { type: "shell" }
+
+let role = process.env.ROLE ?? "admin"
+
+for (const name of names) {
+  let upper = legacy_upper(name)
+  let label = formatLabel(role, upper)
+  printInfo(label)
+}
+
+runDone()
