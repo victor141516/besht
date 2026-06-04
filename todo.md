@@ -130,6 +130,27 @@ Rules:
 
 ---
 
+## TypeScript/Besht behavior divergence table
+
+Add a user-facing table that lists cases where code is syntactically valid TypeScript and syntactically valid Besht, but the behavior differs. The table should use very short code examples and show both outcomes clearly: normal TypeScript/JavaScript behavior and Besht behavior, including whether each side type-checks, compiles, fails at runtime, or fails at Besht compile time.
+
+The table should live in README.md and the most useful distilled guidance should also appear in `skills/besht-scripting/SKILL.md`.
+
+Candidate rows:
+
+| Case | Example | Normal TypeScript / JavaScript | Besht |
+| ---- | ------- | ------------------------------ | ----- |
+| Type annotations | `let n: number = "x"` | TypeScript reports a type error | Compiles; annotations are ignored |
+| `Array.from({ length })` | `Array.from({ length: 3 })` | Creates three `undefined` values | Creates `[0, 1, 2]` |
+| Unsupported `Array.from()` forms | `Array.from("abc")` | Creates `["a", "b", "c"]` | Fails at Besht compile time |
+| Object reflection boundary | `Object.keys(process.env)` | Returns enumerable environment keys in Node-like runtimes | Fails at Besht compile time; `process.env` is not enumerable |
+| Scalar-only object values | `Object.values({ xs: ["a"] })` | Returns the nested array value | Fails at Besht compile time until nested values are supported |
+| Static predicates | `Array.isArray(value)` | Runtime shape check | Compiler-known representation check; unknown dynamic values are not runtime-inspected |
+
+When writing the final table, prefer examples that are already covered by compiler tests or node-eq fixtures. Add missing tests if a documented divergence is compiler-enforced and not already guarded.
+
+---
+
 ## Float precision difference between awk and JavaScript
 
 **Status: known cosmetic difference, not a compiler bug.**
