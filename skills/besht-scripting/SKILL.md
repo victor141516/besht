@@ -501,12 +501,58 @@ When translating shell-style scripts, translate structure into command methods i
 | `(cd dir && cmd)` | `$("cmd").workdir(dir).run()` |
 | `VAR=value cmd` | `$("cmd").env("VAR", value).run()` |
 | `cmd && next` | run a named command, inspect `.exitCode()`, then use `if` |
+| `printf "%s" "$text" \| cmd args...` | `$("printf", "%s", text).pipe($("cmd", "args")).run()` |
+| `printf "%s" "$prompt" >&2; read value` | `$("printf", "%s", prompt).stdout("/dev/stderr").run()` then `$("head", "-n", "1").run().readStdout()` |
 | `${1-default}` | `Besht.args.positional(1) ?? "default"` |
 | `${1:-default}` | read the positional arg, then use `Besht.strings.isEmpty()` to apply the empty-string default |
 | `while`/`case` parser for `--root`, `-r`, `--verbose` | `Besht.args.option("root", "r")`, `Besht.args.flag("verbose", "v")`, `Besht.args.positional(n)` |
 | `printf "$TEAM" \| awk -F: ...` over a literal table | object literals, `Set<T>`, `Object.entries()`, `Object.hasOwn()`, array callbacks, `JSON.stringify()` |
 
-Avoid `$("sh", "-c", "...")`, `$("bash", "-c", "...")`, embedded `cd`, `VAR=value cmd`, `cmd1 | cmd2`, or redirect text inside command strings unless the script's real purpose is to invoke a shell interpreter. Besht should own quoting, argument boundaries, pipes, redirects, per-command environment, and per-command working directory. Use ordinary single-quoted or double-quoted strings for grep/sed/awk patterns and globs.
+Avoid `$("sh", "-c", "...")`, `$("bash", "-c", "...")`, embedded `cd`, `VAR=value cmd`, `cmd1 | cmd2`, `command -v`, prompt/read snippets, or redirect text inside command strings unless the script's real purpose is to invoke a shell interpreter. Besht should own quoting, argument boundaries, pipes, redirects, per-command environment, and per-command working directory. Use ordinary single-quoted or double-quoted strings for grep/sed/awk patterns and globs.
+
+When a shell snippet only pipes dynamic text into a command, start the pipeline with `$("printf", "%s", text)` and pipe into the real command. Put redirects on the command chain with `.stdout(...)` and `.stderr(...)`:
+
+```ts
+let aiJson = $("printf", "%s", prompt)
+    .pipe($("gemini", "-m", "flash", "-o", "json"))
+    .stderr("null")
+    .run()
+    .readStdout()
+```
+
+For simple interactive prompts, print the prompt to stderr and read one input line from stdin with `head`. This avoids a shell `read` wrapper while preserving the usual prompt-on-stderr behavior:
+
+```ts
+function promptLine(prompt: string): string {
+    $("printf", "%s", prompt).stdout("/dev/stderr").run()
+    return $("head", "-n", "1").run().readStdout()
+}
+```
+
+For dependency checks, do not shell out to `command -v` through `sh -c`. A reusable Besht helper can scan `PATH` with string/array methods and `Besht.fs` predicates:
+
+```ts
+function commandExists(name: string): boolean {
+    if (Besht.strings.isEmpty(name)) return false
+    if (name.includes("/")) {
+        return Besht.fs.isFile(name) && Besht.fs.isExecutable(name)
+    }
+
+    let pathEnv = process.env.PATH ?? ""
+    if (Besht.strings.isEmpty(pathEnv)) return false
+
+    for (dir in pathEnv.split(":") as string[]) {
+        let base = dir
+        if (Besht.strings.isEmpty(base)) base = "."
+        let candidate = `${base}/${name}`
+        if (Besht.fs.isFile(candidate) && Besht.fs.isExecutable(candidate)) {
+            return true
+        }
+    }
+
+    return false
+}
+```
 
 ```ts
 // Capture stdout explicitly
