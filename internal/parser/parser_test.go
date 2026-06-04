@@ -85,7 +85,7 @@ func TestParser_LetDeclBool(t *testing.T) {
 }
 
 func TestParser_LetDeclList(t *testing.T) {
-	prog := mustParse(t, `let files: list<string> = ["a.txt", "b.txt"]`)
+	prog := mustParse(t, `let files: Array<string> = ["a.txt", "b.txt"]`)
 	decl := prog.Statements[0].(*ast.LetDecl)
 	if decl.TypeAnnot.Kind != ast.TypeList {
 		t.Fatalf("type: got %v, want list", decl.TypeAnnot.Kind)
@@ -937,7 +937,7 @@ func TestParser_NullLiteral(t *testing.T) {
 }
 
 func TestParser_EmptyList(t *testing.T) {
-	prog := mustParse(t, `let l: list<string> = []`)
+	prog := mustParse(t, `let l: Array<string> = []`)
 	decl := prog.Statements[0].(*ast.LetDecl)
 	lit := decl.Value.(*ast.ListLit)
 	if len(lit.Elements) != 0 {
@@ -1137,7 +1137,7 @@ let mapped = items.map(x => x + "!")`)
 }
 
 func TestParser_ListFilterTypedArrow(t *testing.T) {
-	prog := mustParse(t, `let items: list<string> = ["a"]
+	prog := mustParse(t, `let items: Array<string> = ["a"]
 let picked = items.filter((x: string) => x.startsWith("a"))`)
 	decl := prog.Statements[1].(*ast.LetDecl)
 	call := decl.Value.(*ast.MethodCallExpr)

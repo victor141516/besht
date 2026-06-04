@@ -47,7 +47,6 @@ const (
 	TokTypeNumber
 	TokTypeBoolean
 	TokTypeStatus
-	TokTypeList  // kept for backward compat
 	TokTypeArray // Array<T>
 
 	// Punctuation
@@ -130,7 +129,6 @@ var keywords = map[string]TokenType{
 	"number":    TokTypeNumber,
 	"boolean":   TokTypeBoolean,
 	"status":    TokTypeStatus,
-	"list":      TokTypeList,
 	"Array":     TokTypeArray,
 }
 

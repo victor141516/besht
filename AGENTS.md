@@ -451,7 +451,7 @@ let absent = undefined
 let city = "Paris"
 let items = ["x", "y"]
 
-// Array types. Prefer T[] or Array<T>; legacy list<T> still parses for compatibility.
+// Array types. Prefer T[] or Array<T>.
 let a: string[] = ["a", "b"]
 let b: Array<string> = ["c", "d"]
 let c: string[] = ["e", "f"]

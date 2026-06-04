@@ -48,10 +48,10 @@ func TestLexer_OfIsIdentifier(t *testing.T) {
 }
 
 func TestLexer_TypeKeywords(t *testing.T) {
-	toks := tokenize(t, "string number boolean status list")
+	toks := tokenize(t, "string number boolean status Array")
 	expectTypes(t, toks,
 		lexer.TokTypeString, lexer.TokTypeNumber, lexer.TokTypeBoolean,
-		lexer.TokTypeStatus, lexer.TokTypeList,
+		lexer.TokTypeStatus, lexer.TokTypeArray,
 	)
 }
 
@@ -210,9 +210,9 @@ func TestLexer_FnDeclaration(t *testing.T) {
 	)
 }
 
-func TestLexer_ListType(t *testing.T) {
-	toks := tokenize(t, "list<string>")
-	expectTypes(t, toks, lexer.TokTypeList, lexer.TokLt, lexer.TokTypeString, lexer.TokRAngle)
+func TestLexer_ArrayType(t *testing.T) {
+	toks := tokenize(t, "Array<string>")
+	expectTypes(t, toks, lexer.TokTypeArray, lexer.TokLt, lexer.TokTypeString, lexer.TokRAngle)
 }
 
 func TestLexer_TrueFalse(t *testing.T) {

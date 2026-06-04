@@ -78,7 +78,7 @@ func (p *Parser) expect(tt lexer.TokenType) (lexer.Token, error) {
 
 func isIdentifierName(tt lexer.TokenType) bool {
 	switch tt {
-	case lexer.TokIdent, lexer.TokTypeString, lexer.TokTypeNumber, lexer.TokTypeBoolean, lexer.TokTypeStatus, lexer.TokTypeList, lexer.TokTypeArray, lexer.TokFrom:
+	case lexer.TokIdent, lexer.TokTypeString, lexer.TokTypeNumber, lexer.TokTypeBoolean, lexer.TokTypeStatus, lexer.TokTypeArray, lexer.TokFrom:
 		return true
 	}
 	return false
@@ -538,19 +538,6 @@ func (p *Parser) parseType() (*ast.Type, error) {
 		t = &ast.Type{Kind: ast.TypeBoolean, Pos: pos}
 	case lexer.TokTypeStatus:
 		t = &ast.Type{Kind: ast.TypeStatus, Pos: pos}
-	case lexer.TokTypeList:
-		if _, err := p.expect(lexer.TokLt); err != nil {
-			return nil, err
-		}
-		elem, err := p.parseType()
-		if err != nil {
-			return nil, err
-		}
-		if p.peekType() != lexer.TokRAngle {
-			return nil, p.errorf(p.peek(), "expected '>' to close list<...>")
-		}
-		p.advance()
-		t = &ast.Type{Kind: ast.TypeList, Elem: elem, Pos: pos}
 	case lexer.TokTypeArray:
 		if p.peekType() == lexer.TokLt {
 			p.advance() // consume <
@@ -1952,7 +1939,7 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 		}
 		return inner, nil
 
-	case lexer.TokIdent, lexer.TokTypeString, lexer.TokTypeNumber, lexer.TokTypeBoolean, lexer.TokTypeStatus, lexer.TokTypeList, lexer.TokTypeArray, lexer.TokFrom:
+	case lexer.TokIdent, lexer.TokTypeString, lexer.TokTypeNumber, lexer.TokTypeBoolean, lexer.TokTypeStatus, lexer.TokTypeArray, lexer.TokFrom:
 		name := tok.Literal
 		p.advance()
 		if name == "r" && p.peekType() == lexer.TokString {

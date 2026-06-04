@@ -50,7 +50,7 @@ func TestValidator_LetDeclValid(t *testing.T) {
 	mustCheck(t, `let x: string = "hello"`)
 	mustCheck(t, `let n: number = 42`)
 	mustCheck(t, `let b: boolean = true`)
-	mustCheck(t, `let l: list<string> = ["a", "b"]`)
+	mustCheck(t, `let l: Array<string> = ["a", "b"]`)
 }
 
 func TestValidator_OptionalChaining(t *testing.T) {
@@ -153,7 +153,7 @@ func TestValidator_ForRangeValid(t *testing.T) {
 }
 
 func TestValidator_ForListValid(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a", "b"]
+	mustCheck(t, `let files: Array<string> = ["a", "b"]
 for (f in files) {
     $("echo", "${f}")
 }`)
@@ -242,27 +242,27 @@ let ok: boolean = Besht.fs.unknown(p)`, `Besht.fs has no method "unknown"`)
 }
 
 func TestValidator_BuiltinLen(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a"]
+	mustCheck(t, `let files: Array<string> = ["a"]
 let n: number = files.length`)
 }
 
 func TestValidator_BuiltinHead(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a", "b"]
+	mustCheck(t, `let files: Array<string> = ["a", "b"]
 let first: string = files[0]`)
 }
 
 func TestValidator_BuiltinTail(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a", "b"]
-let rest: list<string> = files.slice(1)`)
+	mustCheck(t, `let files: Array<string> = ["a", "b"]
+let rest: Array<string> = files.slice(1)`)
 }
 
 func TestValidator_BuiltinAppend(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a"]
+	mustCheck(t, `let files: Array<string> = ["a"]
 files = files.push("b")`)
 }
 
 func TestValidator_BuiltinContains(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a"]
+	mustCheck(t, `let files: Array<string> = ["a"]
 if (files.includes("a")) {
     $("echo", "found")
 }`)
@@ -322,7 +322,7 @@ func TestValidator_StringLiteralNoInterpolation(t *testing.T) {
 }
 
 func TestValidator_ListLiteralConsistentTypes(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a", "b", "c"]`)
+	mustCheck(t, `let l: Array<string> = ["a", "b", "c"]`)
 }
 
 func TestValidator_SetAndNestedLists(t *testing.T) {
@@ -407,7 +407,7 @@ while (n > 0) {
 }
 
 func TestValidator_ContinueInLoop(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a", "b"]
+	mustCheck(t, `let files: Array<string> = ["a", "b"]
 for (f in files) {
     continue
 }`)
@@ -454,12 +454,12 @@ console.log(msg)`)
 }
 
 func TestValidator_IndexExpr(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a", "b", "c"]
+	mustCheck(t, `let files: Array<string> = ["a", "b", "c"]
 let first: string = files[0]`)
 }
 
 func TestValidator_IndexExprVariable(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a", "b", "c"]
+	mustCheck(t, `let files: Array<string> = ["a", "b", "c"]
 let i: number = 1
 let item: string = files[i]`)
 }
@@ -503,9 +503,9 @@ let n: number = Number.parseInt(s)`)
 }
 
 func TestValidator_ListConcatMethod(t *testing.T) {
-	mustCheck(t, `let a: list<string> = ["x"]
-let b: list<string> = ["y"]
-let c: list<string> = a.concat(b)`)
+	mustCheck(t, `let a: Array<string> = ["x"]
+let b: Array<string> = ["y"]
+let c: Array<string> = a.concat(b)`)
 }
 
 func TestValidator_ListUnshift(t *testing.T) {
@@ -536,7 +536,7 @@ let l: string = s.toLowerCase()`)
 
 func TestValidator_StringSplit(t *testing.T) {
 	mustCheck(t, `let s: string = "a,b,c"
-let parts: list<string> = s.split(",")`)
+let parts: Array<string> = s.split(",")`)
 }
 
 func TestValidator_StringIncludes(t *testing.T) {
@@ -579,65 +579,65 @@ let n: number = s.length`)
 }
 
 func TestValidator_ListPush(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a"]
-let l2: list<string> = l.push("b")`)
+	mustCheck(t, `let l: Array<string> = ["a"]
+let l2: Array<string> = l.push("b")`)
 }
 
 func TestValidator_ListPop(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a", "b"]
-let l2: list<string> = l.pop()`)
+	mustCheck(t, `let l: Array<string> = ["a", "b"]
+let l2: Array<string> = l.pop()`)
 }
 
 func TestValidator_ListJoin(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a", "b", "c"]
+	mustCheck(t, `let l: Array<string> = ["a", "b", "c"]
 let s: string = l.join(", ")`)
 }
 
 func TestValidator_ListToString(t *testing.T) {
-	mustCheck(t, `let list: list<string> = ["a", "b", "c"]
+	mustCheck(t, `let list: Array<string> = ["a", "b", "c"]
 let s: string = list.toString()`)
 }
 
 func TestValidator_ListToStringRejectsArguments(t *testing.T) {
-	expectError(t, `let list: list<string> = ["a", "b"]
+	expectError(t, `let list: Array<string> = ["a", "b"]
 let s: string = list.toString(",")`, "toString() takes no arguments")
 }
 
 func TestValidator_ListIncludes(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a", "b"]
+	mustCheck(t, `let l: Array<string> = ["a", "b"]
 if (l.includes("a")) { $("echo", "yes") }`)
 }
 
 func TestValidator_ListConcat(t *testing.T) {
-	mustCheck(t, `let a: list<string> = ["x"]
-let b: list<string> = ["y"]
-let c: list<string> = a.concat(b)`)
+	mustCheck(t, `let a: Array<string> = ["x"]
+let b: Array<string> = ["y"]
+let c: Array<string> = a.concat(b)`)
 }
 
 func TestValidator_ListReverse(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["c", "b", "a"]
-let r: list<string> = l.reverse()`)
+	mustCheck(t, `let l: Array<string> = ["c", "b", "a"]
+let r: Array<string> = l.reverse()`)
 }
 
 func TestValidator_ListSlice(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a", "b", "c", "d"]
-let s: list<string> = l.slice(1, 3)`)
+	mustCheck(t, `let l: Array<string> = ["a", "b", "c", "d"]
+let s: Array<string> = l.slice(1, 3)`)
 }
 
 func TestValidator_ListLength(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a", "b", "c"]
+	mustCheck(t, `let l: Array<string> = ["a", "b", "c"]
 let n: number = l.length`)
 }
 
 func TestValidator_NativeListAPIsReplaceGlobalListHelpers(t *testing.T) {
-	mustCheck(t, `let files: list<string> = ["a", "b", "c"]
-let other: list<string> = ["d"]
+	mustCheck(t, `let files: Array<string> = ["a", "b", "c"]
+let other: Array<string> = ["d"]
 let count: number = files.length
 let first: string = files[0]
-let rest: list<string> = files.slice(1)
-let appended: list<string> = files.push("x")
+let rest: Array<string> = files.slice(1)
+let appended: Array<string> = files.push("x")
 let hasX: boolean = files.includes("x")
-let combined: list<string> = files.concat(other)`)
+let combined: Array<string> = files.concat(other)`)
 }
 
 func TestValidator_CmdExprBasic(t *testing.T) {
@@ -649,7 +649,7 @@ func TestValidator_CmdExprMultiArg(t *testing.T) {
 }
 
 func TestValidator_CmdExprRejectsMixedCommandNameSpread(t *testing.T) {
-	expectError(t, `let cmd: list<string> = ["echo"]
+	expectError(t, `let cmd: Array<string> = ["echo"]
 $(...cmd, "extra")`, "command-name spread must be the only $() argument")
 }
 
@@ -659,7 +659,7 @@ let out: string = $("ls", path)`)
 }
 
 func TestValidator_CmdExprAssignToList(t *testing.T) {
-	mustCheck(t, `let lines: list<string> = $("find", ".", "-name", "*.log").readStdoutLines()`)
+	mustCheck(t, `let lines: Array<string> = $("find", ".", "-name", "*.log").readStdoutLines()`)
 }
 
 func TestValidator_CmdExprRun(t *testing.T) {
@@ -706,7 +706,7 @@ func TestValidator_CmdExprStderrCapture(t *testing.T) {
 }
 
 func TestValidator_CmdExprLines(t *testing.T) {
-	mustCheck(t, `let ls: list<string> = $("ls", "/tmp").readStdoutLines()`)
+	mustCheck(t, `let ls: Array<string> = $("ls", "/tmp").readStdoutLines()`)
 }
 
 func TestValidator_CmdExprText(t *testing.T) {
@@ -902,7 +902,7 @@ let n: number = Math.abs(s)`)
 }
 
 func TestValidator_ListForEach(t *testing.T) {
-	mustCheck(t, `let l: list<string> = ["a", "b"]
+	mustCheck(t, `let l: Array<string> = ["a", "b"]
 l.forEach((item, index) => console.log(index.toString() + ":" + item))
 l.forEach(item => {
     console.log(item)
@@ -935,13 +935,13 @@ let mapped = items.map(cb)`)
 }
 
 func TestValidator_ListMapArrow(t *testing.T) {
-	mustCheck(t, `let items: list<string> = ["a", "b"]
-let mapped: list<string> = items.map(x => x + "!")`)
+	mustCheck(t, `let items: Array<string> = ["a", "b"]
+let mapped: Array<string> = items.map(x => x + "!")`)
 }
 
 func TestValidator_ListFilterArrow(t *testing.T) {
-	mustCheck(t, `let items: list<string> = ["a", "b"]
-let picked: list<string> = items.filter((x: string) => x.startsWith("a"))`)
+	mustCheck(t, `let items: Array<string> = ["a", "b"]
+let picked: Array<string> = items.filter((x: string) => x.startsWith("a"))`)
 }
 
 func TestValidator_ListFilterAcceptsTruthyCallback(t *testing.T) {

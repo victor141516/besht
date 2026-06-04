@@ -179,7 +179,7 @@ count--;            // postfix decrement
 let next = ++count;  // prefix increment in expressions
 ```
 
-Preferred annotation forms include `string`, `number`, `boolean`, `object`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), and tuple types (`[string, number]`). The legacy `list<T>` spelling is still accepted for compatibility, but new docs and diagnostics use array terminology. Besht does not type-check annotations; `null` and `undefined` are runtime nullish sentinels for `??` and comparisons.
+Preferred annotation forms include `string`, `number`, `boolean`, `object`, `T[]`, `Array<T>`, `Set<T>`, `status`, union types (`string | null`), and tuple types (`[string, number]`). Besht does not type-check annotations; `null` and `undefined` are runtime nullish sentinels for `??` and comparisons.
 
 ### Strings
 

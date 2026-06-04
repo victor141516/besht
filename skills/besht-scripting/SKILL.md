@@ -186,7 +186,7 @@ Reassign without `let`:
 count = count + 1;
 ```
 
-**Types:** prefer `T[]` or `Array<T>` for arrays. `string`, `number`, `boolean`, `object`, `Set<T>`, `status`, union types (`string | null`), tuple types (`[string, number]`), and `Record<K, V>` are also accepted as annotations only. The legacy `list<T>` spelling still works for compatibility, but new code and diagnostics use array terminology. Besht does not type-check. Nested arrays use `T[][]` or `Array<Array<T>>`. `null` and `undefined` are accepted for TypeScript-compatible syntax and work with `??`.
+**Types:** use `T[]` or `Array<T>` for arrays. `string`, `number`, `boolean`, `object`, `Set<T>`, `status`, union types (`string | null`), tuple types (`[string, number]`), and `Record<K, V>` are also accepted as annotations only. Besht does not type-check. Nested arrays use `T[][]` or `Array<Array<T>>`. `null` and `undefined` are accepted for TypeScript-compatible syntax and work with `??`.
 
 ## Type Aliases and Interfaces
 

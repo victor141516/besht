@@ -1398,7 +1398,7 @@ func TestIntegration_POSIXCompliance_NoLocalKeyword(t *testing.T) {
 
 func TestIntegration_POSIXCompliance_NoArraySyntax(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `let files: list<string> = ["a.txt", "b.txt"]
+	path := writeFile(t, dir, "main.bsh", `let files: Array<string> = ["a.txt", "b.txt"]
 for (f in files) {
     $("echo", "${f}").run()
 }
@@ -1622,9 +1622,9 @@ try {
 
 func TestIntegration_ConcatLists(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "main.bsh", `let a: list<string> = ["one", "two"]
-let b: list<string> = ["three", "four"]
-let c: list<string> = a.concat(b)
+	path := writeFile(t, dir, "main.bsh", `let a: Array<string> = ["one", "two"]
+let b: Array<string> = ["three", "four"]
+let c: Array<string> = a.concat(b)
 let total: number = c.length
 `)
 	out := compileFile(t, path)
@@ -1635,8 +1635,8 @@ let total: number = c.length
 }
 
 func TestIntegration_NativeListAPIsReplaceGlobalListHelpersRuntime(t *testing.T) {
-	out := runCompiledShell(t, `let files: list<string> = ["a", "b", "c"]
-let other: list<string> = ["d", "e"]
+	out := runCompiledShell(t, `let files: Array<string> = ["a", "b", "c"]
+let other: Array<string> = ["d", "e"]
 console.log(files.length)
 console.log(files[0])
 console.log(files.slice(1).join(","))
@@ -2843,7 +2843,7 @@ for (ch in "xy".split("")) {
 func TestIntegration_StaticStringVariableSplitRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let csv: string = "a,b,c"
 let sep: string = ","
-let parts: list<string> = csv.split(sep)
+let parts: Array<string> = csv.split(sep)
 console.log(parts.length)
 for (part in csv.split(sep)) {
     console.log(part)

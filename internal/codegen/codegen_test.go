@@ -87,13 +87,13 @@ func TestCodegen_LetShellCapture(t *testing.T) {
 }
 
 func TestCodegen_LetListLiteral(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a.txt", "b.txt"]`)
+	out := compile(t, `let files: Array<string> = ["a.txt", "b.txt"]`)
 	assertContains(t, out, "files='a.txt\nb.txt'")
 	assertNotContains(t, out, `$( { printf '%s\n'`)
 }
 
 func TestCodegen_StaticListLiteralEscapesSingleQuotes(t *testing.T) {
-	out := compile(t, `let words: list<string> = ["can't", "stop"]`)
+	out := compile(t, `let words: Array<string> = ["can't", "stop"]`)
 	assertContains(t, out, `words='can'"'"'t`)
 	assertNotContains(t, out, `$( { printf '%s\n'`)
 }
@@ -359,7 +359,7 @@ func TestCodegen_ForRangeLargeStaticFallback(t *testing.T) {
 }
 
 func TestCodegen_ForList(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
+	out := compile(t, `let files: Array<string> = ["a", "b"]
 for (f in files) {
     $("echo", "${f}").run()
 }`)
@@ -368,7 +368,7 @@ for (f in files) {
 }
 
 func TestCodegen_ForInListBareVariable(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
+	out := compile(t, `let files: Array<string> = ["a", "b"]
 for (f in files) {
     $("echo", f).run()
 }`)
@@ -376,7 +376,7 @@ for (f in files) {
 }
 
 func TestCodegen_ForLetInList(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
+	out := compile(t, `let files: Array<string> = ["a", "b"]
 for (let f in files) {
     $("echo", f).run()
 }`)
@@ -385,7 +385,7 @@ for (let f in files) {
 }
 
 func TestCodegen_ForStaticListVariableInvalidatedAfterAssignment(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
+	out := compile(t, `let files: Array<string> = ["a", "b"]
 while (true) {
     files = files.push("c")
     break
@@ -645,7 +645,7 @@ func TestCodegen_StaticToStringConcatKeepsDynamicFallback(t *testing.T) {
 }
 
 func TestCodegen_SpreadCommandArgs(t *testing.T) {
-	out := compile(t, `let args: list<string> = ["a b", "c"]
+	out := compile(t, `let args: Array<string> = ["a b", "c"]
 $("echo", ...args).run()`)
 	assertContains(t, out, `set --`)
 	assertContains(t, out, `while IFS= read -r`)
@@ -795,35 +795,35 @@ console.log("empty?", Besht.strings.isEmpty(s))`)
 }
 
 func TestCodegen_BuiltinLen(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a"]
+	out := compile(t, `let files: Array<string> = ["a"]
 let n: number = files.length`)
 	assertContains(t, out, `n=1`)
 	assertNotContains(t, out, `wc -l`)
 }
 
 func TestCodegen_BuiltinHead(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
+	out := compile(t, `let files: Array<string> = ["a", "b"]
 let first: string = files[0]`)
 	assertContains(t, out, `first='a'`)
 	assertNotContains(t, out, `sed -n "$(( 0 + 1 ))p"`)
 }
 
 func TestCodegen_BuiltinTail(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
-let rest: list<string> = files.slice(1)`)
+	out := compile(t, `let files: Array<string> = ["a", "b"]
+let rest: Array<string> = files.slice(1)`)
 	assertContains(t, out, `rest='b'`)
 	assertNotContains(t, out, `tail -n +$(( 1 + 1 ))`)
 }
 
 func TestCodegen_BuiltinAppend(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a"]
+	out := compile(t, `let files: Array<string> = ["a"]
 files = files.push("b")`)
 	assertContains(t, out, "files='a\nb'")
 	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_BuiltinContainsCondition(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a"]
+	out := compile(t, `let files: Array<string> = ["a"]
 if (files.includes("a")) {
     $("echo", "found").run()
 }`)
@@ -1007,7 +1007,7 @@ while (n > 0) {
 }
 
 func TestCodegen_ContinueInLoop(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a"]
+	out := compile(t, `let files: Array<string> = ["a"]
 for (f in files) {
     continue
 }`)
@@ -1317,14 +1317,14 @@ console.log(pick() || "fallback")`)
 }
 
 func TestCodegen_IndexExpr(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
+	out := compile(t, `let files: Array<string> = ["a", "b"]
 let first: string = files[0]`)
 	assertContains(t, out, `first='a'`)
 	assertNotContains(t, out, `sed -n "$(( 0 + 1 ))p"`)
 }
 
 func TestCodegen_IndexExprVariable(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b"]
+	out := compile(t, `let files: Array<string> = ["a", "b"]
 let i: number = 1
 let item: string = files[i]`)
 	assertContains(t, out, `$(( $i + 1 ))`)
@@ -1523,9 +1523,9 @@ func TestCodegen_PrefixStripTernaryUsesParameterExpansion(t *testing.T) {
 }
 
 func TestCodegen_ListConcatMethod(t *testing.T) {
-	out := compile(t, `let a: list<string> = ["x"]
-let b: list<string> = ["y"]
-let c: list<string> = a.concat(b)`)
+	out := compile(t, `let a: Array<string> = ["x"]
+let b: Array<string> = ["y"]
+let c: Array<string> = a.concat(b)`)
 	assertContains(t, out, "c='x\ny'")
 	assertNotContains(t, out, `printf '%s\n%s'`)
 }
@@ -1553,14 +1553,14 @@ func TestCodegen_StringToLowerCase(t *testing.T) {
 
 func TestCodegen_StringSplit(t *testing.T) {
 	out := compile(t, `function splitIt(s: string) {
-    let parts: list<string> = s.split(",")
+    let parts: Array<string> = s.split(",")
 }`)
 	assertContains(t, out, `tr ',' '\n'`)
 }
 
 func TestCodegen_StringSplitEmptySeparator(t *testing.T) {
 	out := compile(t, `function splitChars(s: string) {
-    let parts: list<string> = s.split("")
+    let parts: Array<string> = s.split("")
 }`)
 	assertContains(t, out, `for(i=1;i<=length($0);i++) print substr($0,i,1)`)
 }
@@ -1587,7 +1587,7 @@ func TestCodegen_StaticStringSplitForLoop(t *testing.T) {
 func TestCodegen_StaticStringVariableSplit(t *testing.T) {
 	out := compile(t, `let csv: string = "a,b,c"
 let sep: string = ","
-let parts: list<string> = csv.split(sep)
+let parts: Array<string> = csv.split(sep)
 let count: number = csv.split(sep).length`)
 	assertContains(t, out, "parts='a\nb\nc'")
 	assertContains(t, out, `count=3`)
@@ -1613,7 +1613,7 @@ while (true) {
     csv = "x,y"
     break
 }
-let parts: list<string> = csv.split(",")`)
+let parts: Array<string> = csv.split(",")`)
 	assertContains(t, out, `tr ',' '\n'`)
 	assertNotContains(t, out, "parts='a\nb\nc'")
 }
@@ -1879,14 +1879,14 @@ func TestCodegen_StaticStringLiteralLength(t *testing.T) {
 }
 
 func TestCodegen_ListPush(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a"]
-let l2: list<string> = l.push("b")`)
+	out := compile(t, `let l: Array<string> = ["a"]
+let l2: Array<string> = l.push("b")`)
 	assertContains(t, out, "l2='a\nb'")
 	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_ListJoin(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b", "c"]
+	out := compile(t, `let l: Array<string> = ["a", "b", "c"]
 let s: string = l.join(", ")`)
 	assertContains(t, out, `s='a, b, c'`)
 	assertNotContains(t, out, `NR>1{printf s}`)
@@ -1957,7 +1957,7 @@ let joined = xs.concat(["d"]).join(",")`)
 }
 
 func TestCodegen_ListToString(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b", "c"]
+	out := compile(t, `let l: Array<string> = ["a", "b", "c"]
 let s: string = l.toString()`)
 	assertContains(t, out, `s='a,b,c'`)
 	assertNotContains(t, out, `awk -v s=','`)
@@ -2007,14 +2007,14 @@ let has = files.includes("b")`)
 }
 
 func TestCodegen_ListLength(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b"]
+	out := compile(t, `let l: Array<string> = ["a", "b"]
 let n: number = l.length`)
 	assertContains(t, out, `n=2`)
 	assertNotContains(t, out, `wc -l`)
 }
 
 func TestCodegen_ListLengthFallsBackAfterControlFlowAssignment(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b"]
+	out := compile(t, `let l: Array<string> = ["a", "b"]
 while (true) {
     l = ["a", "b", "c"]
     break
@@ -2025,7 +2025,7 @@ let n: number = l.length`)
 }
 
 func TestCodegen_ListLengthUpdatesAfterStaticMutation(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b"]
+	out := compile(t, `let l: Array<string> = ["a", "b"]
 l.push("c")
 let n: number = l.length`)
 	assertContains(t, out, `n=3`)
@@ -2039,29 +2039,29 @@ func TestCodegen_StaticListLiteralLength(t *testing.T) {
 }
 
 func TestCodegen_ListReverse(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["c", "b", "a"]
-let r: list<string> = l.reverse()`)
+	out := compile(t, `let l: Array<string> = ["c", "b", "a"]
+let r: Array<string> = l.reverse()`)
 	assertContains(t, out, "r='a\nb\nc'")
 	assertNotContains(t, out, `tail -r`)
 }
 
 func TestCodegen_ListConcat(t *testing.T) {
-	out := compile(t, `let a: list<string> = ["x"]
-let b: list<string> = ["y"]
-let c: list<string> = a.concat(b)`)
+	out := compile(t, `let a: Array<string> = ["x"]
+let b: Array<string> = ["y"]
+let c: Array<string> = a.concat(b)`)
 	assertContains(t, out, "c='x\ny'")
 	assertNotContains(t, out, `printf '%s\n%s'`)
 }
 
 func TestCodegen_ListSlice(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b", "c", "d"]
-let s: list<string> = l.slice(1, 3)`)
+	out := compile(t, `let l: Array<string> = ["a", "b", "c", "d"]
+let s: Array<string> = l.slice(1, 3)`)
 	assertContains(t, out, "s='b\nc'")
 	assertNotContains(t, out, `awk -v _s=1 -v _e=3`)
 }
 
 func TestCodegen_ListIncludesCondition(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b"]
+	out := compile(t, `let l: Array<string> = ["a", "b"]
 if (l.includes("a")) { $("echo", "yes") }`)
 	assertNotContains(t, out, `grep -qxF`)
 	assertNotContains(t, out, `_bst_includes()`)
@@ -2084,14 +2084,14 @@ let missing: number = ["a", "b", "a"].indexOf("z")`)
 }
 
 func TestCodegen_NativeListAPIsReplaceGlobalListHelpers(t *testing.T) {
-	out := compile(t, `let files: list<string> = ["a", "b", "c"]
-let other: list<string> = ["d"]
+	out := compile(t, `let files: Array<string> = ["a", "b", "c"]
+let other: Array<string> = ["d"]
 let count: number = files.length
 let first: string = files[0]
-let rest: list<string> = files.slice(1)
-let appended: list<string> = files.push("x")
+let rest: Array<string> = files.slice(1)
+let appended: Array<string> = files.push("x")
 if (files.includes("x")) { $("echo", "found").run() }
-let combined: list<string> = files.concat(other)`)
+let combined: Array<string> = files.concat(other)`)
 	assertContains(t, out, `count=3`)
 	assertNotContains(t, out, `wc -l`)
 	assertContains(t, out, `first='a'`)
@@ -3297,7 +3297,7 @@ func TestCodegen_StringEndsWithInCondition(t *testing.T) {
 }
 
 func TestCodegen_ListIncludesInCondition(t *testing.T) {
-	out := compile(t, `let l: list<string> = ["a", "b"]
+	out := compile(t, `let l: Array<string> = ["a", "b"]
 	if (l.includes("a")) {
 	    $("echo", "yes").run()
 	}`)
