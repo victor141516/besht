@@ -151,6 +151,18 @@ Expected design:
 
 ---
 
+## Rest parameter declarations
+
+Add TypeScript-style rest parameter support for declarations and user functions after the first `Object.assign()` slice. This should allow standard-library signatures such as:
+
+```ts
+function assign(target: object, ...sources: object[]): object
+```
+
+The first `Object.assign()` implementation should avoid this parser/signature expansion and expose only two practical declaration overloads. Future rest parameter work should decide how `...args` maps to shell function arguments, user-authored functions, declaration-only functions, callbacks, and imported/exported function signatures.
+
+---
+
 ## TypeScript/Besht behavior divergence table
 
 Add a user-facing table that lists cases where code is syntactically valid TypeScript and syntactically valid Besht, but the behavior differs. The table should use very short code examples and show both outcomes clearly: normal TypeScript/JavaScript behavior and Besht behavior, including whether each side type-checks, compiles, fails at runtime, or fails at Besht compile time.
