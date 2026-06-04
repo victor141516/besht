@@ -625,6 +625,13 @@ if (probe.exitCode() == 0) {
   console.log("ok")
 }
 
+// Literal grep/test data usually becomes native data; real external status stays a command.
+let valid = ["alpha", "beta", "gamma"]
+console.log(valid.includes(word) ? "ok" : "missing")
+let realProbe = $("false").stdout("null").stderr("null")
+realProbe.run()
+console.log(realProbe.exitCode().toString())
+
 // Shell ${1:-.}: default on missing OR empty positional arg
 let root = Besht.args.positional(1) ?? "."
 if (Besht.strings.isEmpty(root)) {

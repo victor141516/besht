@@ -901,6 +901,8 @@ if (probe.exitCode() == 0) {
 }
 ```
 
+Literal `grep -q`, `case`, or `[ ]` checks over script-owned static data usually become native arrays, objects, sets, or predicates. Keep `.exitCode()` for genuinely external commands whose status is the result you need.
+
 For shell defaults like `${1:-.}`, remember that the `:-` form treats both missing and empty arguments as absent:
 
 ```ts

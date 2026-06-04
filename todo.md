@@ -47,6 +47,7 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 - `node-eq/tests/language/core/skill_control_flow_idioms.*`: translating shell `for`/`case` loop filters, counters, `continue`, `break`, and empty-input branches into native arrays, string methods, and ordinary Besht flow control.
 - `node-eq/tests/imports/skill_module_idioms.*`: translating sourced shell helper files into `.bsh` modules with named/default exports for script-owned helpers and asserted `.sh` imports for preserved shell helpers.
 - `node-eq/tests/language/classes/skill_class_idioms.*`: translating stateful shell helper families over pipe-delimited records into classes with constructors, fields, methods, accessors, and static members when a reusable entity is the natural model.
+- `node-eq/tests/commands/skill_status_idioms.*`: translating literal `grep -q`/membership checks over static data into native arrays while preserving `.exitCode()` for real external command status.
 
 Suggested next slice after the module-boundary guardrail: classes, especially constructors, methods, getters/setters, static members, `this`, and unsupported inheritance/modifier boundaries.
 

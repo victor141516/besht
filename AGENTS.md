@@ -1019,6 +1019,8 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 
 **Skill validation should cover class-worthy stateful helper families.** `node-eq/tests/language/classes/skill_class_idioms.bsh` is paired with shell functions that create, read, mutate, and display a pipe-delimited account record. The Besht fixture intentionally uses a class with constructor setup, instance fields, methods, getter/setter, and a static member; keep it as a guardrail for teaching classes when behavior belongs to a reusable stateful entity. Simple record-only translations may still be better as object literals plus functions.
 
+**Skill validation should distinguish static checks from real command status.** `node-eq/tests/commands/skill_status_idioms.bsh` is paired with a shell source that mixes a literal `grep -qx` membership probe and real `true`/`false` command statuses. The Besht fixture intentionally uses native array membership for script-owned static data and `.run().exitCode()` only for real external command status.
+
 **node-eq fixtures run through TypeScript semantics too.** The Besht compiler treats `for (x in array)` as value iteration, but the Bun-side node-eq runner executes JavaScript/TypeScript where `for...in` over arrays yields indexes. Use `for...of` in node-eq fixtures when the fixture must pass both runners while exercising value iteration.
 
 **JSON object values must preserve expression types.** `JSON.stringify({ count: items.length })` must pass `items.length` to jq as JSON number data, not as a string. Keep `inferReceiverType()` aware that `.length` on strings and arrays is numeric so object-literal JSON codegen chooses `--argjson`.
