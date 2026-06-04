@@ -114,6 +114,22 @@ Implementation notes:
 
 ---
 
+## jq-backed alternate lowering mode
+
+`--opt-use-jq` can mean more than enabling `JSON.parse()` and `JSON.stringify()`: when jq-backed codegen produces simpler or safer shell than the standard POSIX-only lowering, the compiler may choose a jq-backed implementation for supported APIs.
+
+This should be considered for object handling, array handling, JSON interop, and future JS-style standard-library APIs. The same Besht/TypeScript-style source should be able to compile either to normal POSIX-oriented output or to jq-assisted output when the user passes `--opt-use-jq`.
+
+Rules:
+
+- Use jq only when `--opt-use-jq` is enabled.
+- If a feature requires jq and the flag is absent, fail at compile time with a clear error mentioning `--opt-use-jq`.
+- If the non-jq implementation is simpler or already optimal, keep using it even when jq is enabled.
+- Prefer jq-backed lowering when it materially simplifies generated shell, improves correctness for nested data, or avoids fragile POSIX string/object encoding.
+- Keep docs, stdlib declarations, semantics/codegen tests, and node-eq fixtures clear about which APIs require jq and which merely have an optional jq-backed lowering.
+
+---
+
 ## Float precision difference between awk and JavaScript
 
 **Status: known cosmetic difference, not a compiler bug.**
