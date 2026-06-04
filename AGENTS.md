@@ -1017,6 +1017,8 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 
 **Skill validation should cover module boundary idioms.** `node-eq/tests/imports/skill_module_idioms.bsh` is paired with a sourced multi-file shell project. The Besht fixture intentionally uses a `.bsh` module with named and default exports for script-owned helpers/data, plus an asserted `.sh` import for a preserved shell helper; keep it as a guardrail against agents collapsing sourced projects into one file or wrapping reusable helper boundaries in `$("sh", "-c", ...)`.
 
+**Skill validation should cover class-worthy stateful helper families.** `node-eq/tests/language/classes/skill_class_idioms.bsh` is paired with shell functions that create, read, mutate, and display a pipe-delimited account record. The Besht fixture intentionally uses a class with constructor setup, instance fields, methods, getter/setter, and a static member; keep it as a guardrail for teaching classes when behavior belongs to a reusable stateful entity. Simple record-only translations may still be better as object literals plus functions.
+
 **node-eq fixtures run through TypeScript semantics too.** The Besht compiler treats `for (x in array)` as value iteration, but the Bun-side node-eq runner executes JavaScript/TypeScript where `for...in` over arrays yields indexes. Use `for...of` in node-eq fixtures when the fixture must pass both runners while exercising value iteration.
 
 **JSON object values must preserve expression types.** `JSON.stringify({ count: items.length })` must pass `items.length` to jq as JSON number data, not as a string. Keep `inferReceiverType()` aware that `.length` on strings and arrays is numeric so object-literal JSON codegen chooses `--argjson`.

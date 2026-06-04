@@ -603,6 +603,8 @@ Static and computed object keys must contain only letters, numbers, and `_`.
 
 Classes compile to POSIX sh functions plus compiler-managed object property slots. Supported features are constructors, instance properties, instance methods, `new`, `this`, static properties/methods, and getters/setters. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored. Inheritance, decorators, and abstract classes are not supported.
 
+When translating shell helper families that create a record, read/write its fields, and perform repeated operations on it, use either object literals plus functions or a class. Prefer a class when the behavior naturally belongs to a reusable stateful entity with constructor-style setup, methods, getters/setters, or static constants. For simple delimiter-separated records with only a few transformations, object literals are often enough.
+
 ```ts
 class User {
   name: string
