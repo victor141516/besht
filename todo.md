@@ -130,6 +130,27 @@ Rules:
 
 ---
 
+## Object spread syntax
+
+Add object spread once `Object.assign()` is implemented. Object spread should be based on the same object-copy and merge machinery as `Object.assign()` rather than introducing a separate object representation path.
+
+Candidate syntax:
+
+```ts
+let merged = { ...defaults, active: true }
+let copy = { ...source }
+```
+
+Expected design:
+
+- Lower object spread through the same validated key-copy behavior as `Object.assign()`.
+- Preserve left-to-right overwrite semantics and key order: existing keys keep their first position, new keys append when first introduced, and later spreads/properties overwrite values.
+- Keep the first slice scalar-safe, matching the initial `Object.assign()` boundary.
+- Treat computed or dynamic keys through the same compiler-managed `_objkeys_*` metadata and runtime key validation used by `Object.assign()`.
+- Reuse future jq-backed nested-value support if `Object.assign()` grows a richer `--opt-use-jq` mode.
+
+---
+
 ## TypeScript/Besht behavior divergence table
 
 Add a user-facing table that lists cases where code is syntactically valid TypeScript and syntactically valid Besht, but the behavior differs. The table should use very short code examples and show both outcomes clearly: normal TypeScript/JavaScript behavior and Besht behavior, including whether each side type-checks, compiles, fails at runtime, or fails at Besht compile time.
