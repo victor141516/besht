@@ -1,4 +1,4 @@
-package checker
+package semantics
 
 import (
 	"fmt"
@@ -83,7 +83,7 @@ func (v *fetchSurfaceValidator) stmt(stmt ast.Statement) error {
 		v.setVar(s.Name, s.Value)
 	case *ast.IndexAssignStmt:
 		if v.fetchVars[s.Name] {
-			return &CheckError{Pos: s.Pos, Message: "FetchResponse does not support index assignment"}
+			return &SemanticError{Pos: s.Pos, Message: "FetchResponse does not support index assignment"}
 		}
 		if err := v.expr(s.Index); err != nil {
 			return err
@@ -91,7 +91,7 @@ func (v *fetchSurfaceValidator) stmt(stmt ast.Statement) error {
 		return v.expr(s.Value)
 	case *ast.PropertyAssignStmt:
 		if v.fetchVars[s.Object] {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", s.Property)}
+			return &SemanticError{Pos: s.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", s.Property)}
 		}
 		return v.expr(s.Value)
 	case *ast.FnDecl:
@@ -269,7 +269,7 @@ func (v *fetchSurfaceValidator) expr(expr ast.Expression) error {
 		}
 	case *ast.BuiltinCallExpr:
 		if e.Name == "fetch" && len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
+			return &SemanticError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
 		}
 		for _, arg := range e.Args {
 			if err := v.expr(arg); err != nil {
@@ -288,7 +288,7 @@ func (v *fetchSurfaceValidator) expr(expr ast.Expression) error {
 			return err
 		}
 		if v.isFetchResponse(e.Expr) {
-			return &CheckError{Pos: e.Pos, Message: "FetchResponse does not support index access"}
+			return &SemanticError{Pos: e.Pos, Message: "FetchResponse does not support index access"}
 		}
 		return v.expr(e.Index)
 	case *ast.MethodCallExpr:
@@ -302,10 +302,10 @@ func (v *fetchSurfaceValidator) expr(expr ast.Expression) error {
 		}
 		if v.isFetchResponse(e.Receiver) {
 			if e.Method != "text" {
-				return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)}
+				return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)}
 			}
 			if len(e.Args) != 0 {
-				return &CheckError{Pos: e.Pos, Message: "FetchResponse.text() takes no arguments"}
+				return &SemanticError{Pos: e.Pos, Message: "FetchResponse.text() takes no arguments"}
 			}
 		}
 	case *ast.PropertyExpr:
@@ -313,7 +313,7 @@ func (v *fetchSurfaceValidator) expr(expr ast.Expression) error {
 			return err
 		}
 		if v.isFetchResponse(e.Receiver) {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", e.Property)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", e.Property)}
 		}
 	case *ast.SpreadExpr:
 		return v.expr(e.Expr)

@@ -9102,7 +9102,7 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 	case "forEach":
 		return "", fmt.Errorf("forEach() must be used as a statement")
 	}
-	return "", fmt.Errorf("list has no method %q", e.Method)
+	return "", fmt.Errorf("array has no method %q", e.Method)
 }
 
 func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool, error) {

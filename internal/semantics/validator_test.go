@@ -1,11 +1,11 @@
-package checker_test
+package semantics_test
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/victor141516/besht/internal/checker"
 	"github.com/victor141516/besht/internal/parser"
+	"github.com/victor141516/besht/internal/semantics"
 )
 
 func check(t *testing.T, src string) error {
@@ -14,8 +14,8 @@ func check(t *testing.T, src string) error {
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	chk := checker.New()
-	return chk.Check(prog)
+	validator := semantics.New()
+	return validator.Validate(prog)
 }
 
 func mustCheck(t *testing.T, src string) {
@@ -36,24 +36,24 @@ func expectError(t *testing.T, src, fragment string) {
 	}
 }
 
-func TestChecker_DefaultModeIsPermissive(t *testing.T) {
+func TestValidator_DefaultModeIsPermissive(t *testing.T) {
 	prog, err := parser.Parse(`let x: string = 42`, "test.bsh")
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if err := checker.New().Check(prog); err != nil {
-		t.Fatalf("checker should ignore type annotations, got %v", err)
+	if err := semantics.New().Validate(prog); err != nil {
+		t.Fatalf("semantic validator should ignore type annotations, got %v", err)
 	}
 }
 
-func TestChecker_LetDeclValid(t *testing.T) {
+func TestValidator_LetDeclValid(t *testing.T) {
 	mustCheck(t, `let x: string = "hello"`)
 	mustCheck(t, `let n: number = 42`)
 	mustCheck(t, `let b: boolean = true`)
 	mustCheck(t, `let l: list<string> = ["a", "b"]`)
 }
 
-func TestChecker_OptionalChaining(t *testing.T) {
+func TestValidator_OptionalChaining(t *testing.T) {
 	mustCheck(t, `let user = { name: "Ada" }
 let a: string = user?.name
 let name: string = user?.name ?? "anonymous"
@@ -65,24 +65,24 @@ let d: string = undefined?.[0]
 let e: string = " Ada "?.trim()`)
 }
 
-func TestChecker_OptionalChainingChecksSubexpressions(t *testing.T) {
+func TestValidator_OptionalChainingChecksSubexpressions(t *testing.T) {
 	expectError(t, `let items: string[] = ["a"]
 let value = items?.[missing]`, `variable "missing" not declared`)
 }
 
-func TestChecker_OptionalChainingIgnoresTypeShapes(t *testing.T) {
+func TestValidator_OptionalChainingIgnoresTypeShapes(t *testing.T) {
 	mustCheck(t, `let items: string[] = ["a"]
 let value = items?.bogus`)
 	mustCheck(t, `let value = undefined?.["bad"]`)
 }
 
-func TestChecker_NullishCoalescing(t *testing.T) {
+func TestValidator_NullishCoalescing(t *testing.T) {
 	mustCheck(t, `let value: string = undefined ?? "fallback"`)
 	mustCheck(t, `let value: string = null ?? "fallback"`)
 	mustCheck(t, `let value: number = undefined ?? 7`)
 }
 
-func TestChecker_ProcessEnvAndExit(t *testing.T) {
+func TestValidator_ProcessEnvAndExit(t *testing.T) {
 	mustCheck(t, `let home: string = process.env.HOME`)
 	mustCheck(t, `let home: string = process.env.HOME ?? "fallback"`)
 	mustCheck(t, `let envObj = process.env`)
@@ -95,77 +95,77 @@ func TestChecker_ProcessEnvAndExit(t *testing.T) {
 }`)
 }
 
-func TestChecker_ProcessRejectsInvalidAPI(t *testing.T) {
+func TestValidator_ProcessRejectsInvalidAPI(t *testing.T) {
 	expectError(t, `process.foo()`, `process has no method "foo"`)
 	expectError(t, `let cwd = process.cwd`, `process has no property "cwd"`)
 	expectError(t, `process.exit(1, 2)`, `process.exit() takes 0 or 1 argument`)
 }
 
-func TestChecker_ArgsHelpers(t *testing.T) {
+func TestValidator_ArgsHelpers(t *testing.T) {
 	mustCheck(t, `let all: string[] = Besht.args.argv()`)
 	mustCheck(t, `let first: string = Besht.args.positional(1) ?? "fallback"`)
 	mustCheck(t, `let branch: string = Besht.args.option("branch", "b") ?? "main"`)
 	mustCheck(t, `let dryRun: boolean = Besht.args.flag("dry-run", "d")`)
 }
 
-func TestChecker_ArgsLongNameRequired(t *testing.T) {
+func TestValidator_ArgsLongNameRequired(t *testing.T) {
 	expectError(t, `let bad = Besht.args.option()`, "Besht.args.option() takes 1 or 2 arguments")
 	expectError(t, `let bad = Besht.args.flag()`, "Besht.args.flag() takes 1 or 2 arguments")
 }
 
-func TestChecker_FnDeclValid(t *testing.T) {
+func TestValidator_FnDeclValid(t *testing.T) {
 	mustCheck(t, `function add(a: number, b: number): number {
     return 1
 }`)
 }
 
-func TestChecker_FnCallValid(t *testing.T) {
+func TestValidator_FnCallValid(t *testing.T) {
 	mustCheck(t, `function greet(name: string) {
     $("echo", "hi")
 }
 greet("Alice")`)
 }
 
-func TestChecker_FnParamScope(t *testing.T) {
+func TestValidator_FnParamScope(t *testing.T) {
 	mustCheck(t, `function f(x: number): number {
     return x
 }`)
 }
 
-func TestChecker_IfConditionBool(t *testing.T) {
+func TestValidator_IfConditionBool(t *testing.T) {
 	mustCheck(t, `let b: boolean = true
 if (b) {
     $("echo", "x")
 }`)
 }
 
-func TestChecker_IfConditionComparison(t *testing.T) {
+func TestValidator_IfConditionComparison(t *testing.T) {
 	mustCheck(t, `let n: number = 5
 if (n > 0) {
     $("echo", "pos")
 }`)
 }
 
-func TestChecker_ForRangeValid(t *testing.T) {
+func TestValidator_ForRangeValid(t *testing.T) {
 	mustCheck(t, `for (i in Besht.iter.range(1, 10)) {
     $("echo", "${i}")
 }`)
 }
 
-func TestChecker_ForListValid(t *testing.T) {
+func TestValidator_ForListValid(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b"]
 for (f in files) {
     $("echo", "${f}")
 }`)
 }
 
-func TestChecker_ForShellValid(t *testing.T) {
+func TestValidator_ForShellValid(t *testing.T) {
 	mustCheck(t, `for (line in $("cat", "/etc/hosts").readStdoutLines()) {
     $("echo", "${line}")
 }`)
 }
 
-func TestChecker_TryCatchValid(t *testing.T) {
+func TestValidator_TryCatchValid(t *testing.T) {
 	mustCheck(t, `try {
     $("risky_cmd")
 } catch (err: status) {
@@ -173,24 +173,24 @@ func TestChecker_TryCatchValid(t *testing.T) {
 }`)
 }
 
-func TestChecker_StringConcatValid(t *testing.T) {
+func TestValidator_StringConcatValid(t *testing.T) {
 	mustCheck(t, `let a: string = "hello"
 let b: string = " world"
 let c: string = a + b`)
 }
 
-func TestChecker_StringConcatWithLiteral(t *testing.T) {
+func TestValidator_StringConcatWithLiteral(t *testing.T) {
 	mustCheck(t, `let name: string = "Alice"
 let greeting: string = "Hello, " + name + "!"`)
 }
 
-func TestChecker_BinaryArithmeticValid(t *testing.T) {
+func TestValidator_BinaryArithmeticValid(t *testing.T) {
 	mustCheck(t, `let a: number = 3
 let b: number = 4
 let c: number = a + b`)
 }
 
-func TestChecker_EqValidForStrings(t *testing.T) {
+func TestValidator_EqValidForStrings(t *testing.T) {
 	mustCheck(t, `let a: string = "x"
 let b: string = "y"
 if (a == b) {
@@ -198,28 +198,28 @@ if (a == b) {
 }`)
 }
 
-func TestChecker_UnaryNotValidBool(t *testing.T) {
+func TestValidator_UnaryNotValidBool(t *testing.T) {
 	mustCheck(t, `let b: boolean = true
 if (!b) {
     $("echo", "x")
 }`)
 }
 
-func TestChecker_BuiltinFileExists(t *testing.T) {
+func TestValidator_BuiltinFileExists(t *testing.T) {
 	mustCheck(t, `let p: string = "/tmp/x"
 if (Besht.fs.isFile(p)) {
     $("echo", "exists")
 }`)
 }
 
-func TestChecker_BuiltinIsDir(t *testing.T) {
+func TestValidator_BuiltinIsDir(t *testing.T) {
 	mustCheck(t, `let p: string = "/tmp"
 if (Besht.fs.isDir(p)) {
     $("echo", "dir")
 }`)
 }
 
-func TestChecker_BeshtNamespaceWrappers(t *testing.T) {
+func TestValidator_BeshtNamespaceWrappers(t *testing.T) {
 	mustCheck(t, `let p: string = "/tmp"
 let s: string = "x"
 let a: boolean = Besht.fs.isFile(p)
@@ -234,77 +234,77 @@ if (Besht.fs.isFile(p) && Besht.strings.isNonEmpty(s)) {
 }`)
 }
 
-func TestChecker_BeshtNamespaceErrors(t *testing.T) {
+func TestValidator_BeshtNamespaceErrors(t *testing.T) {
 	expectError(t, `let p: string = "/tmp"
 let ok: boolean = Besht.fs.unknown(p)`, `Besht.fs has no method "unknown"`)
 	expectError(t, `let ok: boolean = Besht.fs.isFile()`, `Besht.fs.isFile() takes 1 argument`)
 	expectError(t, `let ok: boolean = Besht.fs.isFile("/tmp", "extra")`, `Besht.fs.isFile() takes 1 argument`)
 }
 
-func TestChecker_BuiltinLen(t *testing.T) {
+func TestValidator_BuiltinLen(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a"]
 let n: number = files.length`)
 }
 
-func TestChecker_BuiltinHead(t *testing.T) {
+func TestValidator_BuiltinHead(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b"]
 let first: string = files[0]`)
 }
 
-func TestChecker_BuiltinTail(t *testing.T) {
+func TestValidator_BuiltinTail(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b"]
 let rest: list<string> = files.slice(1)`)
 }
 
-func TestChecker_BuiltinAppend(t *testing.T) {
+func TestValidator_BuiltinAppend(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a"]
 files = files.push("b")`)
 }
 
-func TestChecker_BuiltinContains(t *testing.T) {
+func TestValidator_BuiltinContains(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a"]
 if (files.includes("a")) {
     $("echo", "found")
 }`)
 }
 
-func TestChecker_BuiltinRangeValid(t *testing.T) {
+func TestValidator_BuiltinRangeValid(t *testing.T) {
 	mustCheck(t, `for (i in Besht.iter.range(1, 5)) {
     $("echo", "${i}")
 }`)
 }
 
-func TestChecker_ExitNoArg(t *testing.T) {
+func TestValidator_ExitNoArg(t *testing.T) {
 	mustCheck(t, `process.exit(0)`)
 }
 
-func TestChecker_ExitWithCode(t *testing.T) {
+func TestValidator_ExitWithCode(t *testing.T) {
 	mustCheck(t, `let code: number = 1
 process.exit(code)`)
 }
 
-func TestChecker_ShellExprReturnsString(t *testing.T) {
+func TestValidator_ShellExprReturnsString(t *testing.T) {
 	mustCheck(t, `let s: string = $("whoami")`)
 }
 
-func TestChecker_ShellExprDefinedVar(t *testing.T) {
+func TestValidator_ShellExprDefinedVar(t *testing.T) {
 	mustCheck(t, `let name: string = "world"
 let s: string = $("echo", "${name}")`)
 }
 
-func TestChecker_ShellExprPositionalParams(t *testing.T) {
+func TestValidator_ShellExprPositionalParams(t *testing.T) {
 	mustCheck(t, `let s: string = $("echo", "hello")`)
 }
 
-func TestChecker_ShellExprSpecialVars(t *testing.T) {
+func TestValidator_ShellExprSpecialVars(t *testing.T) {
 	mustCheck(t, `let s: string = $("echo", "hello")`)
 }
 
-func TestChecker_PipeExpr(t *testing.T) {
+func TestValidator_PipeExpr(t *testing.T) {
 	mustCheck(t, `let r: string = $("whoami").pipe($("tr", "-d", "\n"))`)
 }
 
-func TestChecker_NestedFunctions(t *testing.T) {
+func TestValidator_NestedFunctions(t *testing.T) {
 	mustCheck(t, `function outer(x: number): number {
     return x
 }
@@ -313,19 +313,19 @@ function wrapper(y: number): number {
 }`)
 }
 
-func TestChecker_TemplateLitKnownVar(t *testing.T) {
+func TestValidator_TemplateLitKnownVar(t *testing.T) {
 	mustCheck(t, "let name: string = \"Alice\"\nlet msg: string = `Hello, ${name}!`")
 }
 
-func TestChecker_StringLiteralNoInterpolation(t *testing.T) {
+func TestValidator_StringLiteralNoInterpolation(t *testing.T) {
 	mustCheck(t, `let msg: string = "Hello, ${literally_anything}!"`)
 }
 
-func TestChecker_ListLiteralConsistentTypes(t *testing.T) {
+func TestValidator_ListLiteralConsistentTypes(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b", "c"]`)
 }
 
-func TestChecker_SetAndNestedLists(t *testing.T) {
+func TestValidator_SetAndNestedLists(t *testing.T) {
 	mustCheck(t, "function f(factory: string[]): string {\n"+
 		"    const matrix: string[][] = factory.map(e => e.split(\"\") as string[])\n"+
 		"    const seen = new Set<string>()\n"+
@@ -339,30 +339,30 @@ func TestChecker_SetAndNestedLists(t *testing.T) {
 		"}")
 }
 
-func TestChecker_PropagateExpr(t *testing.T) {
+func TestValidator_PropagateExpr(t *testing.T) {
 	mustCheck(t, `function f(): string {
     let x: string = $("cat", "file")?
     return x
 }`)
 }
 
-func TestChecker_TernaryExpr(t *testing.T) {
+func TestValidator_TernaryExpr(t *testing.T) {
 	mustCheck(t, `let x: number = 10
 let y: number = 3
 let bigger: number = x > y ? x : y`)
 }
 
-func TestChecker_TernaryExprStringBranches(t *testing.T) {
+func TestValidator_TernaryExprStringBranches(t *testing.T) {
 	mustCheck(t, `let x: number = 10
 let label: string = x > 5 ? "big" : "small"`)
 }
 
-func TestChecker_NumberToStringMethod(t *testing.T) {
+func TestValidator_NumberToStringMethod(t *testing.T) {
 	mustCheck(t, `let n: number = 42
 let s: string = n.toString()`)
 }
 
-func TestChecker_PrimitiveToStringMethods(t *testing.T) {
+func TestValidator_PrimitiveToStringMethods(t *testing.T) {
 	mustCheck(t, `let s: string = "x"
 let out: string = s.toString()`)
 	mustCheck(t, `let b: boolean = true
@@ -374,7 +374,7 @@ let out: string = b.toString()`)
 }`)
 }
 
-func TestChecker_PrimitiveToStringRejectsArguments(t *testing.T) {
+func TestValidator_PrimitiveToStringRejectsArguments(t *testing.T) {
 	expectError(t, `let s: string = "x"
 let out: string = s.toString("bad")`, "toString() takes no arguments")
 	expectError(t, `let n: number = 42
@@ -388,17 +388,17 @@ let out: string = b.toString("bad")`, "toString() takes no arguments")
 }`, "toString() takes no arguments")
 }
 
-func TestChecker_NumberParseIntOneAndTwoArgs(t *testing.T) {
+func TestValidator_NumberParseIntOneAndTwoArgs(t *testing.T) {
 	mustCheck(t, `let n: number = Number.parseInt("42")`)
 	mustCheck(t, `let n: number = Number.parseInt("42", 10)`)
 }
 
-func TestChecker_NumberToFixedMethod(t *testing.T) {
+func TestValidator_NumberToFixedMethod(t *testing.T) {
 	mustCheck(t, `let pi: number = 3.14159
 let s: string = pi.toFixed(2)`)
 }
 
-func TestChecker_BreakInLoop(t *testing.T) {
+func TestValidator_BreakInLoop(t *testing.T) {
 	mustCheck(t, `let n: number = 5
 while (n > 0) {
     break
@@ -406,33 +406,33 @@ while (n > 0) {
 }`)
 }
 
-func TestChecker_ContinueInLoop(t *testing.T) {
+func TestValidator_ContinueInLoop(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b"]
 for (f in files) {
     continue
 }`)
 }
 
-func TestChecker_ConstDecl(t *testing.T) {
+func TestValidator_ConstDecl(t *testing.T) {
 	mustCheck(t, `const threshold: number = 90`)
 }
 
-func TestChecker_ProcessEnvDirect(t *testing.T) {
+func TestValidator_ProcessEnvDirect(t *testing.T) {
 	mustCheck(t, `let home: string = process.env.HOME`)
 }
 
-func TestChecker_ProcessEnvWithDefault(t *testing.T) {
+func TestValidator_ProcessEnvWithDefault(t *testing.T) {
 	mustCheck(t, `let port: string = process.env.PORT ?? "8080"`)
 }
 
-func TestChecker_FetchTextSlice(t *testing.T) {
+func TestValidator_FetchTextSlice(t *testing.T) {
 	mustCheck(t, `let url: string = "file:///tmp/data.txt"
 let body: string = fetch(url).text()
 let response = fetch(url)
 let body2: string = response.text()`)
 }
 
-func TestChecker_FetchRejectsDeferredSurface(t *testing.T) {
+func TestValidator_FetchRejectsDeferredSurface(t *testing.T) {
 	expectError(t, `let body = fetch("file:///tmp/data.txt", { method: "POST" }).text()`, "fetch() takes 1 URL argument")
 	expectError(t, `let response = fetch("file:///tmp/data.txt")
 let body = response.text("utf8")`, "FetchResponse.text() takes no arguments")
@@ -448,23 +448,23 @@ let headers = response.headers`, `FetchResponse has no property "headers"`)
 let body = response.body`, `FetchResponse has no property "body"`)
 }
 
-func TestChecker_PrintBuiltin(t *testing.T) {
+func TestValidator_PrintBuiltin(t *testing.T) {
 	mustCheck(t, `let msg: string = "hello"
 console.log(msg)`)
 }
 
-func TestChecker_IndexExpr(t *testing.T) {
+func TestValidator_IndexExpr(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b", "c"]
 let first: string = files[0]`)
 }
 
-func TestChecker_IndexExprVariable(t *testing.T) {
+func TestValidator_IndexExprVariable(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b", "c"]
 let i: number = 1
 let item: string = files[i]`)
 }
 
-func TestChecker_SetAndNestedListIndex(t *testing.T) {
+func TestValidator_SetAndNestedListIndex(t *testing.T) {
 	mustCheck(t, `type Factory = string[]
 function run(factory: Factory): string {
     const matrix: string[][] = factory.map(e => e.split("") as string[])
@@ -478,73 +478,73 @@ function run(factory: Factory): string {
 }`)
 }
 
-func TestChecker_SetAddValuePositionIsNotTypeChecked(t *testing.T) {
+func TestValidator_SetAddValuePositionIsNotTypeChecked(t *testing.T) {
 	mustCheck(t, `const seen = new Set<string>()
 let x: Set<string> = seen.add("a")`)
 }
 
-func TestChecker_SetConstructorRejectsRuntimeArgs(t *testing.T) {
+func TestValidator_SetConstructorRejectsRuntimeArgs(t *testing.T) {
 	expectError(t, `const seen = new Set<string>("a")`, "Set constructor takes no runtime arguments")
 }
 
-func TestChecker_ToStringMethod(t *testing.T) {
+func TestValidator_ToStringMethod(t *testing.T) {
 	mustCheck(t, `let n: number = 42
 let s: string = n.toString()`)
 }
 
-func TestChecker_BooleanToStringMethod(t *testing.T) {
+func TestValidator_BooleanToStringMethod(t *testing.T) {
 	mustCheck(t, `let b: boolean = true
 let s: string = b.toString()`)
 }
 
-func TestChecker_IntBuiltin(t *testing.T) {
+func TestValidator_IntBuiltin(t *testing.T) {
 	mustCheck(t, `let s: string = "42"
 let n: number = Number.parseInt(s)`)
 }
 
-func TestChecker_ListConcatMethod(t *testing.T) {
+func TestValidator_ListConcatMethod(t *testing.T) {
 	mustCheck(t, `let a: list<string> = ["x"]
 let b: list<string> = ["y"]
 let c: list<string> = a.concat(b)`)
 }
 
-func TestChecker_ListUnshift(t *testing.T) {
+func TestValidator_ListUnshift(t *testing.T) {
 	mustCheck(t, `let items: string[] = ["b", "c"]
 let next: string[] = items.unshift("a")
 items.unshift("z")`)
 }
 
-func TestChecker_ListUnshiftRejectsBadArity(t *testing.T) {
+func TestValidator_ListUnshiftRejectsBadArity(t *testing.T) {
 	expectError(t, `let items: string[] = ["b", "c"]
 let next: string[] = items.unshift()`, "unshift() takes 1 argument")
 }
 
-func TestChecker_StringTrim(t *testing.T) {
+func TestValidator_StringTrim(t *testing.T) {
 	mustCheck(t, `let s: string = "  hello  "
 let t: string = s.trim()`)
 }
 
-func TestChecker_StringToUpperCase(t *testing.T) {
+func TestValidator_StringToUpperCase(t *testing.T) {
 	mustCheck(t, `let s: string = "hello"
 let u: string = s.toUpperCase()`)
 }
 
-func TestChecker_StringToLowerCase(t *testing.T) {
+func TestValidator_StringToLowerCase(t *testing.T) {
 	mustCheck(t, `let s: string = "HELLO"
 let l: string = s.toLowerCase()`)
 }
 
-func TestChecker_StringSplit(t *testing.T) {
+func TestValidator_StringSplit(t *testing.T) {
 	mustCheck(t, `let s: string = "a,b,c"
 let parts: list<string> = s.split(",")`)
 }
 
-func TestChecker_StringIncludes(t *testing.T) {
+func TestValidator_StringIncludes(t *testing.T) {
 	mustCheck(t, `let s: string = "hello world"
 if (s.includes("world")) { $("echo", "yes") }`)
 }
 
-func TestChecker_StringSearchOptionalPositionArgs(t *testing.T) {
+func TestValidator_StringSearchOptionalPositionArgs(t *testing.T) {
 	mustCheck(t, `let s: string = "hello hello"
 let i: number = s.indexOf("lo", 4)
 let last: number = s.lastIndexOf("lo", 7)
@@ -553,83 +553,83 @@ let starts: boolean = s.startsWith("lo", 3)
 let ends: boolean = s.endsWith("hel", 3)`)
 }
 
-func TestChecker_StringStartsWith(t *testing.T) {
+func TestValidator_StringStartsWith(t *testing.T) {
 	mustCheck(t, `let s: string = "hello"
 if (s.startsWith("hel")) { $("echo", "yes") }`)
 }
 
-func TestChecker_StringEndsWith(t *testing.T) {
+func TestValidator_StringEndsWith(t *testing.T) {
 	mustCheck(t, `let s: string = "hello"
 if (s.endsWith("llo")) { $("echo", "yes") }`)
 }
 
-func TestChecker_StringReplace(t *testing.T) {
+func TestValidator_StringReplace(t *testing.T) {
 	mustCheck(t, `let s: string = "hello world"
 let r: string = s.replace("world", "besht")`)
 }
 
-func TestChecker_StringReplaceAll(t *testing.T) {
+func TestValidator_StringReplaceAll(t *testing.T) {
 	mustCheck(t, `let s: string = "aaa"
 let r: string = s.replaceAll("a", "b")`)
 }
 
-func TestChecker_StringLength(t *testing.T) {
+func TestValidator_StringLength(t *testing.T) {
 	mustCheck(t, `let s: string = "hello"
 let n: number = s.length`)
 }
 
-func TestChecker_ListPush(t *testing.T) {
+func TestValidator_ListPush(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a"]
 let l2: list<string> = l.push("b")`)
 }
 
-func TestChecker_ListPop(t *testing.T) {
+func TestValidator_ListPop(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b"]
 let l2: list<string> = l.pop()`)
 }
 
-func TestChecker_ListJoin(t *testing.T) {
+func TestValidator_ListJoin(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b", "c"]
 let s: string = l.join(", ")`)
 }
 
-func TestChecker_ListToString(t *testing.T) {
+func TestValidator_ListToString(t *testing.T) {
 	mustCheck(t, `let list: list<string> = ["a", "b", "c"]
 let s: string = list.toString()`)
 }
 
-func TestChecker_ListToStringRejectsArguments(t *testing.T) {
+func TestValidator_ListToStringRejectsArguments(t *testing.T) {
 	expectError(t, `let list: list<string> = ["a", "b"]
 let s: string = list.toString(",")`, "toString() takes no arguments")
 }
 
-func TestChecker_ListIncludes(t *testing.T) {
+func TestValidator_ListIncludes(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b"]
 if (l.includes("a")) { $("echo", "yes") }`)
 }
 
-func TestChecker_ListConcat(t *testing.T) {
+func TestValidator_ListConcat(t *testing.T) {
 	mustCheck(t, `let a: list<string> = ["x"]
 let b: list<string> = ["y"]
 let c: list<string> = a.concat(b)`)
 }
 
-func TestChecker_ListReverse(t *testing.T) {
+func TestValidator_ListReverse(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["c", "b", "a"]
 let r: list<string> = l.reverse()`)
 }
 
-func TestChecker_ListSlice(t *testing.T) {
+func TestValidator_ListSlice(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b", "c", "d"]
 let s: list<string> = l.slice(1, 3)`)
 }
 
-func TestChecker_ListLength(t *testing.T) {
+func TestValidator_ListLength(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b", "c"]
 let n: number = l.length`)
 }
 
-func TestChecker_NativeListAPIsReplaceGlobalListHelpers(t *testing.T) {
+func TestValidator_NativeListAPIsReplaceGlobalListHelpers(t *testing.T) {
 	mustCheck(t, `let files: list<string> = ["a", "b", "c"]
 let other: list<string> = ["d"]
 let count: number = files.length
@@ -640,86 +640,86 @@ let hasX: boolean = files.includes("x")
 let combined: list<string> = files.concat(other)`)
 }
 
-func TestChecker_CmdExprBasic(t *testing.T) {
+func TestValidator_CmdExprBasic(t *testing.T) {
 	mustCheck(t, `let u: string = $("whoami")`)
 }
 
-func TestChecker_CmdExprMultiArg(t *testing.T) {
+func TestValidator_CmdExprMultiArg(t *testing.T) {
 	mustCheck(t, `let b: string = $("git", "rev-parse", "--abbrev-ref", "HEAD")`)
 }
 
-func TestChecker_CmdExprRejectsMixedCommandNameSpread(t *testing.T) {
+func TestValidator_CmdExprRejectsMixedCommandNameSpread(t *testing.T) {
 	expectError(t, `let cmd: list<string> = ["echo"]
 $(...cmd, "extra")`, "command-name spread must be the only $() argument")
 }
 
-func TestChecker_CmdExprVarArg(t *testing.T) {
+func TestValidator_CmdExprVarArg(t *testing.T) {
 	mustCheck(t, `let path: string = "/tmp"
 let out: string = $("ls", path)`)
 }
 
-func TestChecker_CmdExprAssignToList(t *testing.T) {
+func TestValidator_CmdExprAssignToList(t *testing.T) {
 	mustCheck(t, `let lines: list<string> = $("find", ".", "-name", "*.log").readStdoutLines()`)
 }
 
-func TestChecker_CmdExprRun(t *testing.T) {
+func TestValidator_CmdExprRun(t *testing.T) {
 	mustCheck(t, `$("chmod", "+x", "script.sh")`)
 }
 
-func TestChecker_CmdExprPipe(t *testing.T) {
+func TestValidator_CmdExprPipe(t *testing.T) {
 	mustCheck(t, `let r: string = $("cat", "/etc/passwd").pipe($("grep", "root"))`)
 }
 
-func TestChecker_CmdExprPipeChain(t *testing.T) {
+func TestValidator_CmdExprPipeChain(t *testing.T) {
 	mustCheck(t, `let r: string = $("cat", "/etc/passwd")
     .pipe($("grep", "root"))
     .pipe($("cut", "-d:", "-f1"))`)
 }
 
-func TestChecker_CmdExprStdoutRedirect(t *testing.T) {
+func TestValidator_CmdExprStdoutRedirect(t *testing.T) {
 	mustCheck(t, `$("make", "build").stdout("/tmp/build.log")`)
 }
 
-func TestChecker_CmdExprStdoutAppend(t *testing.T) {
+func TestValidator_CmdExprStdoutAppend(t *testing.T) {
 	mustCheck(t, `$("echo", "line").stdout("/tmp/out.txt", "append")`)
 }
 
-func TestChecker_CmdExprStderrNull(t *testing.T) {
+func TestValidator_CmdExprStderrNull(t *testing.T) {
 	mustCheck(t, `$("make", "build").stderr("null")`)
 }
 
-func TestChecker_CmdExprStderrAnd1(t *testing.T) {
+func TestValidator_CmdExprStderrAnd1(t *testing.T) {
 	mustCheck(t, `$("make", "build").stderr("&1")`)
 }
 
-func TestChecker_CmdExprWorkdir(t *testing.T) {
+func TestValidator_CmdExprWorkdir(t *testing.T) {
 	mustCheck(t, `$("ls").workdir("/")`)
 }
 
-func TestChecker_CmdExprWorkdirRejectsArity(t *testing.T) {
+func TestValidator_CmdExprWorkdirRejectsArity(t *testing.T) {
 	expectError(t, `$("ls").workdir()`, "workdir() takes 1 argument")
 	expectError(t, `$("ls").workdir("/", "/tmp")`, "workdir() takes 1 argument")
 }
 
-func TestChecker_CmdExprStderrCapture(t *testing.T) {
+func TestValidator_CmdExprStderrCapture(t *testing.T) {
 	mustCheck(t, `let errs: string = $("make").readStderr()`)
 }
 
-func TestChecker_CmdExprLines(t *testing.T) {
+func TestValidator_CmdExprLines(t *testing.T) {
 	mustCheck(t, `let ls: list<string> = $("ls", "/tmp").readStdoutLines()`)
 }
 
-func TestChecker_CmdExprText(t *testing.T) {
+func TestValidator_CmdExprText(t *testing.T) {
 	mustCheck(t, `let s: string = $("whoami").readStdout()`)
 }
 
-func TestChecker_CmdExprInFor(t *testing.T) {
+func TestValidator_CmdExprInFor(t *testing.T) {
 	mustCheck(t, `for (f in $("find", ".", "-name", "*.log").readStdoutLines()) {
     $("echo", f)
 }`)
 }
 
-func TestChecker_CmdExprInTryCatch(t *testing.T) {
+func TestValidator_CmdExprInTryCatch(t *testing.T) {
 	mustCheck(t, `try {
     $("rsync", "-az", "src", "dest")
 } catch (code: status) {
@@ -727,37 +727,37 @@ func TestChecker_CmdExprInTryCatch(t *testing.T) {
 }`)
 }
 
-func TestChecker_CmdExprPropagate(t *testing.T) {
+func TestValidator_CmdExprPropagate(t *testing.T) {
 	mustCheck(t, `function f(): string {
     let c: string = $("cat", "file")?
     return c
 }`)
 }
 
-func TestChecker_CmdExprEmptyError(t *testing.T) {
+func TestValidator_CmdExprEmptyError(t *testing.T) {
 	prog, parseErr := parser.Parse(`let x: string = $()`, "test.bsh")
 	if parseErr != nil {
 		return
 	}
-	chk := checker.New()
-	err := chk.Check(prog)
+	validator := semantics.New()
+	err := validator.Validate(prog)
 	if err == nil {
 		t.Fatal("expected error for empty $(), got nil")
 	}
 }
 
-func TestChecker_CmdExprStringConcat(t *testing.T) {
+func TestValidator_CmdExprStringConcat(t *testing.T) {
 	mustCheck(t, `let name: string = "world"
 $("echo", "Hello " + name)`)
 }
 
-func TestChecker_CStyleForBareAssign(t *testing.T) {
+func TestValidator_CStyleForBareAssign(t *testing.T) {
 	mustCheck(t, `for (i = 0; i < 3; i++) {
     $("echo", "x")
 }`)
 }
 
-func TestChecker_CStyleForHelloStyle(t *testing.T) {
+func TestValidator_CStyleForHelloStyle(t *testing.T) {
 	mustCheck(t, `function greet(name: string, times: number): string {
     let result: string = ""
     for (i = 0; i < times; i++) {
@@ -767,7 +767,7 @@ func TestChecker_CStyleForHelloStyle(t *testing.T) {
 }`)
 }
 
-func TestChecker_MathMethods(t *testing.T) {
+func TestValidator_MathMethods(t *testing.T) {
 	mustCheck(t, `let a: number = 3
 let b: number = 4
 let mn: number = Math.min(a, b)
@@ -780,7 +780,7 @@ let pw: number = Math.pow(2, 8)
 let sq: number = Math.sqrt(16)`)
 }
 
-func TestChecker_FirstPureJSCompatibleAPIBatchValid(t *testing.T) {
+func TestValidator_FirstPureJSCompatibleAPIBatchValid(t *testing.T) {
 	tests := []struct {
 		name string
 		src  string
@@ -832,7 +832,7 @@ let json: string = JSON.stringify(user)`},
 	}
 }
 
-func TestChecker_FirstPureJSCompatibleAPIBatchRejectsBadCalls(t *testing.T) {
+func TestValidator_FirstPureJSCompatibleAPIBatchRejectsBadCalls(t *testing.T) {
 	tests := []struct {
 		name     string
 		src      string
@@ -896,12 +896,12 @@ let result = l.forEach(x => console.log(x))`, "forEach() must be used as a state
 	}
 }
 
-func TestChecker_MathMethodIgnoresArgumentTypes(t *testing.T) {
+func TestValidator_MathMethodIgnoresArgumentTypes(t *testing.T) {
 	mustCheck(t, `let s: string = "x"
 let n: number = Math.abs(s)`)
 }
 
-func TestChecker_ListForEach(t *testing.T) {
+func TestValidator_ListForEach(t *testing.T) {
 	mustCheck(t, `let l: list<string> = ["a", "b"]
 l.forEach((item, index) => console.log(index.toString() + ":" + item))
 l.forEach(item => {
@@ -909,23 +909,23 @@ l.forEach(item => {
 })`)
 }
 
-func TestChecker_CmdExprEnv(t *testing.T) {
+func TestValidator_CmdExprEnv(t *testing.T) {
 	mustCheck(t, `$("env").env("FOO", "bar")`)
 }
 
-func TestChecker_CmdExprEnvRejectsDynamicName(t *testing.T) {
+func TestValidator_CmdExprEnvRejectsDynamicName(t *testing.T) {
 	expectError(t, `let name: string = "FOO"
 $("env").env(name, "bar")`, "command env name must be a string literal")
 }
 
-func TestChecker_CmdExprEnvRejectsInvalidName(t *testing.T) {
+func TestValidator_CmdExprEnvRejectsInvalidName(t *testing.T) {
 	invalid := []string{"FOO=bar", "FOO;touch", "FOO BAR", "$(FOO)", "`FOO`", "1FOO"}
 	for _, name := range invalid {
 		expectError(t, `$("env").env("`+name+`", "bar")`, "invalid command env name")
 	}
 }
 
-func TestChecker_ArrowFunctionValues(t *testing.T) {
+func TestValidator_ArrowFunctionValues(t *testing.T) {
 	mustCheck(t, `let cb = (x: string): string => x`)
 	mustCheck(t, `let cb = (x: string) => x + "!"
 console.log(cb("a"))`)
@@ -934,36 +934,36 @@ let items: string[] = ["a"]
 let mapped = items.map(cb)`)
 }
 
-func TestChecker_ListMapArrow(t *testing.T) {
+func TestValidator_ListMapArrow(t *testing.T) {
 	mustCheck(t, `let items: list<string> = ["a", "b"]
 let mapped: list<string> = items.map(x => x + "!")`)
 }
 
-func TestChecker_ListFilterArrow(t *testing.T) {
+func TestValidator_ListFilterArrow(t *testing.T) {
 	mustCheck(t, `let items: list<string> = ["a", "b"]
 let picked: list<string> = items.filter((x: string) => x.startsWith("a"))`)
 }
 
-func TestChecker_ListFilterAcceptsTruthyCallback(t *testing.T) {
+func TestValidator_ListFilterAcceptsTruthyCallback(t *testing.T) {
 	mustCheck(t, `let items: number[] = [1, 2]
 let picked: number[] = items.filter(x => x % 2)`)
 }
 
-func TestChecker_ListPredicateCallbacks(t *testing.T) {
+func TestValidator_ListPredicateCallbacks(t *testing.T) {
 	mustCheck(t, `let items: string[] = ["alpha", "beta"]
 let hasAlpha: boolean = items.some((item: string) => item.startsWith("a"))
 let allIndexed: boolean = items.every((item, i: number) => i >= 0)
 let found: string = items.find((item, i) => i == 1)`)
 }
 
-func TestChecker_ListPredicateCallbacksRejectInvalidArgs(t *testing.T) {
+func TestValidator_ListPredicateCallbacksRejectInvalidArgs(t *testing.T) {
 	tests := []struct {
 		name     string
 		src      string
 		fragment string
 	}{
 		{"some non-arrow", `let items: string[] = ["a"]
-let ok: boolean = items.some("a")`, "list callback must be an arrow expression"},
+let ok: boolean = items.some("a")`, "array callback must be an arrow expression or stored callback"},
 		{"every callback arity", `let items: string[] = ["a"]
 let ok: boolean = items.every((a, b, c) => true)`, "arrow callbacks take 1 or 2 parameters"},
 		{"find wrong arity", `let items: string[] = ["a"]
@@ -978,19 +978,19 @@ let ok: boolean = items.some(x => { return true })`, "some() predicate callback 
 	}
 }
 
-func TestChecker_ListReduceAsListThenJoin(t *testing.T) {
+func TestValidator_ListReduceAsListThenJoin(t *testing.T) {
 	mustCheck(t, `let nums: number[] = [1, 2]
 let lines: string = nums.reduce((acc, n) => [...acc, "x"], [] as string[]).join("\n")`)
 }
 
-func TestChecker_ListReduceBlockReturn(t *testing.T) {
+func TestValidator_ListReduceBlockReturn(t *testing.T) {
 	mustCheck(t, `let nums: number[] = [1, 2]
 let product: number = nums.reduce((acc, n) => {
     return acc * n
 }, 1)`)
 }
 
-func TestChecker_ListReduceObjectBlockReturn(t *testing.T) {
+func TestValidator_ListReduceObjectBlockReturn(t *testing.T) {
 	mustCheck(t, `let words: string[] = ["apple"]
 let counts = words.reduce((acc, word) => {
     acc[word] = (acc[word] || 0) + 1
@@ -998,13 +998,13 @@ let counts = words.reduce((acc, word) => {
 }, {})`)
 }
 
-func TestChecker_LogicalOrValueType(t *testing.T) {
+func TestValidator_LogicalOrValueType(t *testing.T) {
 	mustCheck(t, `let counts = {}
 let word = "apple"
 counts[word] = (counts[word] || 0) + 1`)
 }
 
-func TestChecker_ClassDeclValid(t *testing.T) {
+func TestValidator_ClassDeclValid(t *testing.T) {
 	mustCheck(t, `class User {
     name: string
     constructor(name: string) {
@@ -1017,7 +1017,7 @@ func TestChecker_ClassDeclValid(t *testing.T) {
 }`)
 }
 
-func TestChecker_ClassAccessorsValid(t *testing.T) {
+func TestValidator_ClassAccessorsValid(t *testing.T) {
 	mustCheck(t, `class User {
 	name: string
 	constructor(name: string) { this.name = name }
@@ -1030,7 +1030,7 @@ func TestChecker_ClassAccessorsValid(t *testing.T) {
 let count: number = Metrics.count`)
 }
 
-func TestChecker_ClassAccessorValidation(t *testing.T) {
+func TestValidator_ClassAccessorValidation(t *testing.T) {
 	expectError(t, `class Circle {
     get area(value: number): number { return value }
 }`, `getter "area" must not take parameters`)
@@ -1064,7 +1064,7 @@ func TestChecker_ClassAccessorValidation(t *testing.T) {
 }`, `class method "next" returns a value and cannot assign to this properties`)
 }
 
-func TestChecker_TypeScriptClassModifiersFindIndexAndDestructure(t *testing.T) {
+func TestValidator_TypeScriptClassModifiersFindIndexAndDestructure(t *testing.T) {
 	mustCheck(t, `function run(board: string): number {
     class Game {
         readonly matrix: string[][]
@@ -1082,7 +1082,7 @@ func TestChecker_TypeScriptClassModifiersFindIndexAndDestructure(t *testing.T) {
 }`)
 }
 
-func TestChecker_ArrayFromMapIndexAndBlockReturn(t *testing.T) {
+func TestValidator_ArrayFromMapIndexAndBlockReturn(t *testing.T) {
 	mustCheck(t, `let height: number = 3
 let count: number = 0
 let rows: string[] = Array.from({ length: height }).map((_, i: number) => {
@@ -1091,7 +1091,7 @@ let rows: string[] = Array.from({ length: height }).map((_, i: number) => {
 })`)
 }
 
-func TestChecker_ArrayFromLengthShorthand(t *testing.T) {
+func TestValidator_ArrayFromLengthShorthand(t *testing.T) {
 	mustCheck(t, `let length: number = 2
 let values: number[] = Array.from({ length })`)
 }

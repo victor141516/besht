@@ -133,7 +133,7 @@ func TestParser_AsTypeAssertion(t *testing.T) {
 		t.Fatalf("value: expected *ast.AsExpr, got %T", decl.Value)
 	}
 	if asExpr.Type.Kind != ast.TypeList || asExpr.Type.Elem.Kind != ast.TypeString {
-		t.Fatalf("type: got %v, want list<string>", asExpr.Type)
+		t.Fatalf("type: got %v, want Array<string>", asExpr.Type)
 	}
 }
 
@@ -146,7 +146,7 @@ func TestParser_SetTypeArgsAndBlocklessIf(t *testing.T) {
 }`)
 	fn := prog.Statements[0].(*ast.FnDecl)
 	if fn.Params[0].Type.Kind != ast.TypeList || fn.Params[0].Type.Elem.Kind != ast.TypeString {
-		t.Fatalf("param type: got %v, want list<string>", fn.Params[0].Type)
+		t.Fatalf("param type: got %v, want Array<string>", fn.Params[0].Type)
 	}
 	letDecl := fn.Body.Statements[0].(*ast.LetDecl)
 	newExpr, ok := letDecl.Value.(*ast.NewExpr)
@@ -166,7 +166,7 @@ func TestParser_NestedArrayType(t *testing.T) {
 	prog := mustParse(t, `let matrix: string[][] = [["a"]]`)
 	decl := prog.Statements[0].(*ast.LetDecl)
 	if decl.TypeAnnot.Kind != ast.TypeList || decl.TypeAnnot.Elem.Kind != ast.TypeList || decl.TypeAnnot.Elem.Elem.Kind != ast.TypeString {
-		t.Fatalf("type: got %v, want list<list<string>>", decl.TypeAnnot)
+		t.Fatalf("type: got %v, want Array<Array<string>>", decl.TypeAnnot)
 	}
 }
 
@@ -194,7 +194,7 @@ function run(factory: Factory): string {
 }`)
 	fn := prog.Statements[1].(*ast.FnDecl)
 	if fn.Params[0].Type.Kind != ast.TypeList || fn.Params[0].Type.Elem.Kind != ast.TypeString {
-		t.Fatalf("alias param type: got %v, want list<string>", fn.Params[0].Type)
+		t.Fatalf("alias param type: got %v, want Array<string>", fn.Params[0].Type)
 	}
 	ifStmt := fn.Body.Statements[1].(*ast.IfStmt)
 	if len(ifStmt.Then.Statements) != 1 || len(ifStmt.Else.Statements) != 1 {

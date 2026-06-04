@@ -1,4 +1,4 @@
-package checker
+package semantics
 
 import (
 	"fmt"
@@ -6,12 +6,12 @@ import (
 	"github.com/victor141516/besht/internal/ast"
 )
 
-type CheckError struct {
+type SemanticError struct {
 	Pos     ast.Pos
 	Message string
 }
 
-func (e *CheckError) Error() string {
+func (e *SemanticError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Pos, e.Message)
 }
 
@@ -45,7 +45,7 @@ func (s *Scope) lookup(name string) (*ast.Type, bool) {
 	return nil, false
 }
 
-type Checker struct {
+type Validator struct {
 	fns        map[string]*FnSig
 	scope      *Scope
 	inFunction bool
@@ -54,30 +54,30 @@ type Checker struct {
 	consts     map[string]bool
 }
 
-func New() *Checker {
-	return &Checker{
+func New() *Validator {
+	return &Validator{
 		fns:    make(map[string]*FnSig),
 		scope:  newScope(nil),
 		consts: make(map[string]bool),
 	}
 }
 
-func (c *Checker) RegisterFn(name string, sig *FnSig) {
+func (c *Validator) RegisterFn(name string, sig *FnSig) {
 	c.fns[name] = sig
 }
 
-func (c *Checker) RegisterUncheckedFunction(name string) {
+func (c *Validator) RegisterUncheckedFunction(name string) {
 	c.RegisterFn(name, &FnSig{ReturnType: &ast.Type{Kind: ast.TypeString}, VarArgs: true})
 }
 
-func (c *Checker) RegisterVar(name string, typ *ast.Type) {
+func (c *Validator) RegisterVar(name string, typ *ast.Type) {
 	if typ == nil {
 		typ = &ast.Type{Kind: ast.TypeString}
 	}
 	c.scope.define(name, typ)
 }
 
-func (c *Checker) Check(prog *ast.Program) error {
+func (c *Validator) Validate(prog *ast.Program) error {
 	collectFnSigs(prog.Statements, c.fns)
 	c.predeclareTopLevel(prog.Statements)
 	if err := c.checkSemanticStmts(prog.Statements); err != nil {
@@ -96,7 +96,7 @@ func (c *Checker) Check(prog *ast.Program) error {
 	return nil
 }
 
-func (c *Checker) semanticVarTypes() map[string]*ast.Type {
+func (c *Validator) semanticVarTypes() map[string]*ast.Type {
 	out := make(map[string]*ast.Type)
 	for scope := c.scope; scope != nil; scope = scope.parent {
 		for name, typ := range scope.vars {
@@ -108,7 +108,7 @@ func (c *Checker) semanticVarTypes() map[string]*ast.Type {
 	return out
 }
 
-func (c *Checker) predeclareTopLevel(stmts []ast.Statement) {
+func (c *Validator) predeclareTopLevel(stmts []ast.Statement) {
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.LetDecl:
@@ -133,7 +133,7 @@ func (c *Checker) predeclareTopLevel(stmts []ast.Statement) {
 	}
 }
 
-func (c *Checker) checkSemanticStmts(stmts []ast.Statement) error {
+func (c *Validator) checkSemanticStmts(stmts []ast.Statement) error {
 	for _, stmt := range stmts {
 		if err := c.checkSemanticStmt(stmt); err != nil {
 			return err
@@ -142,7 +142,7 @@ func (c *Checker) checkSemanticStmts(stmts []ast.Statement) error {
 	return nil
 }
 
-func (c *Checker) checkSemanticBlock(block *ast.Block) error {
+func (c *Validator) checkSemanticBlock(block *ast.Block) error {
 	if block == nil {
 		return nil
 	}
@@ -152,18 +152,18 @@ func (c *Checker) checkSemanticBlock(block *ast.Block) error {
 	return c.checkSemanticStmts(block.Statements)
 }
 
-func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
+func (c *Validator) checkSemanticStmt(stmt ast.Statement) error {
 	switch s := stmt.(type) {
 	case nil, *ast.ImportDecl, *ast.DeclareStmt, *ast.DeclareFnStmt:
 		return nil
 	case *ast.BreakStmt:
 		if !c.inLoop && !c.inCallback {
-			return &CheckError{Pos: s.Pos, Message: "'break' outside of loop"}
+			return &SemanticError{Pos: s.Pos, Message: "'break' outside of loop"}
 		}
 		return nil
 	case *ast.ContinueStmt:
 		if !c.inLoop && !c.inCallback {
-			return &CheckError{Pos: s.Pos, Message: "'continue' outside of loop"}
+			return &SemanticError{Pos: s.Pos, Message: "'continue' outside of loop"}
 		}
 		return nil
 	case *ast.LetDecl:
@@ -190,18 +190,18 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 		}
 	case *ast.Assignment:
 		if c.consts[s.Name] {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Name)}
+			return &SemanticError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Name)}
 		}
 		if _, ok := c.scope.lookup(s.Name); !ok {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
+			return &SemanticError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
 		}
 		return c.checkSemanticExpr(s.Value)
 	case *ast.IndexAssignStmt:
 		if c.consts[s.Name] {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Name)}
+			return &SemanticError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Name)}
 		}
 		if _, ok := c.scope.lookup(s.Name); !ok {
-			return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
+			return &SemanticError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Name)}
 		}
 		if err := c.checkSemanticExpr(s.Index); err != nil {
 			return err
@@ -210,10 +210,10 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 	case *ast.PropertyAssignStmt:
 		if s.Object != "this" {
 			if c.consts[s.Object] {
-				return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Object)}
+				return &SemanticError{Pos: s.Pos, Message: fmt.Sprintf("cannot assign to const %q", s.Object)}
 			}
 			if _, ok := c.scope.lookup(s.Object); !ok {
-				return &CheckError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Object)}
+				return &SemanticError{Pos: s.Pos, Message: fmt.Sprintf("variable %q not declared", s.Object)}
 			}
 		}
 		return c.checkSemanticExpr(s.Value)
@@ -247,20 +247,20 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 		}
 		for _, accessor := range s.Accessors {
 			if fieldNames[accessor.Name] {
-				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("class accessor %q conflicts with field", accessor.Name)}
+				return &SemanticError{Pos: accessor.Pos, Message: fmt.Sprintf("class accessor %q conflicts with field", accessor.Name)}
 			}
 			if accessorNames[accessor.Name] == nil {
 				accessorNames[accessor.Name] = make(map[ast.ClassAccessorKind]bool)
 			}
 			if accessorNames[accessor.Name][accessor.Kind] {
-				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("duplicate %s accessor %q", accessor.Kind, accessor.Name)}
+				return &SemanticError{Pos: accessor.Pos, Message: fmt.Sprintf("duplicate %s accessor %q", accessor.Kind, accessor.Name)}
 			}
 			accessorNames[accessor.Name][accessor.Kind] = true
 		}
 		for _, method := range s.Methods {
 			for name := range accessorNames {
 				if method.Name == "get_"+name || method.Name == "set_"+name {
-					return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("method %q conflicts with accessor %q", method.Name, name)}
+					return &SemanticError{Pos: method.Pos, Message: fmt.Sprintf("method %q conflicts with accessor %q", method.Name, name)}
 				}
 			}
 		}
@@ -272,7 +272,7 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 		for i := range s.Methods {
 			method := &s.Methods[i]
 			if semanticBodyReturnsValue(method.Body.Statements) && classBodyMutatesThis(method.Body.Statements) {
-				return &CheckError{Pos: method.Pos, Message: fmt.Sprintf("class method %q returns a value and cannot assign to this properties", method.Name)}
+				return &SemanticError{Pos: method.Pos, Message: fmt.Sprintf("class method %q returns a value and cannot assign to this properties", method.Name)}
 			}
 			if err := c.checkSemanticClassMethod(&s.Methods[i], false); err != nil {
 				return err
@@ -281,16 +281,16 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 		for i := range s.Accessors {
 			accessor := &s.Accessors[i]
 			if accessor.Kind == ast.AccessorGet && len(accessor.Params) != 0 {
-				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not take parameters", accessor.Name)}
+				return &SemanticError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not take parameters", accessor.Name)}
 			}
 			if accessor.Kind == ast.AccessorSet && len(accessor.Params) != 1 {
-				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must take exactly one parameter", accessor.Name)}
+				return &SemanticError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must take exactly one parameter", accessor.Name)}
 			}
 			if accessor.Kind == ast.AccessorSet && accessor.ReturnType != nil && accessor.ReturnType.Kind != ast.TypeVoid {
-				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must not declare a return type", accessor.Name)}
+				return &SemanticError{Pos: accessor.Pos, Message: fmt.Sprintf("setter %q must not declare a return type", accessor.Name)}
 			}
 			if accessor.Kind == ast.AccessorGet && classBodyMutatesThis(accessor.Body.Statements) {
-				return &CheckError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not assign to this properties", accessor.Name)}
+				return &SemanticError{Pos: accessor.Pos, Message: fmt.Sprintf("getter %q must not assign to this properties", accessor.Name)}
 			}
 			method := &ast.ClassMethod{Pos: accessor.Pos, Name: string(accessor.Kind) + "_" + accessor.Name, IsStatic: accessor.IsStatic, Params: accessor.Params, Body: accessor.Body}
 			if err := c.checkSemanticClassMethod(method, false); err != nil {
@@ -392,7 +392,7 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 		}
 	case *ast.ReturnStmt:
 		if !c.inFunction && !c.inCallback {
-			return &CheckError{Pos: s.Pos, Message: "'return' outside of function"}
+			return &SemanticError{Pos: s.Pos, Message: "'return' outside of function"}
 		}
 		return c.checkSemanticExpr(s.Value)
 	case *ast.ExitStmt:
@@ -403,7 +403,7 @@ func (c *Checker) checkSemanticStmt(stmt ast.Statement) error {
 	return nil
 }
 
-func (c *Checker) checkSemanticClassMethod(method *ast.ClassMethod, isConstructor bool) error {
+func (c *Validator) checkSemanticClassMethod(method *ast.ClassMethod, isConstructor bool) error {
 	prev := c.scope
 	prevInFunction := c.inFunction
 	c.scope = newScope(prev)
@@ -420,7 +420,7 @@ func (c *Checker) checkSemanticClassMethod(method *ast.ClassMethod, isConstructo
 	return err
 }
 
-func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
+func (c *Validator) checkSemanticExpr(expr ast.Expression) error {
 	if expr == nil {
 		return nil
 	}
@@ -435,7 +435,7 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 			return nil
 		}
 		if _, ok := c.scope.lookup(e.Name); !ok {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("variable %q not declared", e.Name)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("variable %q not declared", e.Name)}
 		}
 	case *ast.TemplateLit:
 		for _, part := range e.Exprs {
@@ -457,7 +457,7 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 		}
 	case *ast.NewExpr:
 		if e.ClassName == "Set" && len(e.Args) != 0 {
-			return &CheckError{Pos: e.Pos, Message: "Set constructor takes no runtime arguments"}
+			return &SemanticError{Pos: e.Pos, Message: "Set constructor takes no runtime arguments"}
 		}
 		for _, arg := range e.Args {
 			if err := c.checkSemanticExpr(arg); err != nil {
@@ -467,7 +467,7 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 	case *ast.FnCallExpr:
 		if _, ok := c.fns[e.Name]; !ok {
 			if _, ok := c.scope.lookup(e.Name); !ok {
-				return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("function %q not declared", e.Name)}
+				return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("function %q not declared", e.Name)}
 			}
 		}
 		for _, arg := range e.Args {
@@ -507,18 +507,18 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 			switch ident.Name {
 			case "process":
 				if e.Property != "env" {
-					return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no property %q", e.Property)}
+					return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("process has no property %q", e.Property)}
 				}
 			case "Besht":
 				switch e.Property {
 				case "fs", "strings", "args", "iter":
 				default:
-					return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht has no property %q", e.Property)}
+					return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("Besht has no property %q", e.Property)}
 				}
 			}
 		}
 		if recvType := c.semanticExprType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeFetchResponse {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", e.Property)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no property %q; status, ok, headers, json(), and body are not supported yet", e.Property)}
 		}
 		return nil
 	case *ast.IndexExpr:
@@ -543,15 +543,15 @@ func (c *Checker) checkSemanticExpr(expr ast.Expression) error {
 		return c.checkSemanticExpr(e.Expr)
 	case *ast.UpdateExpr:
 		if c.consts[e.Name] {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("cannot assign to const %q", e.Name)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("cannot assign to const %q", e.Name)}
 		}
 		if _, ok := c.scope.lookup(e.Name); !ok {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("variable %q not declared", e.Name)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("variable %q not declared", e.Name)}
 		}
 	case *ast.CmdExpr:
 		for i, arg := range e.Args {
 			if spread, ok := arg.(*ast.SpreadExpr); ok && i == 0 && len(e.Args) > 1 {
-				return &CheckError{Pos: spread.Pos, Message: "command-name spread must be the only $() argument"}
+				return &SemanticError{Pos: spread.Pos, Message: "command-name spread must be the only $() argument"}
 			}
 		}
 		for _, arg := range e.Args {
@@ -607,52 +607,52 @@ func isSemanticGlobalIdent(name string) bool {
 	return false
 }
 
-func (c *Checker) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
+func (c *Validator) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 	switch e.Name {
 	case "fetch":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
+			return &SemanticError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
 		}
 	case "Boolean", "Array.isArray":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes 1 argument", e.Name)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes 1 argument", e.Name)}
 		}
 	case "Number.parseInt", "Number.parseFloat":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 or 2 arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 1 or 2 arguments"}
 		}
 	case "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
 		}
 	case "Array.from":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "Array.from() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: "Array.from() takes 1 argument"}
 		}
 	case "Object.keys", "Object.values", "Object.entries":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
 		}
 	case "Object.hasOwn":
 		if len(e.Args) != 2 {
-			return &CheckError{Pos: e.Pos, Message: "Object.hasOwn() takes 2 arguments"}
+			return &SemanticError{Pos: e.Pos, Message: "Object.hasOwn() takes 2 arguments"}
 		}
 	case "JSON.parse", "JSON.stringify":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
 		}
 	}
 	return nil
 }
 
-func (c *Checker) checkMethodArity(e *ast.MethodCallExpr) error {
+func (c *Validator) checkMethodArity(e *ast.MethodCallExpr) error {
 	if builtinName, ok := ast.BeshtMethodBuiltinName(e.Receiver, e.Method); ok {
 		want := 1
 		if builtinName == "Besht.iter.range" {
 			want = 2
 		}
 		if len(e.Args) != want {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("%s.%s() takes %d argument%s", beshtReceiverName(e.Receiver), e.Method, want, pluralSuffix(want))}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("%s.%s() takes %d argument%s", beshtReceiverName(e.Receiver), e.Method, want, pluralSuffix(want))}
 		}
 		return nil
 	}
@@ -660,37 +660,37 @@ func (c *Checker) checkMethodArity(e *ast.MethodCallExpr) error {
 		switch e.Method {
 		case "argv":
 			if len(e.Args) != 0 {
-				return &CheckError{Pos: e.Pos, Message: "Besht.args.argv() takes no arguments"}
+				return &SemanticError{Pos: e.Pos, Message: "Besht.args.argv() takes no arguments"}
 			}
 		case "positional":
 			if len(e.Args) != 1 {
-				return &CheckError{Pos: e.Pos, Message: "Besht.args.positional() takes 1 argument"}
+				return &SemanticError{Pos: e.Pos, Message: "Besht.args.positional() takes 1 argument"}
 			}
 		case "option":
 			if len(e.Args) < 1 || len(e.Args) > 2 {
-				return &CheckError{Pos: e.Pos, Message: "Besht.args.option() takes 1 or 2 arguments"}
+				return &SemanticError{Pos: e.Pos, Message: "Besht.args.option() takes 1 or 2 arguments"}
 			}
 		case "flag":
 			if len(e.Args) < 1 || len(e.Args) > 2 {
-				return &CheckError{Pos: e.Pos, Message: "Besht.args.flag() takes 1 or 2 arguments"}
+				return &SemanticError{Pos: e.Pos, Message: "Besht.args.flag() takes 1 or 2 arguments"}
 			}
 		default:
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.args has no method %q", e.Method)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("Besht.args has no method %q", e.Method)}
 		}
 		return nil
 	}
 	if group, ok := ast.BeshtGroupReceiver(e.Receiver); ok {
-		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Besht.%s has no method %q", group, e.Method)}
+		return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("Besht.%s has no method %q", group, e.Method)}
 	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
 		return c.checkMathMethodArity(e)
 	}
 	if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "process" {
 		if e.Method != "exit" {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("process has no method %q", e.Method)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("process has no method %q", e.Method)}
 		}
 		if len(e.Args) > 1 {
-			return &CheckError{Pos: e.Pos, Message: "process.exit() takes 0 or 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: "process.exit() takes 0 or 1 argument"}
 		}
 		return nil
 	}
@@ -703,19 +703,19 @@ func (c *Checker) checkMethodArity(e *ast.MethodCallExpr) error {
 		return c.checkCommandMethodArity(e)
 	case ast.TypeFetchResponse:
 		if e.Method != "text" {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("FetchResponse has no method %q; this fetch() slice only supports text()", e.Method)}
 		}
 		if len(e.Args) != 0 {
-			return &CheckError{Pos: e.Pos, Message: "FetchResponse.text() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: "FetchResponse.text() takes no arguments"}
 		}
 	case ast.TypeSet:
 		switch e.Method {
 		case "has", "add":
 			if len(e.Args) != 1 {
-				return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Set.%s() takes 1 argument", e.Method)}
+				return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("Set.%s() takes 1 argument", e.Method)}
 			}
 		default:
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Set has no method %q", e.Method)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("Set has no method %q", e.Method)}
 		}
 	case ast.TypeList:
 		return c.checkListMethodArity(e)
@@ -725,134 +725,134 @@ func (c *Checker) checkMethodArity(e *ast.MethodCallExpr) error {
 		return c.checkNumberMethodArity(e)
 	case ast.TypeBoolean, ast.TypeStatus:
 		if e.Method != "toString" {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
 		}
 		if len(e.Args) != 0 {
-			return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
 		}
 	}
 	return nil
 }
 
-func (c *Checker) checkMathMethodArity(e *ast.MethodCallExpr) error {
+func (c *Validator) checkMathMethodArity(e *ast.MethodCallExpr) error {
 	want := 1
 	switch e.Method {
 	case "min", "max", "pow":
 		want = 2
 	case "round", "floor", "ceil", "abs", "sqrt", "trunc", "sign":
 	default:
-		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Math has no method %q", e.Method)}
+		return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("Math has no method %q", e.Method)}
 	}
 	if len(e.Args) != want {
-		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("Math.%s() takes %d argument(s)", e.Method, want)}
+		return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("Math.%s() takes %d argument(s)", e.Method, want)}
 	}
 	return nil
 }
 
-func (c *Checker) checkCommandMethodArity(e *ast.MethodCallExpr) error {
+func (c *Validator) checkCommandMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
 	case "pipe":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "pipe() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: "pipe() takes 1 argument"}
 		}
 	case "run", "readStdout", "readStdoutLines", "readStderr", "exitCode", "clone":
 		if len(e.Args) != 0 {
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
 	case "stdout":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return &CheckError{Pos: e.Pos, Message: "stdout() takes 1 or 2 arguments: (path[, \"append\"])"}
+			return &SemanticError{Pos: e.Pos, Message: "stdout() takes 1 or 2 arguments: (path[, \"append\"])"}
 		}
 	case "stderr":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "stderr() takes 1 argument: \"null\", \"&1\", or a file path"}
+			return &SemanticError{Pos: e.Pos, Message: "stderr() takes 1 argument: \"null\", \"&1\", or a file path"}
 		}
 	case "workdir":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "workdir() takes 1 argument: path"}
+			return &SemanticError{Pos: e.Pos, Message: "workdir() takes 1 argument: path"}
 		}
 	case "env":
 		if len(e.Args) != 2 {
-			return &CheckError{Pos: e.Pos, Message: "env() on command takes 2 arguments: (name, value)"}
+			return &SemanticError{Pos: e.Pos, Message: "env() on command takes 2 arguments: (name, value)"}
 		}
 		name, err := commandEnvName(e.Args[0])
 		if err != nil {
-			return &CheckError{Pos: e.Pos, Message: err.Error()}
+			return &SemanticError{Pos: e.Pos, Message: err.Error()}
 		}
 		if !isShellIdentifier(name) {
-			return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("invalid command env name %q", name)}
+			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("invalid command env name %q", name)}
 		}
 	default:
-		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("command has no method %q (available: run, pipe, readStdout, readStdoutLines, readStderr, exitCode, stdout, stderr, workdir, env, clone)", e.Method)}
+		return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("command has no method %q (available: run, pipe, readStdout, readStdoutLines, readStderr, exitCode, stdout, stderr, workdir, env, clone)", e.Method)}
 	}
 	return nil
 }
 
-func (c *Checker) checkListMethodArity(e *ast.MethodCallExpr) error {
+func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
 	case "push", "unshift", "includes", "indexOf", "lastIndexOf", "join":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
 		}
 	case "pop", "shift", "reverse", "toString":
 		if len(e.Args) != 0 {
 			if e.Method == "toString" {
-				return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+				return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
 			}
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
 	case "concat":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "concat() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: "concat() takes 1 argument"}
 		}
 	case "slice":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return &CheckError{Pos: e.Pos, Message: "slice() takes 1 or 2 arguments"}
+			return &SemanticError{Pos: e.Pos, Message: "slice() takes 1 or 2 arguments"}
 		}
 	case "map", "filter", "some", "every", "find", "findIndex":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
 		}
 		arrow, ok := callbackArrowExpr(e.Args[0])
 		if !ok && !c.isCallbackValue(e.Args[0]) {
-			return &CheckError{Pos: e.Pos, Message: "list callback must be an arrow expression"}
+			return &SemanticError{Pos: e.Pos, Message: "array callback must be an arrow expression or stored callback"}
 		}
 		if ok {
 			if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
-				return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+				return &SemanticError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
 			}
 			if (e.Method == "some" || e.Method == "every" || e.Method == "find") && arrow.BlockBody != nil {
-				return &CheckError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
+				return &SemanticError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
 			}
 		}
 	case "forEach":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: "forEach() takes 1 arrow callback"}
+			return &SemanticError{Pos: e.Pos, Message: "forEach() takes 1 arrow callback"}
 		}
 		arrow, ok := callbackArrowExpr(e.Args[0])
 		if !ok && !c.isCallbackValue(e.Args[0]) {
-			return &CheckError{Pos: e.Pos, Message: "forEach() callback must be an arrow expression"}
+			return &SemanticError{Pos: e.Pos, Message: "forEach() callback must be an arrow expression"}
 		}
 		if ok {
 			if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
-				return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+				return &SemanticError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
 			}
 		}
 	case "reduce":
 		if len(e.Args) != 2 {
-			return &CheckError{Pos: e.Pos, Message: "reduce() takes 2 arguments: callback and initial value"}
+			return &SemanticError{Pos: e.Pos, Message: "reduce() takes 2 arguments: callback and initial value"}
 		}
 		arrow, ok := callbackArrowExpr(e.Args[0])
 		if !ok && !c.isCallbackValue(e.Args[0]) {
-			return &CheckError{Pos: e.Pos, Message: "reduce() callback must be an arrow expression"}
+			return &SemanticError{Pos: e.Pos, Message: "reduce() callback must be an arrow expression"}
 		}
 		if ok {
 			if len(arrow.Params) != 2 {
-				return &CheckError{Pos: arrow.Pos, Message: "reduce() callback must take 2 parameters (accumulator, current)"}
+				return &SemanticError{Pos: arrow.Pos, Message: "reduce() callback must take 2 parameters (accumulator, current)"}
 			}
 		}
 	default:
-		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("list has no method %q", e.Method)}
+		return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("array has no method %q", e.Method)}
 	}
 	return nil
 }
@@ -868,7 +868,7 @@ func callbackArrowExpr(expr ast.Expression) (*ast.ArrowExpr, bool) {
 	}
 }
 
-func (c *Checker) isCallbackValue(expr ast.Expression) bool {
+func (c *Validator) isCallbackValue(expr ast.Expression) bool {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
 		return c.isCallbackValue(e.Expr)
@@ -884,54 +884,54 @@ func (c *Checker) isCallbackValue(expr ast.Expression) bool {
 	}
 }
 
-func (c *Checker) checkStringMethodArity(e *ast.MethodCallExpr) error {
+func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
 	case "toString", "trim", "trimStart", "trimEnd", "toUpperCase", "toLowerCase":
 		if len(e.Args) != 0 {
 			if e.Method == "toString" {
-				return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+				return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
 			}
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
 	case "split", "repeat", "at", "charAt":
 		if len(e.Args) != 1 {
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
 		}
 	case "includes", "startsWith", "endsWith", "indexOf", "lastIndexOf", "slice", "substring", "padStart", "padEnd":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 1 or 2 arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 or 2 arguments"}
 		}
 	case "replace", "replaceAll":
 		if len(e.Args) != 2 {
-			return &CheckError{Pos: e.Pos, Message: e.Method + "() takes 2 arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 2 arguments"}
 		}
 	case "concat":
 		if len(e.Args) < 1 {
-			return &CheckError{Pos: e.Pos, Message: "concat() takes at least 1 argument"}
+			return &SemanticError{Pos: e.Pos, Message: "concat() takes at least 1 argument"}
 		}
 	default:
-		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("string has no method %q", e.Method)}
+		return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("string has no method %q", e.Method)}
 	}
 	return nil
 }
 
-func (c *Checker) checkNumberMethodArity(e *ast.MethodCallExpr) error {
+func (c *Validator) checkNumberMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
 	case "toString":
 		if len(e.Args) != 0 {
-			return &CheckError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
 		}
 	case "toFixed":
 		if len(e.Args) > 1 {
-			return &CheckError{Pos: e.Pos, Message: "toFixed() takes 0 or 1 arguments"}
+			return &SemanticError{Pos: e.Pos, Message: "toFixed() takes 0 or 1 arguments"}
 		}
 	default:
-		return &CheckError{Pos: e.Pos, Message: fmt.Sprintf("number has no method %q", e.Method)}
+		return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("number has no method %q", e.Method)}
 	}
 	return nil
 }
 
-func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
+func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 	strType := &ast.Type{Kind: ast.TypeString}
 	numType := &ast.Type{Kind: ast.TypeNumber}
 	boolType := &ast.Type{Kind: ast.TypeBoolean}
@@ -1181,7 +1181,7 @@ func (c *Checker) semanticExprType(expr ast.Expression) *ast.Type {
 	return strType
 }
 
-func (c *Checker) callbackReturnType(expr ast.Expression) *ast.Type {
+func (c *Validator) callbackReturnType(expr ast.Expression) *ast.Type {
 	switch e := expr.(type) {
 	case *ast.AsExpr:
 		if e.Type != nil && e.Type.Kind == ast.TypeFunction {
@@ -1205,7 +1205,7 @@ func (c *Checker) callbackReturnType(expr ast.Expression) *ast.Type {
 	return nil
 }
 
-func (c *Checker) arrowReturnType(e *ast.ArrowExpr) *ast.Type {
+func (c *Validator) arrowReturnType(e *ast.ArrowExpr) *ast.Type {
 	if e == nil {
 		return &ast.Type{Kind: ast.TypeString}
 	}
@@ -1224,7 +1224,7 @@ func (c *Checker) arrowReturnType(e *ast.ArrowExpr) *ast.Type {
 	return &ast.Type{Kind: ast.TypeVoid}
 }
 
-func (c *Checker) blockReturnType(block *ast.Block) *ast.Type {
+func (c *Validator) blockReturnType(block *ast.Block) *ast.Type {
 	if block == nil {
 		return nil
 	}
@@ -1401,17 +1401,17 @@ func beshtReceiverName(expr ast.Expression) string {
 	return "Besht"
 }
 
-func (c *Checker) validateJSONStringifyArg(pos ast.Pos, expr ast.Expression) error {
+func (c *Validator) validateJSONStringifyArg(pos ast.Pos, expr ast.Expression) error {
 	if obj, ok := unwrapJSONStringifyAs(expr).(*ast.ObjectLit); ok {
 		for _, field := range obj.Fields {
 			if unsupportedJSONStringifyObjectValue(c.semanticExprType(field.Value)) {
-				return &CheckError{Pos: pos, Message: "JSON.stringify() only supports scalar object values"}
+				return &SemanticError{Pos: pos, Message: "JSON.stringify() only supports scalar object values"}
 			}
 		}
 	}
 	typ := c.semanticExprType(expr)
 	if !isJSONStringifyType(typ) {
-		return &CheckError{Pos: pos, Message: fmt.Sprintf("JSON.stringify() cannot encode %s", typ)}
+		return &SemanticError{Pos: pos, Message: fmt.Sprintf("JSON.stringify() cannot encode %s", typ)}
 	}
 	return nil
 }

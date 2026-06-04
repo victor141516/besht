@@ -1,4 +1,4 @@
-package checker
+package semantics
 
 import "github.com/victor141516/besht/internal/ast"
 
@@ -164,7 +164,7 @@ func (v *forEachSurfaceValidator) expr(expr ast.Expression) error {
 		return nil
 	case *ast.MethodCallExpr:
 		if e.Method == "forEach" && v.isListValue(e.Receiver) {
-			return &CheckError{Pos: e.Pos, Message: "forEach() must be used as a statement"}
+			return &SemanticError{Pos: e.Pos, Message: "forEach() must be used as a statement"}
 		}
 		if err := v.expr(e.Receiver); err != nil {
 			return err
@@ -264,14 +264,14 @@ func (v *forEachSurfaceValidator) validateForEachCall(call *ast.MethodCallExpr) 
 		return err
 	}
 	if len(call.Args) != 1 {
-		return &CheckError{Pos: call.Pos, Message: "forEach() takes 1 arrow callback"}
+		return &SemanticError{Pos: call.Pos, Message: "forEach() takes 1 arrow callback"}
 	}
 	arrow, ok := callbackArrowExpr(call.Args[0])
 	if !ok {
 		return v.expr(call.Args[0])
 	}
 	if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
-		return &CheckError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
+		return &SemanticError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
 	}
 	return v.withParamScope(arrow.Params, func() error {
 		if arrow.BlockBody == nil {
@@ -298,11 +298,11 @@ func (v *forEachSurfaceValidator) forEachCallbackStmt(stmt ast.Statement) error 
 	case *ast.ExprStmt:
 		return v.forEachCallbackExpr(s.Expr)
 	case *ast.ReturnStmt:
-		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support return"}
+		return &SemanticError{Pos: s.Pos, Message: "forEach() callback does not support return"}
 	case *ast.BreakStmt:
-		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support break"}
+		return &SemanticError{Pos: s.Pos, Message: "forEach() callback does not support break"}
 	case *ast.ContinueStmt:
-		return &CheckError{Pos: s.Pos, Message: "forEach() callback does not support continue"}
+		return &SemanticError{Pos: s.Pos, Message: "forEach() callback does not support continue"}
 	case *ast.IfStmt:
 		if err := v.expr(s.Condition); err != nil {
 			return err
@@ -328,7 +328,7 @@ func (v *forEachSurfaceValidator) forEachCallbackExpr(expr ast.Expression) error
 	if v.isSideEffectExpr(expr) {
 		return v.expr(expr)
 	}
-	return &CheckError{Pos: ast.Pos{}, Message: "forEach() callback expression must be side-effecting"}
+	return &SemanticError{Pos: ast.Pos{}, Message: "forEach() callback expression must be side-effecting"}
 }
 
 func (v *forEachSurfaceValidator) isSideEffectExpr(expr ast.Expression) bool {

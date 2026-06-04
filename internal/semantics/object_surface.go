@@ -1,4 +1,4 @@
-package checker
+package semantics
 
 import "github.com/victor141516/besht/internal/ast"
 
@@ -194,7 +194,7 @@ func (v *objectSurfaceValidator) expr(expr ast.Expression) error {
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
 			if err := validateObjectKey(field.Key); err != nil {
-				return &CheckError{Pos: field.Pos, Message: err.Error()}
+				return &SemanticError{Pos: field.Pos, Message: err.Error()}
 			}
 			if err := v.expr(field.Value); err != nil {
 				return err
@@ -207,13 +207,13 @@ func (v *objectSurfaceValidator) expr(expr ast.Expression) error {
 				wantArgs = 2
 			}
 			if len(e.Args) != wantArgs {
-				return &CheckError{Pos: e.Pos, Message: e.Name + "() takes " + objectSurfaceArgCount(wantArgs)}
+				return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes " + objectSurfaceArgCount(wantArgs)}
 			}
 			if v.isProcessEnvValue(e.Args[0]) || !v.isObjectValue(e.Args[0]) {
-				return &CheckError{Pos: e.Pos, Message: e.Name + "() requires an object literal or named object"}
+				return &SemanticError{Pos: e.Pos, Message: e.Name + "() requires an object literal or named object"}
 			}
 			if (e.Name == "Object.values" || e.Name == "Object.entries") && v.hasUnsupportedObjectValue(e.Args[0]) {
-				return &CheckError{Pos: e.Pos, Message: e.Name + "() only supports scalar object values"}
+				return &SemanticError{Pos: e.Pos, Message: e.Name + "() only supports scalar object values"}
 			}
 		}
 		for _, arg := range e.Args {

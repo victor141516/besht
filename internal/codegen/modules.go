@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/victor141516/besht/internal/ast"
-	"github.com/victor141516/besht/internal/checker"
 	"github.com/victor141516/besht/internal/parser"
+	"github.com/victor141516/besht/internal/semantics"
 )
 
 type Module struct {
@@ -24,7 +24,7 @@ type Compiler struct {
 	modules     []*Module
 	root        string
 	entryPath   string
-	globalSigs  map[string]*checker.FnSig
+	globalSigs  map[string]*semantics.FnSig
 	globalDecls map[string]bool
 	globalVars  map[string]*ast.Type
 	opts        Options
@@ -35,7 +35,7 @@ func NewCompiler(root string, opts Options) *Compiler {
 		visited:     make(map[string]bool),
 		modules:     nil,
 		root:        root,
-		globalSigs:  make(map[string]*checker.FnSig),
+		globalSigs:  make(map[string]*semantics.FnSig),
 		globalDecls: make(map[string]bool),
 		globalVars:  make(map[string]*ast.Type),
 		opts:        opts,
@@ -87,13 +87,13 @@ func CheckFile(entryPath string, opts Options) error {
 	}
 	_, _, importedVarTypes := c.buildImportedMaps()
 	for _, mod := range c.modules {
-		if err := checker.ValidateFetchSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
+		if err := semantics.ValidateFetchSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
 			return err
 		}
-		if err := checker.ValidateObjectSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
+		if err := semantics.ValidateObjectSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
 			return err
 		}
-		if err := checker.ValidateForEachSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
+		if err := semantics.ValidateForEachSurfaceWithTypes(mod.Prog.Statements, importedVarTypes[mod.Path]); err != nil {
 			return err
 		}
 		if !opts.UseJQ {
@@ -157,14 +157,14 @@ func (c *Compiler) load(absPath string) error {
 
 	modName := pathToModName(absPath, c.root)
 
-	chk := checker.New()
+	validator := semantics.New()
 	for qualName, sig := range c.globalSigs {
-		chk.RegisterFn(qualName, sig)
+		validator.RegisterFn(qualName, sig)
 	}
 	for _, imp := range prog.Imports {
 		if isShellImport(imp) {
 			for _, name := range imp.Names {
-				chk.RegisterUncheckedFunction(name)
+				validator.RegisterUncheckedFunction(name)
 			}
 			continue
 		}
@@ -174,23 +174,23 @@ func (c *Compiler) load(absPath string) error {
 		if imp.DefaultName != "" {
 			qualName := prefix + "__default"
 			if typ, ok := c.globalVars[qualName]; ok {
-				chk.RegisterVar(imp.DefaultName, typ)
+				validator.RegisterVar(imp.DefaultName, typ)
 			}
 		}
 		for _, name := range imp.Names {
 			qualName := prefix + "__" + name
 			if sig, ok := c.globalSigs[qualName]; ok {
-				chk.RegisterFn(name, sig)
-				chk.RegisterFn(qualName, sig)
+				validator.RegisterFn(name, sig)
+				validator.RegisterFn(qualName, sig)
 			} else if sig, ok := c.globalSigs[name]; ok {
-				chk.RegisterFn(name, sig)
+				validator.RegisterFn(name, sig)
 			} else if typ, ok := c.globalVars[qualName]; ok {
-				chk.RegisterVar(name, typ)
+				validator.RegisterVar(name, typ)
 			}
 		}
 	}
 
-	if err := chk.Check(prog); err != nil {
+	if err := validator.Validate(prog); err != nil {
 		return err
 	}
 
@@ -202,7 +202,7 @@ func (c *Compiler) load(absPath string) error {
 			if fn.Exported {
 				retType := declaredOrInferredFunctionReturnType(fn)
 				qualName := modNameToPrefix(modName) + "__" + fn.Name
-				sig := &checker.FnSig{
+				sig := &semantics.FnSig{
 					Params:     fn.Params,
 					ReturnType: retType,
 				}
@@ -214,7 +214,7 @@ func (c *Compiler) load(absPath string) error {
 			if retType == nil {
 				retType = &ast.Type{Kind: ast.TypeVoid}
 			}
-			sig := &checker.FnSig{Params: fn.Params, ReturnType: retType}
+			sig := &semantics.FnSig{Params: fn.Params, ReturnType: retType}
 			c.globalSigs[fn.Name] = sig
 			c.globalDecls[fn.Name] = true
 		case *ast.LetDecl:

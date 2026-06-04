@@ -61,7 +61,7 @@ func (t *Type) String() string {
 	case TypeVoid:
 		return "void"
 	case TypeList:
-		return fmt.Sprintf("list<%s>", t.Elem)
+		return fmt.Sprintf("Array<%s>", t.Elem)
 	case TypeSet:
 		return fmt.Sprintf("Set<%s>", t.Elem)
 	case TypeFunction:
@@ -168,7 +168,7 @@ type LetDecl struct {
 	DefaultExport bool
 	TypeAnnot     *Type
 	Value         Expression
-	ResolvedTy    *Type // set by checker
+	ResolvedTy    *Type // set by semantic validation
 }
 
 func (n *LetDecl) nodePos() Pos { return n.Pos }

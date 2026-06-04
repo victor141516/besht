@@ -41,7 +41,7 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 ### Existing guardrail fixtures
 
 - `node-eq/tests/commands/skill_pipeline_idioms.*`: command expressions, pipes, redirects, `.env()`, `.workdir()`, raw patterns, and exit-code-gated command chains.
-- `node-eq/tests/language/callbacks/skill_native_data_idioms.*`: translating static text/number pipelines into native lists, callbacks, string transforms, joins, reductions, and indexed `forEach`.
+- `node-eq/tests/language/callbacks/skill_native_data_idioms.*`: translating static text/number pipelines into native arrays, callbacks, string transforms, joins, reductions, and indexed `forEach`.
 - `node-eq/tests/commands/skill_args_env_predicates.*`: translating shell argument parsers, environment defaults, file predicates, and string predicates into `Besht.args`, `process.env`, `Besht.fs`, and `Besht.strings`.
 - `node-eq/tests/language/objects/skill_object_data_idioms.*`: translating static delimiter-separated records into objects, callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`.
 
@@ -49,7 +49,7 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 
 - Commands: pipelines, redirects, stderr/stdout capture, `.exitCode()`, `.clone()`, command spreading, raw patterns, and avoiding shell injection.
 - Script interface: args parsing, `--`, empty arguments, `process.env.NAME ?? fallback`, `Besht.fs.*`, `Besht.strings.*`, and `process.exit()`.
-- In-memory data: list methods, callbacks, reduction, `forEach`, static transforms, `Set<T>`, object literals, dynamic keys, object helpers, optional chaining, and JSON output.
+- In-memory data: array methods, callbacks, reduction, `forEach`, static transforms, `Set<T>`, object literals, dynamic keys, object helpers, optional chaining, and JSON output.
 - Control flow: `if`/`else`, `switch`, loops, `break`/`continue`, `try`/`catch`, command failure handling, and status values.
 - Modules and declarations: imports, `.d.bsh`, shell imports with assertions, split output, exported values, default exports, and TypeScript import fallback flags.
 - Classes: constructors, instance/static properties, methods, getters/setters, `this`, and unsupported inheritance/modifier boundaries.
@@ -72,7 +72,7 @@ Current canonical surface:
 - `process.env.NAME ?? fallback` for environment variables.
 - `process.exit(code)` for process exit.
 - `value.toString()` and `Number.parseInt(value)` for common conversion.
-- Native list/array-style APIs: indexing, `.length`, `.slice()`, `.push()`, `.concat()`, `.includes()`, `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.reduce()`, and statement-position `.forEach()`.
+- Native array-style APIs: indexing, `.length`, `.slice()`, `.push()`, `.concat()`, `.includes()`, `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.reduce()`, and statement-position `.forEach()`.
 - `Boolean(value)` for primitive boolean coercion.
 - `Object.keys(obj)`, scalar-only `Object.values(obj)`, scalar-only `Object.entries(obj)`, and `Object.hasOwn(obj, key)` over compiler-managed object key metadata.
 - Besht-only helpers under `Besht.fs.*`, `Besht.strings.*`, `Besht.args.*`, and `Besht.iter.*`.
@@ -94,32 +94,23 @@ Requirements to preserve for future standard-library work:
 
 - Prefer TypeScript/JavaScript-standard APIs where they already exist.
 - Group Besht-only helpers under `Besht.<group>.*` with camelCase names.
-- Keep generated POSIX sh as small and optimal as possible: standard-looking APIs should compile to minimal inline tests, index reads, and list operations rather than broad runtime metadata.
+- Keep generated POSIX sh as small and optimal as possible: standard-looking APIs should compile to minimal inline tests, index reads, and array operations rather than broad runtime metadata.
 - Object helpers remain backed by compiler-managed object key metadata, not broad runtime shape metadata.
 - Dynamic object metadata keys must be validated before generated shell uses `eval`; invalid dynamic keys fail closed instead of becoming shell injection vectors.
-- `Object.values()` and `Object.entries()` should keep rejecting statically known list/object/set/command/fetch values until the representation can preserve nested values safely.
+- `Object.values()` and `Object.entries()` should keep rejecting statically known array/object/set/command/fetch values until the representation can preserve nested values safely.
 
 Remaining future work:
 
 - Broader JS stdlib migration for APIs that map cleanly to POSIX sh without broad runtime metadata.
-- The larger move away from `list<T>` terminology toward `Array<T>` / `T[]` as the preferred user-facing type in docs, examples, declarations, and diagnostics.
-- Expand object APIs only after preserving the current no-runtime-metadata boundary. Near candidates are `Object.assign()` and `Object.fromEntries()`; nested `Object.values()` / `Object.entries()` support requires a broader object/list representation design.
-- `JSON.parse()` and `JSON.stringify()` are implemented as opt-in jq-backed slices (`--opt-use-jq`). `JSON.parse()` returns compact `JSONValue` data with jq-backed path access and scalar extraction; `JSON.stringify()` handles `JSONValue`, strings, numbers, booleans, null/undefined, scalar lists, and scalar-valued compiler-managed objects.
+- Expand object APIs only after preserving the current no-runtime-metadata boundary. Near candidates are `Object.assign()` and `Object.fromEntries()`; nested `Object.values()` / `Object.entries()` support requires a broader object/array representation design.
+- `JSON.parse()` and `JSON.stringify()` are implemented as opt-in jq-backed slices (`--opt-use-jq`). `JSON.parse()` returns compact `JSONValue` data with jq-backed path access and scalar extraction; `JSON.stringify()` handles `JSONValue`, strings, numbers, booleans, null/undefined, scalar arrays, and scalar-valued compiler-managed objects.
 Implementation notes:
 
-- Parser/checker/codegen recognize `Besht.*`, `process.*`, `Array.*`, `Object.*`, `Boolean`, `Number`, `Math`, and other standard namespaces enough for the implemented slices. Future namespaces such as `JSON` must continue to be exempt from module qualification.
+- Parser/semantics/codegen recognize `Besht.*`, `process.*`, `Array.*`, `Object.*`, `Boolean`, `Number`, `Math`, and other standard namespaces enough for the implemented slices. Future namespaces such as `JSON` must continue to be exempt from module qualification.
 - Static namespaces should keep using handling similar to the existing `Number.*` and `Object.*` paths instead of ad-hoc emitted runtime libraries.
 - Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Any API that introduces dynamic object keys or slots must validate names before generated shell uses `eval`; tests should cover polluted `_objkeys_*` metadata and unsafe computed keys.
-- Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, stdlib declarations, checker/codegen tests, and node-eq fixtures in sync.
-
----
-
-## Checker package cleanup after removing type checking
-
-**Status: type checking has been removed; package naming cleanup remains future work.** `internal/checker` now owns semantic validation and representation/surface checks: function/declaration signature collection, name and const validation, builtin/method arity, fetch surface validation, object surface validation, statement-only `forEach()` validation, and similar checks for code the compiler cannot emit safely.
-
-Future refactor: rename or split `internal/checker` into a semantic validation package such as `internal/semantics`, so the package name no longer implies user-facing type checking.
+- Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, stdlib declarations, semantics/codegen tests, and node-eq fixtures in sync.
 
 ---
 
@@ -177,15 +168,15 @@ Recommended phases:
 
 - **Number / Math:** consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
 - **String:** the old non-JS-compatible global `String(value)` alias has been removed. Besht should eventually have a JS-compatible global `String` object, but only after designing what native-like `String(...)`, static `String.*` APIs, and string wrapper behavior mean under Besht's no-runtime-metadata constraint. Consider regex-dependent APIs like `match()` or `search()` after lower-risk string methods.
-- **Array / list:** Consider related helpers when they map cleanly to current list representations without runtime shape metadata.
+- **Array:** Consider related helpers when they map cleanly to current array representations without runtime shape metadata.
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
 - **Object:** `Object.keys()`, narrow scalar-value `Object.values()`, scalar-value `Object.entries()`, and `Object.hasOwn(obj, key)` are implemented over compiler-managed object key metadata. Future richer known-shape APIs should keep the same no-runtime-metadata boundary unless a broader object model is designed.
 - **Object copying:** evaluate `Object.assign()` and `Object.fromEntries()` after object alias/field metadata is reliable.
-- **JSON:** `JSON.parse()` and `JSON.stringify()` are implemented behind `--opt-use-jq` for the first jq-backed slice: compact `JSONValue` parsing, JSON property/index access, scalar extraction via annotations/assertions, `JSONValue` stringification, scalar values, scalar lists, and scalar-valued compiler-managed objects. Future work is richer JSON/Besht value interop, such as nested Besht object/list serialization beyond the current scalar-safe boundary.
+- **JSON:** `JSON.parse()` and `JSON.stringify()` are implemented behind `--opt-use-jq` for the first jq-backed slice: compact `JSONValue` parsing, JSON property/index access, scalar extraction via annotations/assertions, `JSONValue` stringification, scalar values, scalar arrays, and scalar-valued compiler-managed objects. Future work is richer JSON/Besht value interop, such as nested Besht object/array serialization beyond the current scalar-safe boundary.
 
 Implementation notes:
 
 - Static namespaces such as `Boolean` and `JSON` use parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, `Object.hasOwn()`, and opt-in JSON slices are implemented.
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
 - Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
-- Every added API needs checker, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.
+- Every added API needs semantics, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.

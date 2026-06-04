@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/victor141516/besht/internal/checker"
 	"github.com/victor141516/besht/internal/codegen"
 	"github.com/victor141516/besht/internal/parser"
+	"github.com/victor141516/besht/internal/semantics"
 )
 
 func compile(t *testing.T, src string) string {
@@ -15,9 +15,9 @@ func compile(t *testing.T, src string) string {
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	chk := checker.New()
-	if err := chk.Check(prog); err != nil {
-		t.Fatalf("type error: %v", err)
+	validator := semantics.New()
+	if err := validator.Validate(prog); err != nil {
+		t.Fatalf("semantic error: %v", err)
 	}
 	out, err := codegen.Generate(prog)
 	if err != nil {
@@ -32,8 +32,8 @@ func compileError(t *testing.T, src string) error {
 	if err != nil {
 		return err
 	}
-	chk := checker.New()
-	if err := chk.Check(prog); err != nil {
+	validator := semantics.New()
+	if err := validator.Validate(prog); err != nil {
 		return err
 	}
 	_, err = codegen.Generate(prog)
@@ -3494,9 +3494,9 @@ func compileWithOptions(t *testing.T, src string, opts codegen.Options) string {
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	chk := checker.New()
-	if err := chk.Check(prog); err != nil {
-		t.Fatalf("type error: %v", err)
+	validator := semantics.New()
+	if err := validator.Validate(prog); err != nil {
+		t.Fatalf("semantic error: %v", err)
 	}
 	out, err := codegen.GenerateWithOptions(prog, opts)
 	if err != nil {

@@ -67,7 +67,7 @@ When the task is fully done:
 - Type annotations (`let x: string = "hi"`, `function f(a: number): string`) are **completely ignored** by the compiler
 - They exist only so users can write TypeScript-compatible syntax and get editor support (autocomplete, type hints) via `declare` statements and `.d.bsh` files
 - The compiler never errors on type mismatches
-- The `internal/checker/checker.go` file exists but only collects function signatures — it performs no validation
+- The `internal/semantics/validator.go` package performs semantic validation and signature collection only; it does not validate annotation/type mismatches
 
 `--check` performs semantic validation only: imports, names, command lifecycle, unsupported surfaces, and emitter-required syntax. It must not validate annotation/type mismatches.
 
@@ -209,10 +209,10 @@ internal/
 ├── parser/
 │   └── parser.go        # Recursive descent parser → AST
 │                        # parseCmdExpr() handles $() command expressions
-├── checker/
-│   └── checker.go       # Type checker + scope resolver; walks AST, annotates types
-│                        # FnSig, Scope, Checker structs; RegisterFn for cross-module sigs
-│                        # checkCommandMethod() routes .pipe()/.run()/.readStdoutLines() etc.
+├── semantics/
+│   └── validator.go     # Semantic validator + scope resolver; walks AST, annotates representation hints
+│                        # FnSig, Scope, Validator structs; RegisterFn for cross-module sigs
+│                        # checkCommandMethodArity() routes .pipe()/.run()/.readStdoutLines() etc.
 ├── viewer/
 │   └── viewer.go        # Terminal side-by-side source/shell renderer for `besht visualize`
 │                        # Compiles with source comments internally, strips them from display
@@ -234,7 +234,7 @@ internal/
   │                                      load only filepath.Dir(entry)/stdlib.d.bsh when present
   → Lexer  (lexer.Tokenize)
   → Parser (parser.Parse)
-  → Checker (checker.Check)              ← registers cross-module fn sigs first
+  → Semantics validator (Validator.Validate) ← registers cross-module fn sigs first
   → Command Analysis pass                ← assigns identities to $() calls, tracks
   │                                         run/text/lines/exitCode usage per object,
   │                                         emits warnings for unrun commands,
@@ -329,7 +329,7 @@ The compiler assigns each `$()` call a unique identity during the semantic analy
 
 **No auto-run:** `$()` as a bare statement (with no `.run()`) emits nothing and produces a warning. There is no implicit execution. The user must always call `.run()` explicitly.
 
-**Output philosophy:** Generated shell should be readable and minimal. Side-effect-only commands (`cmd.run()` with no `.readStdout()`/`.readStdoutLines()`/`.exitCode()`) compile to a bare shell command with no variable. Capture variables are only emitted when the corresponding method is actually used. Helper code, metadata, array/object metadata, runtime checks, and other shell boilerplate should only be emitted when the compiled program uses functionality that requires it. For example, if an array operation needs metadata, do not emit that metadata for programs that never use that operation. Static scalar list literals, list-returning method chains over static scalar lists (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`), static scalar `Array.of(...)` calls, and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when elements contain no newlines; dynamic, nested, spread, and newline-sensitive list expressions keep the `printf` builder. Static string literals, variables bound to static string literals, static scalar list expressions, and variables bound to static scalar lists compile `.length` properties to numeric constants; dynamic lengths keep the `wc` path. Static scalar list expressions and variables bound to them compile to compact shell `for item in ...; do` loops when elements contain no newlines; dynamic and newline-sensitive list expressions keep the heredoc-backed read loop so assignments and `break` persist in the current shell. Small static integer `Besht.iter.range()` loops compile to compact `for i in 1 2 3; do` shell; dynamic and large static ranges keep the counter `while` loop. Static scalar list indexes with known in-range integer indexes and static nested-list indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row path. Static scalar list destructuring over literals and variables bound to them emits direct assignments; dynamic and newline-sensitive destructuring keeps the temp-and-`sed` path. Static scalar list expressions and variables bound to static scalar lists fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static; dynamic and newline-sensitive joins keep the `awk` path. Static scalar list expressions and variables bound to static scalar lists fold `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles to constants; dynamic searches keep the `grep`/`awk` path. Static Set bindings populated by straight-line static `.add()` calls compile `.has()` to constants; dynamic, control-flow, callback, and newline-sensitive Set values keep the `awk`/`grep` runtime path. Static scalar list `console.log()` and `console.error()` output compiles to one quoted display string when elements contain no newlines; dynamic and newline-sensitive list printing keeps the generic `awk` formatter. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, `.charAt()`, and transforms (`trim`, `trimStart`, `trimEnd`, `toUpperCase`, `toLowerCase`, `slice`, `substring`, `repeat`, `replace`, `replaceAll`, `concat`, `padStart`, `padEnd`) with static arguments to constants; dynamic and non-ASCII string searches/transforms keep the helper/`awk` or POSIX `sed`/`tr`/`awk` paths. Dynamic string `slice()`, `at()`, and string indexing use `awk substr` rather than `cut`. The ternary shape `x.startsWith(prefix) ? x.slice(prefix.length) : x` compiles to POSIX `${x#prefix}` parameter expansion when `x` is a simple identifier and the prefix is shell-pattern-safe. Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to quoted newline-backed list strings and compact `for item in ...; do` loops when resulting elements contain no newlines; dynamic and non-ASCII splits keep the POSIX `tr`/`awk` path. Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold to constants, while mutated or dynamic objects keep compiler-managed metadata so assignments and computed keys stay visible. Direct reads of scalar properties from static object literal bindings compile to constants when the object root is not assigned, computed-assigned, aliased, or passed to a function; mutation and alias escapes keep property reads dynamic. Static boolean `if` conditions and ternary expressions, including `Boolean(value)`, `Array.isArray(value)`, static string/list/Set searches, static `Object.hasOwn()`, static boolean object properties, and static comparisons with arithmetic literal operands, compile to the selected branch or value; dynamic conditions keep shell tests. Dynamic boolean object properties used directly in conditions compile to direct `[ "$_obj_name_prop" = 1 ]` tests; optional property chains, `process.env`, and non-boolean properties keep their nullish or generic truthiness paths. Static safe `process.env.NAME ?? fallback` defaults compile to POSIX unset-only `${NAME-fallback}` expansion; dynamic or unsafe defaults keep the nullish sentinel path. Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic parseInt uses inline AWK when a general parser is needed; `Number.parseInt(value.slice(start, start + 2), 16)` uses a tiny `_bst_hex_byte` helper selected from static slice and radix analysis, and broader `Number.parseInt(value.slice(a, b), radix)` calls pass slice bounds into the AWK parser instead of emitting a separate substring command. Compiler-known dynamic integer relational comparisons compile to POSIX integer tests; float and unknown relational comparisons keep the POSIX `awk` path. Static numeric arithmetic over literal numbers and variables bound to static numeric expressions, static numeric expression/variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, and literal-argument `Math.*` calls compile to constants; dynamic numeric expressions keep shell arithmetic or the POSIX `awk` path. Single-command redirects append directly to the command; pipeline redirects keep `{ ...; }` grouping so the redirect applies to the whole pipeline. String runtime helpers (`_bst_starts_with`, `_bst_ends_with`, `_bst_includes`) are emitted only when generated shell calls the corresponding one-argument string method; two-argument string search methods use inline `awk`, and list `.includes()` uses `grep -qxF` without emitting `_bst_includes`. Top-level scripts that only read `Besht.args.positional()` use an inline `"$@"` scan instead of the full args runtime; `argv()`, `option()`, `flag()`, args reads inside functions, and split output keep the shared parser runtime. This unused-feature elision is best effort and must never break correctness. All boilerplate is opt-out via `--opt-*` flags.
+**Output philosophy:** Generated shell should be readable and minimal. Side-effect-only commands (`cmd.run()` with no `.readStdout()`/`.readStdoutLines()`/`.exitCode()`) compile to a bare shell command with no variable. Capture variables are only emitted when the corresponding method is actually used. Helper code, metadata, array/object metadata, runtime checks, and other shell boilerplate should only be emitted when the compiled program uses functionality that requires it. For example, if an array operation needs metadata, do not emit that metadata for programs that never use that operation. Static scalar array literals, array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`), static scalar `Array.of(...)` calls, and static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when elements contain no newlines; dynamic, nested, spread, and newline-sensitive array expressions keep the `printf` builder. Static string literals, variables bound to static string literals, static scalar array expressions, and variables bound to static scalar arrays compile `.length` properties to numeric constants; dynamic lengths keep the `wc` path. Static scalar array expressions and variables bound to them compile to compact shell `for item in ...; do` loops when elements contain no newlines; dynamic and newline-sensitive array expressions keep the heredoc-backed read loop so assignments and `break` persist in the current shell. Small static integer `Besht.iter.range()` loops compile to compact `for i in 1 2 3; do` shell; dynamic and large static ranges keep the counter `while` loop. Static scalar array indexes with known in-range integer indexes and static nested-array indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row path. Static scalar array destructuring over literals and variables bound to them emits direct assignments; dynamic and newline-sensitive destructuring keeps the temp-and-`sed` path. Static scalar array expressions and variables bound to static scalar arrays fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static; dynamic and newline-sensitive joins keep the `awk` path. Static scalar array expressions and variables bound to static scalar arrays fold `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles to constants; dynamic searches keep the `grep`/`awk` path. Static Set bindings populated by straight-line static `.add()` calls compile `.has()` to constants; dynamic, control-flow, callback, and newline-sensitive Set values keep the `awk`/`grep` runtime path. Static scalar array `console.log()` and `console.error()` output compiles to one quoted display string when elements contain no newlines; dynamic and newline-sensitive array printing keeps the generic `awk` formatter. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, `.charAt()`, and transforms (`trim`, `trimStart`, `trimEnd`, `toUpperCase`, `toLowerCase`, `slice`, `substring`, `repeat`, `replace`, `replaceAll`, `concat`, `padStart`, `padEnd`) with static arguments to constants; dynamic and non-ASCII string searches/transforms keep the helper/`awk` or POSIX `sed`/`tr`/`awk` paths. Dynamic string `slice()`, `at()`, and string indexing use `awk substr` rather than `cut`. The ternary shape `x.startsWith(prefix) ? x.slice(prefix.length) : x` compiles to POSIX `${x#prefix}` parameter expansion when `x` is a simple identifier and the prefix is shell-pattern-safe. Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to quoted newline-backed arrays and compact `for item in ...; do` loops when resulting elements contain no newlines; dynamic and non-ASCII splits keep the POSIX `tr`/`awk` path. Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls also fold to constants, while mutated or dynamic objects keep compiler-managed metadata so assignments and computed keys stay visible. Direct reads of scalar properties from static object literal bindings compile to constants when the object root is not assigned, computed-assigned, aliased, or passed to a function; mutation and alias escapes keep property reads dynamic. Static boolean `if` conditions and ternary expressions, including `Boolean(value)`, `Array.isArray(value)`, static string/array/Set searches, static `Object.hasOwn()`, static boolean object properties, and static comparisons with arithmetic literal operands, compile to the selected branch or value; dynamic conditions keep shell tests. Dynamic boolean object properties used directly in conditions compile to direct `[ "$_obj_name_prop" = 1 ]` tests; optional property chains, `process.env`, and non-boolean properties keep their nullish or generic truthiness paths. Static safe `process.env.NAME ?? fallback` defaults compile to POSIX unset-only `${NAME-fallback}` expansion; dynamic or unsafe defaults keep the nullish sentinel path. Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic parseInt uses inline AWK when a general parser is needed; `Number.parseInt(value.slice(start, start + 2), 16)` uses a tiny `_bst_hex_byte` helper selected from static slice and radix analysis, and broader `Number.parseInt(value.slice(a, b), radix)` calls pass slice bounds into the AWK parser instead of emitting a separate substring command. Compiler-known dynamic integer relational comparisons compile to POSIX integer tests; float and unknown relational comparisons keep the POSIX `awk` path. Static numeric arithmetic over literal numbers and variables bound to static numeric expressions, static numeric expression/variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, and literal-argument `Math.*` calls compile to constants; dynamic numeric expressions keep shell arithmetic or the POSIX `awk` path. Single-command redirects append directly to the command; pipeline redirects keep `{ ...; }` grouping so the redirect applies to the whole pipeline. String runtime helpers (`_bst_starts_with`, `_bst_ends_with`, `_bst_includes`) are emitted only when generated shell calls the corresponding one-argument string method; two-argument string search methods use inline `awk`, and array `.includes()` uses `grep -qxF` without emitting `_bst_includes`. Top-level scripts that only read `Besht.args.positional()` use an inline `"$@"` scan instead of the full args runtime; `argv()`, `option()`, `flag()`, args reads inside functions, and split output keep the shared parser runtime. This unused-feature elision is best effort and must never break correctness. All boilerplate is opt-out via `--opt-*` flags.
 
 Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep runtime formatting.
 
@@ -378,7 +378,7 @@ The `rewriteFnCalls()` AST pass in `modules.go` walks the entire program AST bef
 
 ### Return Values
 
-- Functions returning `string`/`number`/`list<T>`: emit `printf '%s'` to stdout; callers capture with `$(fn args)`
+- Functions returning `string`/`number`/`Array<T>`/`T[]`: emit `printf '%s'` to stdout; callers capture with `$(fn args)`
 - Void functions: no capture; callers emit bare `fn args`
 - Functions returning `status`: exit code via `$?`
 
@@ -389,12 +389,12 @@ The `rewriteFnCalls()` AST pass in `modules.go` walks the entire program AST bef
 | `string`   | shell string                                                      |
 | `number`   | shell string containing digits; arithmetic via `$((...))`         |
 | `boolean`  | `1` (true) / `0` (false); tested with `[ "$x" = 1 ]`              |
-| `list<T>`  | newline-delimited string; nested list rows use unit-separator-packed lines |
+| `T[]` / `Array<T>` | newline-delimited string; nested array rows use unit-separator-packed lines |
 | `Set<T>`   | newline-delimited unique string values for membership checks               |
 | `status`   | exit code captured as `$?`                                        |
 | `command`  | lazy pipeline description; no shell code until `.run()` is called |
 
-Prefer native list APIs for new user-facing examples and compiler work: `list.length`, `list[0]`, `list.slice(1)`, `list.push(value)` or `[...list, value]`, `list.includes(value)`, and `list.concat(other)`. The old global list helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers.
+Prefer native array APIs for new user-facing examples and compiler work: `items.length`, `items[0]`, `items.slice(1)`, `items.push(value)` or `[...items, value]`, `items.includes(value)`, and `items.concat(other)`. The old global list helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers.
 
 ### POSIX Compliance Invariants
 
@@ -412,7 +412,7 @@ Prefer native list APIs for new user-facing examples and compiler work: `list.le
 ```
 internal/lexer/lexer_test.go       # Token types, keywords, errors, position tracking
 internal/parser/parser_test.go     # Every AST node type; error recovery
-internal/checker/checker_test.go   # Semantic validation, scope, builtins/surfaces
+internal/semantics/validator_test.go # Semantic validation, scope, builtins/surfaces
 internal/codegen/codegen_test.go   # Unit: AST → sh output patterns (uses Generate())
 internal/codegen/integration_test.go # E2E: temp files → CompileFile() → sh output
 internal/viewer/viewer_test.go     # Side-by-side visualization renderer behavior
@@ -436,7 +436,7 @@ let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 let count: number = 42
 let price: number = 3.14          // float literal — compiled to awk arithmetic
 let flag: boolean = true
-let files: list<string> = ["a.txt", "b.txt"]
+let files: string[] = ["a.txt", "b.txt"]
 let rows: string[][] = [["a", "b"], ["c", "d"]]
 let seen = new Set<string>()
 
@@ -451,21 +451,21 @@ let absent = undefined
 let city = "Paris"
 let items = ["x", "y"]
 
-// Array types — all three forms compile identically to list<T>
+// Array types. Prefer T[] or Array<T>; legacy list<T> still parses for compatibility.
 let a: string[] = ["a", "b"]
 let b: Array<string> = ["c", "d"]
-let c: list<string> = ["e", "f"]
+let c: string[] = ["e", "f"]
 let matrix: string[][] = rows.map(row => row.join("").split("") as string[])
 let indexes: number[] = Array.from({ length: 3 }) // [0, 1, 2]; Besht numeric range, not JS undefined slots
 let selected: string[] = Array.of("a", "b") // ["a", "b"]
-let objectKeys: string[] = Object.keys(user) // compiler-managed object key list, not general JS reflection
-let objectValues: string[] = Object.values(user) // object value list
+let objectKeys: string[] = Object.keys(user) // compiler-managed object key array, not general JS reflection
+let objectValues: string[] = Object.values(user) // object value array
 let objectEntries: string[][] = Object.entries(user) // packed [key, value] rows
 let objectHasName: boolean = Object.hasOwn(user, "name")
 let parsed: JSONValue = JSON.parse("{\"user\":{\"name\":\"Ada\"}}") // requires --opt-use-jq and jq
 let parsedName: string = parsed.user.name
 let jsonUser: string = JSON.stringify(user) // scalar Besht/object values only; requires --opt-use-jq and jq
-let jsonList: string = JSON.stringify(["a", "b"])
+let jsonArray: string = JSON.stringify(["a", "b"])
 
 // Constants (compile-time immutability)
 const MAX: number = 100
@@ -600,7 +600,7 @@ for (i in Besht.iter.range(1, 10)) {
 }
 for (i in Besht.iter.range(1, 10)) total += i
 
-// For list
+// For array
 for (f in files) {
     $("echo", f).run()
 }
@@ -611,7 +611,7 @@ for (let f in files) {
     $("echo", f).run()
 }
 
-// TypeScript for...of is accepted as the same value-iteration list loop.
+// TypeScript for...of is accepted as the same value-iteration array loop.
 for (const f of files) {
     $("echo", f).run()
 }
@@ -623,10 +623,10 @@ for (f in files) {
     $("echo", f).run()
 }
 
-// List indexing (0-based)
-let first: string = files[0] // static scalar list indexes fold to constants when known
+// Array indexing (0-based)
+let first: string = files[0] // static scalar array indexes fold to constants when known
 let item: string = files[i]
-let cell: string = matrix[row][col] // static nested list indexes fold to constants when known
+let cell: string = matrix[row][col] // static nested array indexes fold to constants when known
 let letter: string = "abc"[1] // static ASCII string indexes fold to constants when known
 let maybeName: string = user?.name ?? "anonymous"
 let maybeItem: string = items?.[i] ?? "fallback"
@@ -634,10 +634,10 @@ let maybeCell: string = matrix?.[row]?.[col] ?? "missing"
 let maybeTrimmed: string = maybeText?.trim() ?? ""
 let width: number = matrix[0].length
 
-// List index assignment
+// Array index assignment
 items[1] = "BETA"
 
-// Empty list
+// Empty array
 let empty: string[] = []
 
 // Object literals — compile to per-property shell variables
@@ -733,13 +733,13 @@ let user: string = userCmd.readStdout()      // reads from captured var
 let branch = $("git", "rev-parse", "--abbrev-ref", "HEAD").run().readStdout()
 
 // Spread command arguments
-let args: list<string> = ["-n", "hello"]
+let args: string[] = ["-n", "hello"]
 $("echo", ...args).run()
 
 // Capture as lines: .run() + .readStdoutLines()
 let logCmd = $("git", "log", "--oneline", "-20")
 logCmd.run()
-let log_lines: list<string> = logCmd.readStdoutLines()
+let log_lines: string[] = logCmd.readStdoutLines()
 
 // Pipeline — built lazily before run()
 let result: string = $("cat", "/etc/passwd")
@@ -758,8 +758,8 @@ $("make", "build").env("CI", "1").run()     // CI=1 make build
 let root = $("pwd").workdir("/").run().readStdout() // run one command from /
 $("make", "test").workdir("/repo/app").run() // parent script cwd is unchanged
 
-// Spread a list into command arguments
-let args: list<string> = ["-n", "hello"]
+// Spread an array into command arguments
+let args: string[] = ["-n", "hello"]
 $("echo", ...args).run()
 
 // exitCode — captured only when used
@@ -826,8 +826,8 @@ let negf: number = -1.5
 let trimmed: string = name.trim()
 let upper: string = name.toUpperCase()
 let lower: string = name.toLowerCase()
-let parts: list<string> = name.split(",")
-let chars: list<string> = name.split("")
+let parts: string[] = name.split(",")
+let chars: string[] = name.split("")
 let r: string = name.replace("old", "new")
 let ra: string = name.replaceAll("a", "b")
 let slen: number = name.length
@@ -844,30 +844,30 @@ let sub: string = name.slice(0, 5)
 let sub2: string = name.substring(0, 5)
 let ch: string = name.charAt(1)
 
-// List methods. Prefer these native APIs over the older global helper aliases.
+// Array methods. Prefer these native APIs over the older global helper aliases.
 let flen: number = files.length
 let first: string = files[0]
-let rest: list<string> = files.slice(1)
-let pushed: list<string> = files.push("new.txt")
-let alsoPushed: list<string> = [...files, "new.txt"]
-let prepended: list<string> = files.unshift("first.txt")
-let popped: list<string> = files.pop()
+let rest: string[] = files.slice(1)
+let pushed: string[] = files.push("new.txt")
+let alsoPushed: string[] = [...files, "new.txt"]
+let prepended: string[] = files.unshift("first.txt")
+let popped: string[] = files.pop()
 let joined: string = files.join(", ")
-let listText: string = files.toString() // scalar lists only; same as files.join(",")
-let merged: list<string> = files.concat(other)
-let rev: list<string> = files.reverse()
+let arrayText: string = files.toString() // scalar arrays only; same as files.join(",")
+let merged: string[] = files.concat(other)
+let rev: string[] = files.reverse()
 let compactText: string = ["a", "b"].concat(["c"]).join(",") // static chains compile to 'a,b,c'
-let copied: list<string> = [...files, "extra"]
+let copied: string[] = [...files, "extra"]
 let indexes: number[] = Array.from({ length: 3 })
 let selected: string[] = Array.of("a", "b")
-let mapped: list<string> = files.map(f => f + ".bak")
-let labeled: list<string> = files.map((f, i) => i.toString() + ":" + f)
-let classified: list<string> = files.map((f, i) => {
+let mapped: string[] = files.map(f => f + ".bak")
+let labeled: string[] = files.map((f, i) => i.toString() + ":" + f)
+let classified: string[] = files.map((f, i) => {
     if (i == 0) return "first:" + f
     return "next:" + f
 })
 files.forEach((f, i) => console.log(i.toString() + ":" + f))
-let filtered: list<string> = files.filter(f => f.endsWith(".txt"))
+let filtered: string[] = files.filter(f => f.endsWith(".txt"))
 let hasTxt: boolean = files.some((f, i) => f.endsWith(".txt") && i >= 0)
 let allNamed: boolean = files.every(f => f.length > 0)
 let firstTxt: string = files.find(f => f.endsWith(".txt")) ?? "missing"
@@ -878,8 +878,8 @@ let counts = words.reduce((acc, word) => {
     acc[word] = (acc[word] || 0) + 1
     return acc
 }, {})
-let sliced: list<string> = files.slice(1, 3)
-let found: boolean = files.includes("a.txt") // list membership via grep -qxF; does not emit _bst_includes
+let sliced: string[] = files.slice(1, 3)
+let found: boolean = files.includes("a.txt") // array membership via grep -qxF; does not emit _bst_includes
 let idx: number = files.indexOf("b.txt")
 let lastIdx: number = files.lastIndexOf("b.txt")
 // Old global list helper names remain supported for now: len, head, tail, append, contains, concat.
@@ -921,7 +921,7 @@ for (line in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
 Builtins are compile-time functions with no runtime overhead. To add one:
 
 1. Add name to `IsBuiltin()` in `ast/ast.go`
-2. Add case in `checkBuiltinCall()` in `checker/checker.go`
+2. Add case in `checkBuiltinCall()` in `semantics/validator.go`
 3. Add case in `genBuiltinCapture()` (value position) in `codegen/codegen.go`
 4. If usable as a statement, add case in `genBuiltinStmt()` in `codegen/codegen.go`
 5. If usable as a condition, add case in `genBuiltinCondition()` in `codegen/codegen.go`
@@ -930,7 +930,7 @@ Builtins are compile-time functions with no runtime overhead. To add one:
 
 Command methods chain on `command` type values. With the lazy Command model:
 
-1. Add case in `checkCommandMethod()` in `checker/checker.go` — specify arg count and return type
+1. Add case in `checkCommandMethodArity()` in `semantics/validator.go` — specify arg count and return type
 2. If the method is a **terminal** (causes execution or capture): handle in the Command Analysis pass so it's accounted for in the emit decision
 3. Add case in `genCmdChain()` in `codegen/codegen.go` — emit the shell equivalent
 4. If the method records a capture (like `.readStdout()` or `.exitCode()`), codegen usually reads from the pre-assigned capture variable. Immediate anonymous `.run().readStdout()` / `.run().readStderr()` expressions may compile directly to command substitution; named command objects and `.exitCode()` must keep `genRunCall()` capture/exit-variable emission so reuse stays correct.
@@ -979,7 +979,7 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **`genArgs()` applies `ensureArgSafe()` to all generated args.** Any `$(...)` expression is automatically wrapped in `"$(...)"` when passed as an argument to a command, `console.log`, or a function call. This prevents word-splitting of multi-word command output.
 
-**Command literal words prefer natural bare output only when safe.** `genCmdArgs()` uses `cmdArgWordForExpr()` so ordinary string literals such as `"git"` and `"--short"` can emit as `git --short`, while globs, spaces, embedded quotes, variables, command substitutions, shell reserved command names, and command-position assignments remain quoted or protected. Do not route general string/assignment/list emission through this command-word path.
+**Command literal words prefer natural bare output only when safe.** `genCmdArgs()` uses `cmdArgWordForExpr()` so ordinary string literals such as `"git"` and `"--short"` can emit as `git --short`, while globs, spaces, embedded quotes, variables, command substitutions, shell reserved command names, and command-position assignments remain quoted or protected. Do not route general string/assignment/array emission through this command-word path.
 
 **`escapeForDoubleQuote()` handles shell-active characters in string literals.** When emitting a double-quoted sh string, backtick `` ` `` and every literal dollar form must be escaped, including `$(`, `$WORD`, `$1`, `${text}`, `$*`, `$?`, and `$$`. Besht template interpolation is inserted separately from parsed `${expr}` nodes by `genTemplateLiteral()`/`strInner()`; do not treat literal template text as shell syntax. `\$` (already escaped by the lexer for literal dollars) must also be left as-is. Any new string emission path must call `escapeForDoubleQuote()` before wrapping in `"..."`.
 
@@ -991,15 +991,15 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **node-eq command parity should cover idiomatic command APIs.** `node-eq/runtime.ts` mirrors command `.env()` and `.workdir()`. `node-eq/run-bsh` should not translate syntax that Besht itself rejects; fixtures use ordinary quoted strings for glob, grep, and sed patterns. `node-eq/tests/commands/skill_pipeline_idioms.bsh` is paired with a source shell script to keep future skill iterations focused on pipes, redirects, workdir, env, quoted patterns, and exit-code gating.
 
-**Skill validation should cover native data idioms, not only commands.** `node-eq/tests/language/callbacks/skill_native_data_idioms.bsh` is paired with a shell source that uses `sed`/`grep`/`tr`/`awk` over literal data. The Besht fixture intentionally uses native lists, callbacks, string transforms, joins, numeric reduction, and indexed `forEach`; keep this as a guardrail for teaching agents to translate in-memory shell pipelines into Besht data operations instead of process pipelines.
+**Skill validation should cover native data idioms, not only commands.** `node-eq/tests/language/callbacks/skill_native_data_idioms.bsh` is paired with a shell source that uses `sed`/`grep`/`tr`/`awk` over literal data. The Besht fixture intentionally uses native arrays, callbacks, string transforms, joins, numeric reduction, and indexed `forEach`; keep this as a guardrail for teaching agents to translate in-memory shell pipelines into Besht data operations instead of process pipelines.
 
 **Skill validation should cover script interface idioms.** `node-eq/tests/commands/skill_args_env_predicates.bsh` is paired with a shell source that reads options, flags, positionals, environment defaults, file predicates, and string predicates. The Besht fixture intentionally uses `Besht.args.option()`/`.flag()`/`.positional()`, `process.env.NAME ?? fallback`, `Besht.fs.*`, and `Besht.strings.*`; keep it as a guardrail against agents transliterating ordinary shell option parser loops or `[ -f ]`/`[ -z ]` checks.
 
-**Skill validation should cover static record idioms.** `node-eq/tests/language/objects/skill_object_data_idioms.bsh` is paired with a shell source that uses `awk -F:`, `cut`, `paste`, and membership probes over a literal colon-delimited table. The Besht fixture intentionally uses object literals, list callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`; keep it as a guardrail against agents preserving text-processing pipelines for static in-memory records.
+**Skill validation should cover static record idioms.** `node-eq/tests/language/objects/skill_object_data_idioms.bsh` is paired with a shell source that uses `awk -F:`, `cut`, `paste`, and membership probes over a literal colon-delimited table. The Besht fixture intentionally uses object literals, array callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`; keep it as a guardrail against agents preserving text-processing pipelines for static in-memory records.
 
-**JSON object values must preserve expression types.** `JSON.stringify({ count: items.length })` must pass `items.length` to jq as JSON number data, not as a string. Keep `inferReceiverType()` aware that `.length` on strings and lists is numeric so object-literal JSON codegen chooses `--argjson`.
+**JSON object values must preserve expression types.** `JSON.stringify({ count: items.length })` must pass `items.length` to jq as JSON number data, not as a string. Keep `inferReceiverType()` aware that `.length` on strings and arrays is numeric so object-literal JSON codegen chooses `--argjson`.
 
-**JSONValue is compact JSON text, not an object/list mirror.** `JSON.parse()` returns internal `TypeJSON`/user-facing `JSONValue`; property and index access on it must stay jq-backed and return another `JSONValue`. Missing final JSON fields, out-of-range array indexes, and JSON `null` must become the Besht nullish sentinel for `??`; accessing through a missing/null intermediate should fail unless optional chaining short-circuits it. String/number/boolean extraction happens only when the JSON-backed expression is annotated or asserted with that target type, and non-JSON annotations remain erased. Keep generated JSON reads routed through shared runtime helpers: `_bst_json_canonical()` owns common jq validation/compaction, `_bst_json_get_prop()`/`_bst_json_get_index()` own path reads, `_bst_json_scalar()` owns common scalar handling, and the one-per-type cell helpers (`_bst_json_cell_string()`, `_bst_json_cell_number()`, `_bst_json_cell_boolean()`) own type-specific jq predicates. Do not reintroduce inline jq scalar/path programs at every JSON read site.
+**JSONValue is compact JSON text, not an object/array mirror.** `JSON.parse()` returns internal `TypeJSON`/user-facing `JSONValue`; property and index access on it must stay jq-backed and return another `JSONValue`. Missing final JSON fields, out-of-range array indexes, and JSON `null` must become the Besht nullish sentinel for `??`; accessing through a missing/null intermediate should fail unless optional chaining short-circuits it. String/number/boolean extraction happens only when the JSON-backed expression is annotated or asserted with that target type, and non-JSON annotations remain erased. Keep generated JSON reads routed through shared runtime helpers: `_bst_json_canonical()` owns common jq validation/compaction, `_bst_json_get_prop()`/`_bst_json_get_index()` own path reads, `_bst_json_scalar()` owns common scalar handling, and the one-per-type cell helpers (`_bst_json_cell_string()`, `_bst_json_cell_number()`, `_bst_json_cell_boolean()`) own type-specific jq predicates. Do not reintroduce inline jq scalar/path programs at every JSON read site.
 
 **`command` objects do not auto-coerce.** Unlike the old model, `command` no longer coerces to `string` on assignment. You must explicitly call `.run()` then `.readStdout()` to get a string. The Command Analysis pass enforces this.
 
@@ -1009,17 +1009,17 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Module generator vs plain generator.** `moduleGenerator` embeds `Generator`. When adding new statement types, add a case to `genModuleTopStmt()` if they can contain function calls that need qualification.
 
-**Checker cross-module signatures and values.** `Compiler.load()` builds a `globalSigs` map of exported signatures and a `globalVars` map for exported top-level values. When adding new exported constructs, register them there.
+**Semantics cross-module signatures and values.** `Compiler.load()` builds a `globalSigs` map of exported signatures and a `globalVars` map for exported top-level values. When adding new exported constructs, register them there.
 
 **Object literals compile to per-property shell variables.** `let user = { id: 1, name: "Victor" }` emits `_obj_user_id=1` and `_obj_user_name="Victor"`. Property access `user.name` reads `_obj_user_name`. Property assignment `user.name = "X"` writes `_obj_user_name="X"`. Since shell variables are global, these `_obj_*` variables are accessible inside functions. When an object is passed as a function parameter, `genProperty` uses `objPropTypeMap` (populated by `collectObjectTypes` pre-pass) to resolve the original `_obj_` prefix directly — no copying needed. Inside a function, `student.name` emits `$_obj_student_name` (using the original top-level variable name, not the mangled parameter name).
 
-**`Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use `_objkeys_*` metadata.** Object literal bindings, aliases, reduce object accumulators, class instance slots, static object maps, dot property assignments, and computed property assignments must keep `_objkeys_<object>` in sync. `Object.keys()` lowers to a newline-delimited list from that metadata, `Object.values()` evals each keyed scalar `_obj_*` slot in the same order, and `Object.entries()` emits existing nested-list unit-separator packed `[key, value]` rows for scalar values. Unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls may fold from `staticObjectMap`, `staticObjectEntryMap`, and `staticObjectValueMap`; any property assignment to that static object must invalidate those maps so later reads use runtime metadata. Statically known boolean values format as `true`/`false` when enumerated through `Object.values()` or `Object.entries()`, while the stored shell slots remain `1`/`0`. `Object.values()` and `Object.entries()` must reject statically known list/object/set/command/fetch values because the current `string[]` and packed `string[][]` representations cannot preserve deeper nested values without corrupting rows. These helpers must not emit a runtime helper. `Object.hasOwn()` checks exact line membership against that metadata, returns `1`/`0`, and returns false for dynamic keys that fail `[A-Za-z0-9_]+` instead of mutating metadata or exiting. Static and computed object keys must match `[A-Za-z0-9_]`; computed assignments append only validated keys. The `object` annotation parses to `TypeObject` so function parameters can carry object slot names for Object helpers. `process.env` is intentionally not enumerable; reject `Object.keys(process.env)`, `Object.values(process.env)`, `Object.entries(process.env)`, and `Object.hasOwn(process.env, key)` in `--check` and compile paths.
+**`Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, and `Object.hasOwn(obj, key)` use `_objkeys_*` metadata.** Object literal bindings, aliases, reduce object accumulators, class instance slots, static object maps, dot property assignments, and computed property assignments must keep `_objkeys_<object>` in sync. `Object.keys()` lowers to a newline-delimited list from that metadata, `Object.values()` evals each keyed scalar `_obj_*` slot in the same order, and `Object.entries()` emits existing nested-array unit-separator packed `[key, value]` rows for scalar values. Unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, and static-key `Object.hasOwn()` calls may fold from `staticObjectMap`, `staticObjectEntryMap`, and `staticObjectValueMap`; any property assignment to that static object must invalidate those maps so later reads use runtime metadata. Statically known boolean values format as `true`/`false` when enumerated through `Object.values()` or `Object.entries()`, while the stored shell slots remain `1`/`0`. `Object.values()` and `Object.entries()` must reject statically known array/object/set/command/fetch values because the current `string[]` and packed `string[][]` representations cannot preserve deeper nested values without corrupting rows. These helpers must not emit a runtime helper. `Object.hasOwn()` checks exact line membership against that metadata, returns `1`/`0`, and returns false for dynamic keys that fail `[A-Za-z0-9_]+` instead of mutating metadata or exiting. Static and computed object keys must match `[A-Za-z0-9_]`; computed assignments append only validated keys. The `object` annotation parses to `TypeObject` so function parameters can carry object slot names for Object helpers. `process.env` is intentionally not enumerable; reject `Object.keys(process.env)`, `Object.values(process.env)`, `Object.entries(process.env)`, and `Object.hasOwn(process.env, key)` in `--check` and compile paths.
 
 **Classes use compiler-managed instance slots.** `let u = new User("Alice")` stores `u='u'`, calls `User__constructor "$u" ...`, and writes instance fields as `_obj_u_name`. `this.prop` inside constructors and methods uses tightly controlled `eval` to construct `_obj_${slot}_${prop}` names; user values must flow through temporary shell variables, never interpolated directly into the eval string. Static properties use `_class_<Class>_<prop>` and static/instance methods compile to `<Class>__<method>` shell functions. Explicit getters/setters compile to `<Class>__get_<name>` and `<Class>__set_<name>`; property reads/writes lower to those calls when present. Accessors cannot share a property name with a field, and source methods named `get_<name>`/`set_<name>` conflict with the corresponding accessor. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored.
 
 **Static object maps use object backing.** `static Deltas: Record<string, [number, number]> = { U: [-1, 0] }` emits `_obj__class_Class_Deltas_U` storage, and `Class.Deltas[key]` lowers to computed object access. `Record<K, V>` is annotation-only; it guides compiler inference but adds no runtime type checking.
 
-**Class methods and getters that mutate `this` must be void-style calls.** Value-returning methods and getters are invoked through command substitution (`$(Class__method "$slot")`), which runs in a subshell. Any `this.prop = value` mutation inside that subshell is lost, so checker/codegen reject non-void methods and getters that assign to `this` properties. Constructors and setters are exempt because they are called directly.
+**Class methods and getters that mutate `this` must be void-style calls.** Value-returning methods and getters are invoked through command substitution (`$(Class__method "$slot")`), which runs in a subshell. Any `this.prop = value` mutation inside that subshell is lost, so semantics/codegen reject non-void methods and getters that assign to `this` properties. Constructors and setters are exempt because they are called directly.
 
 **Optional string search positions are normalized in awk.** `indexOf`/`includes`/`startsWith` position, `lastIndexOf` position, and `endsWith` length must use `awkArg()` plus awk-side `int()` truncation and clamping. Do not strip quotes into shell arithmetic for these arguments.
 
@@ -1027,43 +1027,43 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 **Postfix `++` and `--` are statement-only; prefix updates are expressions.** `count++` and `count--` compile to assignment statements. Prefix `++count` and `--count` are supported in expression position and return the updated numeric value. They must resolve through `paramMap` like other variable reads/writes.
 
-**Arrow functions are callback-capable function values.** Direct list `.map(x => expr)`, `.map((x, i) => { return expr })`, `.filter((x, i) => truthyExpr)`, `.some((x, i) => truthyExpr)`, `.every((x, i) => truthyExpr)`, `.find((x, i) => truthyExpr)`, `.findIndex((x, i) => truthyExpr)`, `.reduce((acc, cur) => { ... }, init)`, and statement-position `.forEach((x, i) => { ... })` callbacks are supported, and arrows can also be assigned to variables, passed to functions, called as `cb(value)`, returned from functions, and passed to list callback methods as stored callbacks. Parenthesized arrows may carry TypeScript-shaped return hints: `(x: string): string => x`. `ast.TypeFunction` is a representation hint only; do not add type mismatch checks. Non-capturing arrow value declarations lower to generated shell functions named `_bst_arrow_<binding>_<line>_<col>`, store that shell function name in the binding, and name params as `<function_name>_param_<param_name>`; never emit `local`. Capturing arrows lower to closure ids plus `_bst_closure_*` environment variables and are invoked through `_bst_call`.
+**Arrow functions are callback-capable function values.** Direct array `.map(x => expr)`, `.map((x, i) => { return expr })`, `.filter((x, i) => truthyExpr)`, `.some((x, i) => truthyExpr)`, `.every((x, i) => truthyExpr)`, `.find((x, i) => truthyExpr)`, `.findIndex((x, i) => truthyExpr)`, `.reduce((acc, cur) => { ... }, init)`, and statement-position `.forEach((x, i) => { ... })` callbacks are supported, and arrows can also be assigned to variables, passed to functions, called as `cb(value)`, returned from functions, and passed to array callback methods as stored callbacks. Parenthesized arrows may carry TypeScript-shaped return hints: `(x: string): string => x`. `ast.TypeFunction` is a representation hint only; do not add type mismatch checks. Non-capturing arrow value declarations lower to generated shell functions named `_bst_arrow_<binding>_<line>_<col>`, store that shell function name in the binding, and name params as `<function_name>_param_<param_name>`; never emit `local`. Capturing arrows lower to closure ids plus `_bst_closure_*` environment variables and are invoked through `_bst_call`.
 
-Direct-arrow list callbacks keep the existing inline lowering and restrictions. `.map()` callbacks may take `(item)` or `(item, index)` and block-bodied `return` emits one mapped value then continues the callback loop; supported block statements are `return`, `if`/`else`, and assignments. Do not splice generic expression statements into map callback shell source — reject unsupported statements instead of treating expression values as commands. `.filter()`, `.some()`, `.every()`, and `.findIndex()` use JavaScript-style truthiness and may take the same optional zero-based index parameter. `.some()` returns `1` on the first truthy callback result and `0` for an empty list; `.every()` returns `0` on the first falsey callback result and `1` for an empty list; `.find()` returns the first matching scalar element or `_BESHT_NULLISH_SENTINEL` so `??` fallbacks work.
+Direct-arrow array callbacks keep the existing inline lowering and restrictions. `.map()` callbacks may take `(item)` or `(item, index)` and block-bodied `return` emits one mapped value then continues the callback loop; supported block statements are `return`, `if`/`else`, and assignments. Do not splice generic expression statements into map callback shell source — reject unsupported statements instead of treating expression values as commands. `.filter()`, `.some()`, `.every()`, and `.findIndex()` use JavaScript-style truthiness and may take the same optional zero-based index parameter. `.some()` returns `1` on the first truthy callback result and `0` for an empty array; `.every()` returns `0` on the first falsey callback result and `1` for an empty array; `.find()` returns the first matching scalar element or `_BESHT_NULLISH_SENTINEL` so `??` fallbacks work.
 
-Stored callback values are invoked through `_bst_call` when the value may be a closure id. List `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, and `.reduce()` pass `(item, index)` or `(accumulator, current)` as shell arguments; one-parameter callbacks simply ignore the extra index. Statement-position `.forEach(storedCallback)` invokes the function directly in the current shell so outer assignments and `Set.add()` side effects persist. Direct value-position calls to generated Besht functions/function values use the `_BESHT_RETURN_SLOT` path instead of stdout command substitution, so `let x = cb(value)`, function-call arguments, template interpolations, conditions, and similar generated expressions preserve captured mutation. Keep declared external shell functions on stdout capture because they do not know the return-slot protocol. Stored `.reduce(callback, {})` over compiler-managed object accumulators is supported for Besht callback values by passing the accumulator slot in the current shell.
+Stored callback values are invoked through `_bst_call` when the value may be a closure id. Array `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, and `.reduce()` pass `(item, index)` or `(accumulator, current)` as shell arguments; one-parameter callbacks simply ignore the extra index. Statement-position `.forEach(storedCallback)` invokes the function directly in the current shell so outer assignments and `Set.add()` side effects persist. Direct value-position calls to generated Besht functions/function values use the `_BESHT_RETURN_SLOT` path instead of stdout command substitution, so `let x = cb(value)`, function-call arguments, template interpolations, conditions, and similar generated expressions preserve captured mutation. Keep declared external shell functions on stdout capture because they do not know the return-slot protocol. Stored `.reduce(callback, {})` over compiler-managed object accumulators is supported for Besht callback values by passing the accumulator slot in the current shell.
 
-Returned arrows that capture function-local variables use a generated closure body plus per-instance closure ids, so `makeCounter()`-style factories get independent mutable state. `genReturn` must sync captured temp variables back to `_bst_closure_${env}_<name>` before returning. Direct callback expressions inside list-producing methods have a delayed-expression prelude so calls such as `items.map(x => next() + x)` run `next()` inside the generated loop rather than once while building the shell source. List-producing and predicate callback expressions used in value or condition position are pre-evaluated into temp vars with current-shell heredoc loops, so assignment, `Set.add()`, and returned-closure side effects persist after `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` complete.
+Returned arrows that capture function-local variables use a generated closure body plus per-instance closure ids, so `makeCounter()`-style factories get independent mutable state. `genReturn` must sync captured temp variables back to `_bst_closure_${env}_<name>` before returning. Direct callback expressions inside array-producing methods have a delayed-expression prelude so calls such as `items.map(x => next() + x)` run `next()` inside the generated loop rather than once while building the shell source. Array-producing and predicate callback expressions used in value or condition position are pre-evaluated into temp vars with current-shell heredoc loops, so assignment, `Set.add()`, and returned-closure side effects persist after `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` complete.
 
 Module rewriting must stay lexical-scope aware: `rewriteFnCalls` qualifies real module function calls but must not qualify `cb(...)` when `cb` is a function parameter, `let` binding, destructured binding, loop variable, catch variable, or arrow parameter. Function identifiers used as values are resolved through `Generator.fnValueMap`, so local function values store `module__fn` in bundled output while imported value bindings remain handled by the import variable maps.
 
-**`Array.from({ length })` is narrow by design.** It only supports an object literal with a numeric `length` field (including shorthand `{ length }`) and emits a zero-based numeric list. Do not broaden it to arbitrary iterables or mapper callbacks without adding parser/checker/codegen coverage and docs.
+**`Array.from({ length })` is narrow by design.** It only supports an object literal with a numeric `length` field (including shorthand `{ length }`) and emits a zero-based numeric array. Do not broaden it to arbitrary iterables or mapper callbacks without adding parser/semantics/codegen coverage and docs.
 
 **`of` is not a keyword.** Keep `of` tokenized as `TokIdent` so `Array.of()` and ordinary member/identifier parsing continue to work. `parseFor()` special-cases an identifier literal `of` only in the loop-header slot and lowers `for (x of xs)`, `for (let x of xs)`, and `for (const x of xs)` to the same `ast.ForStmt` shape as Besht's value-iteration `for...in`.
 
-**`Array.isArray(value)` is static.** It returns true only when codegen can infer `value` as `TypeList`; otherwise it emits false. Do not add runtime array metadata or dynamic shape inspection for this API without a broader object/list representation design.
+**`Array.isArray(value)` is static.** It returns true only when codegen can infer `value` as `TypeList`; otherwise it emits false. Do not add runtime array metadata or dynamic shape inspection for this API without a broader object/array representation design.
 
-**Type assertions are erased.** `expr as Type` exists for TypeScript-compatible syntax and compiler type inference only. It emits the inner expression unchanged. This is especially useful for empty list accumulators such as `[] as string[]`.
+**Type assertions are erased.** `expr as Type` exists for TypeScript-compatible syntax and compiler type inference only. It emits the inner expression unchanged. This is especially useful for empty array accumulators such as `[] as string[]`.
 
-**Tuple/list destructuring declarations are lowered to index reads unless the source is static.** `const [dr, dc] = pair` evaluates dynamic `pair` once into a temp and assigns each name from one-based shell line extraction. Static scalar list literals and variables bound to them emit direct assignments, with out-of-range static positions assigned `''`. Element type inference comes from the list/tuple annotation when available.
+**Tuple/array destructuring declarations are lowered to index reads unless the source is static.** `const [dr, dc] = pair` evaluates dynamic `pair` once into a temp and assigns each name from one-based shell line extraction. Static scalar array literals and variables bound to them emit direct assignments, with out-of-range static positions assigned `''`. Element type inference comes from the array/tuple annotation when available.
 
-**List literal spread is generic.** `[...items, extra]` expands the existing newline-delimited list and appends normal elements. It is used by reduce list accumulators and should remain a list literal transformation, not a reduce-specific special case.
+**Array literal spread is generic.** `[...items, extra]` expands the existing newline-delimited array representation and appends normal elements. It is used by reduce array accumulators and should remain an array literal transformation, not a reduce-specific special case.
 
-**List predicate callbacks short-circuit in current-shell heredoc loops.** `list.some(callback)`, `list.every(callback)`, `list.find(callback)`, and `list.findIndex(callback)` use direct arrow callbacks with one item parameter or `(item, index)`. Keep callback params in `paramMap`, increment the optional index once per scalar element, and avoid pipeline loops when state must persist inside the generated predicate loop. `find()` must require the nullish runtime helper and initialize its result to `_BESHT_NULLISH_SENTINEL`; no-match must compose with `??`. Nested-list element decoding is not part of these scalar predicate methods yet.
+**Array predicate callbacks short-circuit in current-shell heredoc loops.** `items.some(callback)`, `items.every(callback)`, `items.find(callback)`, and `items.findIndex(callback)` use direct arrow callbacks with one item parameter or `(item, index)`. Keep callback params in `paramMap`, increment the optional index once per scalar element, and avoid pipeline loops when state must persist inside the generated predicate loop. `find()` must require the nullish runtime helper and initialize its result to `_BESHT_NULLISH_SENTINEL`; no-match must compose with `??`. Nested-array element decoding is not part of these scalar predicate methods yet.
 
-**List expression loops use value iteration and run in the current shell.** `for (const move in moves.split("") as string[])` and `for (const move of moves.split("") as string[])` use a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist. Keep `for...of` behavior in sync with the existing `for...in` list loop lowering.
+**Array expression loops use value iteration and run in the current shell.** `for (const move in moves.split("") as string[])` and `for (const move of moves.split("") as string[])` use a heredoc-backed `while read`, not a pipeline, so `break` and assignments inside the loop persist. Keep `for...of` behavior in sync with the existing `for...in` array loop lowering.
 
 **Optional chaining uses flags on existing postfix AST nodes.** `IndexExpr`, `PropertyExpr`, and `MethodCallExpr` have `Optional bool`; keep all AST walkers descending into their receivers, indexes, and arguments. Codegen emits POSIX shell that stores the receiver once, compares it with `_BESHT_NULLISH_SENTINEL`, and returns that same sentinel on short-circuit so `??` can distinguish nullish from `""`, `0`, and `false`. Optional chaining guards nullish receivers only; do not add runtime shape/type checks. General `fn?.()`, `obj.method?.()`, and optional assignment targets remain unsupported.
 
-**String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the conditional entry-file POSIX self-check behavior. List `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
+**String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the conditional entry-file POSIX self-check behavior. Array `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
 
-**Dynamic `list.join(sep)` and scalar `list.toString()` use awk, not `paste -sd`.** Multi-character separators for dynamic joins require awk since `paste -sd` only uses the first character of the delimiter. Static scalar list literals and variables bound to them fold to quoted constants when elements contain no newlines and the separator is static. Scalar list `toString()` reuses the same join lowering with `,` as the separator and does not implement JavaScript nested-array flattening for `string[][]` or packed rows. The dynamic generated join shape is: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
+**Dynamic `items.join(sep)` and scalar `items.toString()` use awk, not `paste -sd`.** Multi-character separators for dynamic joins require awk since `paste -sd` only uses the first character of the delimiter. Static scalar array literals and variables bound to them fold to quoted constants when elements contain no newlines and the separator is static. Scalar array `toString()` reuses the same join lowering with `,` as the separator and does not implement JavaScript nested-array flattening for `string[][]` or packed rows. The dynamic generated join shape is: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
 
 **AWK `OFMT="%.17g"` is set in all arithmetic BEGIN blocks.** This matches JavaScript double-precision output for division results (e.g., `72.66666666666667` instead of `72.6667`).
 
 **`collectObjectTypes` pre-pass runs before codegen.** It walks the AST to populate `objPropTypeMap` (mapping `"varName.propName"` → type) so that `genProperty` and `inferReceiverType` can resolve object property types even inside function bodies. Without this pre-pass, functions defined before object literals would have empty `objPropTypeMap` entries.
 
-**`fnParamTypes` tracks function parameter types during codegen.** Set in `genFnDecl`/`genModuleFnDecl` from `param.Type` annotations. Used by `inferReceiverType` to determine that a function parameter like `scores: number[]` is a list, enabling `scores.length` and `scores[i]` to work correctly.
+**`fnParamTypes` tracks function parameter types during codegen.** Set in `genFnDecl`/`genModuleFnDecl` from `param.Type` annotations. Used by `inferReceiverType` to determine that a function parameter like `scores: number[]` is an array, enabling `scores.length` and `scores[i]` to work correctly.
 
 **`||` and `&&` in value position return actual values (JS semantics), not booleans.** `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. This is different from condition position (used in `if`/`while`) which returns 1/0. Static value-position logicals with known left truthiness compile directly to the selected side; dynamic value-position logicals use a subshell with `_l=temp` capture to test the left side, then return the appropriate value.
 
@@ -1096,21 +1096,21 @@ Module rewriting must stay lexical-scope aware: `rewriteFnCalls` qualifies real 
 1. **Token**: add `TokXxx` to `token.go`, add keyword string to `keywords` map if keyword-based
 2. **AST node**: add struct to `ast.go` implementing `Statement` or `Expression`
 3. **Parser**: add parse function, wire into `parseStatement()` or `parsePrimary()`
-4. **Checker**: add case in `checkStmt()` or `checkExpr()`; validate types, update scope
+4. **Semantics**: add case in `checkSemanticStmt()` or `checkSemanticExpr()`; validate supported surfaces and update scope
 5. **Codegen**: add case in `genStmt()` or `genExprRHS()`; handle `paramMap`/`rewriteVarRefs` if needed
 6. **Module rewrite pass**: add cases to `rewriteStmt()`/`rewriteExpr()` in `modules.go` if the new node contains function calls
-7. **Tests**: add lexer test, parser test, checker test (valid + error), codegen unit test, integration test
+7. **Tests**: add lexer test, parser test, semantics validator test (valid + error), codegen unit test, integration test
 8. **Examples**: update `examples/healthcheck/` if the feature is user-visible
 9. **README**: update syntax reference
 10. **SKILL.md**: update `skills/besht-scripting/SKILL.md`
 11. **AGENTS.md**: update this file (Syntax Reference, Types, Architecture, Pitfalls)
 
-**Prefer native list APIs over global list helpers.** New language work, examples, and docs should use `list.length`, `list[0]`, `list.slice(1)`, `list.push(value)` or `[...list, value]`, `list.includes(value)`, and `list.concat(other)`. The old global helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers or present them as the primary API.
+**Prefer native array APIs over global list helpers.** New language work, examples, and docs should use `items.length`, `items[0]`, `items.slice(1)`, `items.push(value)` or `[...items, value]`, `items.includes(value)`, and `items.concat(other)`. The old global helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers or present them as the primary API.
 
 **`Set<T>` is a compiler-backed membership collection.** `new Set<T>()` initializes an empty newline-delimited set, `.has(value)` emits a POSIX `grep -qxF` membership test, and `.add(value)` mutates the set with an `awk` uniqueness filter. Straight-line static scalar `.add()` calls track known values and fold static `.has()` calls to `1`/`0`; invalidate that static Set map on reassignment, dynamic adds, control-flow adds, callback adds, or newline-containing values. Type parameters are annotations only; do not add runtime type checks.
 
-**Nested lists are encoded as packed rows.** When `.map()` returns a list, each row is packed with ASCII unit separator (`\037`) so the outer list remains newline-delimited. `matrix[row]` decodes one row, `matrix[row][col]` indexes into it, and `.length` on a decoded row counts row items. Keep this generic; do not special-case fixtures.
+**Nested arrays are encoded as packed rows.** When `.map()` returns an array, each row is packed with ASCII unit separator (`\037`) so the outer array remains newline-delimited. `matrix[row]` decodes one row, `matrix[row][col]` indexes into it, and `.length` on a decoded row counts row items. Keep this generic; do not special-case fixtures.
 
 **Blockless `if`/`else` bodies are parsed as one-statement blocks.** `if (cond) return x` and `else expr` should produce the same AST shape as braced single-statement blocks.
 
-**Import value exports, shell imports, declaration files, and .ts fallback.** `export const name = expr` and `export default expr` are module-level value exports. Module codegen qualifies exported values as `<module>__<name>` and default exports as `<module>__default`; imported values are mapped through `moduleGenerator.importVarMap` into `paramMap` so normal identifier and command-spread generation uses the qualified shell variable. Imported value representation hints must also be seeded into `varTypeMap` for both the source import name and qualified shell name so codegen dispatches imported list/boolean methods and formatting correctly. Keep extensionless import resolution `.bsh`-first. Only `codegen.Options.ResolveTsImports` / `--opt-resolve-ts-imports` may fall back to `.ts`, and `.d.bsh` imports remain declaration-only. `CompileFile`, `CompileFileSplit`, and `CheckFile` auto-load `stdlib.d.bsh` from the entry file directory when present; do not scan imported module directories for their own stdlib files, and do not emit/source declaration files in bundled or split output. Declared function calls must keep the declared external name unqualified; do not rewrite them to `<module>__<name>` because no Besht wrapper is emitted. Explicit `.sh` imports require named imports plus `assert { type: "shell" }`; default shell imports are rejected, shell files are not parsed for exports, and checker registration treats imported shell functions as unchecked varargs returning `string`. `--check` uses the module compiler path so import validation matches compilation. By default shell imports must stay inside the compiler root; `codegen.Options.AllowExternalShellImports` / `--opt-allow-external-shell-imports` permits explicit `.sh` imports outside that root without relaxing `.bsh` module imports. Bundled output sources the resolved shell file with a guard, while split output copies in-root raw shell dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths. External opt-in shell imports in split output are sourced from their original absolute path instead of copied outside the output root. Shell import guard variables are generated from unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
+**Import value exports, shell imports, declaration files, and .ts fallback.** `export const name = expr` and `export default expr` are module-level value exports. Module codegen qualifies exported values as `<module>__<name>` and default exports as `<module>__default`; imported values are mapped through `moduleGenerator.importVarMap` into `paramMap` so normal identifier and command-spread generation uses the qualified shell variable. Imported value representation hints must also be seeded into `varTypeMap` for both the source import name and qualified shell name so codegen dispatches imported array/boolean methods and formatting correctly. Keep extensionless import resolution `.bsh`-first. Only `codegen.Options.ResolveTsImports` / `--opt-resolve-ts-imports` may fall back to `.ts`, and `.d.bsh` imports remain declaration-only. `CompileFile`, `CompileFileSplit`, and `CheckFile` auto-load `stdlib.d.bsh` from the entry file directory when present; do not scan imported module directories for their own stdlib files, and do not emit/source declaration files in bundled or split output. Declared function calls must keep the declared external name unqualified; do not rewrite them to `<module>__<name>` because no Besht wrapper is emitted. Explicit `.sh` imports require named imports plus `assert { type: "shell" }`; default shell imports are rejected, shell files are not parsed for exports, and semantics validator registration treats imported shell functions as unchecked varargs returning `string`. `--check` uses the module compiler path so import validation matches compilation. By default shell imports must stay inside the compiler root; `codegen.Options.AllowExternalShellImports` / `--opt-allow-external-shell-imports` permits explicit `.sh` imports outside that root without relaxing `.bsh` module imports. Bundled output sources the resolved shell file with a guard, while split output copies in-root raw shell dependencies into the output tree and sources them via safely quoted `_BESHT_ROOT` paths. External opt-in shell imports in split output are sourced from their original absolute path instead of copied outside the output root. Shell import guard variables are generated from unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.

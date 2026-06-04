@@ -617,7 +617,7 @@ func (p *Parser) parseType() (*ast.Type, error) {
 			return nil, err
 		}
 	}
-	// Postfix [] syntax: string[] → list<string>
+	// Postfix [] syntax: string[] -> Array<string>
 	for p.peekType() == lexer.TokLBracket {
 		p.advance() // consume [
 		if _, err := p.expect(lexer.TokRBracket); err != nil {
