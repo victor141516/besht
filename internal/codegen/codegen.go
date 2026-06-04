@@ -399,6 +399,12 @@ func exprJSONBuiltinUse(expr ast.Expression) string {
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				if name := exprJSONBuiltinUse(field.Spread); name != "" {
+					return name
+				}
+				continue
+			}
 			if name := exprJSONBuiltinUse(field.Value); name != "" {
 				return name
 			}
@@ -507,6 +513,10 @@ func collectControlFlowAssignments(stmts []ast.Statement) map[string]bool {
 			}
 		case *ast.ObjectLit:
 			for _, field := range e.Fields {
+				if field.Spread != nil {
+					walkExpr(field.Spread, inControl)
+					continue
+				}
 				walkExpr(field.Value, inControl)
 			}
 		case *ast.ArrowExpr:
@@ -641,6 +651,10 @@ func markControlFlowMutations(expr ast.Expression, inControl bool, assigned map[
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				markControlFlowMutations(field.Spread, inControl, assigned)
+				continue
+			}
 			markControlFlowMutations(field.Value, inControl, assigned)
 		}
 	case *ast.TemplateLit:
@@ -985,6 +999,10 @@ func walkArgsExpr(expr ast.Expression, visit func(ast.Expression)) {
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				walkArgsExpr(field.Spread, visit)
+				continue
+			}
 			walkArgsExpr(field.Value, visit)
 		}
 	case *ast.ArrowExpr:
@@ -1040,6 +1058,9 @@ func (g *Generator) collectObjectTypes(stmts []ast.Statement) {
 			if obj, ok := s.Value.(*ast.ObjectLit); ok {
 				varName := s.Name
 				for _, field := range obj.Fields {
+					if field.Spread != nil {
+						continue
+					}
 					pt := g.inferExprType(field.Value)
 					if pt != nil {
 						g.objPropTypeMap[varName+"."+field.Key] = pt
@@ -1983,6 +2004,38 @@ func objectAssignCall(expr ast.Expression) (*ast.BuiltinCallExpr, bool) {
 	return call, ok && call.Name == "Object.assign"
 }
 
+func objectLiteralHasSpread(obj *ast.ObjectLit) bool {
+	for _, field := range obj.Fields {
+		if field.Spread != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func objectLiteralAssignCall(obj *ast.ObjectLit) *ast.BuiltinCallExpr {
+	args := []ast.Expression{&ast.ObjectLit{Pos: obj.Pos}}
+	var pending []ast.ObjectField
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		fields := append([]ast.ObjectField(nil), pending...)
+		args = append(args, &ast.ObjectLit{Pos: pending[0].Pos, Fields: fields})
+		pending = nil
+	}
+	for _, field := range obj.Fields {
+		if field.Spread != nil {
+			flush()
+			args = append(args, field.Spread)
+			continue
+		}
+		pending = append(pending, field)
+	}
+	flush()
+	return &ast.BuiltinCallExpr{Pos: obj.Pos, Name: "Object.assign", Args: args}
+}
+
 func objectRefRuntimeValue(ref objectRef) string {
 	if ref.StaticName != "" {
 		return shellQuote(ref.StaticName)
@@ -1996,6 +2049,10 @@ func (g *Generator) nextObjectTemp(pos ast.Pos) string {
 }
 
 func (g *Generator) genObjectLiteralBinding(varName string, obj *ast.ObjectLit) error {
+	if objectLiteralHasSpread(obj) {
+		_, err := g.genObjectAssignValue(objectLiteralAssignCall(obj), varName)
+		return err
+	}
 	var fields []string
 	g.deleteObjectStaticValues(varName)
 	for _, field := range obj.Fields {
@@ -2039,6 +2096,13 @@ func (g *Generator) genObjectExprRef(expr ast.Expression) (objectRef, bool, erro
 	if call, ok := objectAssignCall(expr); ok {
 		ref, err := g.genObjectAssignValue(call, "")
 		return ref, err == nil, err
+	}
+	if obj, ok := unwrapAsExpr(expr).(*ast.ObjectLit); ok && objectLiteralHasSpread(obj) {
+		name := g.nextObjectTemp(obj.Pos)
+		if err := g.genObjectLiteralBinding(name, obj); err != nil {
+			return objectRef{}, false, err
+		}
+		return objectRef{StaticName: name, RootName: name}, true, nil
 	}
 	if call, ok := unwrapAsExpr(expr).(*ast.FnCallExpr); ok {
 		if typ := g.inferReceiverType(call); typ != nil && typ.Kind == ast.TypeObject && g.fnCallSupportsReturnSlot(call.Name) {
@@ -2134,6 +2198,27 @@ func (g *Generator) genObjectAssignSources(targetRef objectRef, sources []ast.Ex
 		source = unwrapAsExpr(source)
 		switch src := source.(type) {
 		case *ast.ObjectLit:
+			if objectLiteralHasSpread(src) {
+				sourceRef, ok, err := g.genObjectExprRef(src)
+				if err != nil {
+					return objectRef{}, err
+				}
+				if !ok {
+					return objectRef{}, fmt.Errorf("Object.assign() requires an object literal or named object")
+				}
+				if err := g.validateObjectRefScalarValues("Object.assign", sourceRef); err != nil {
+					return objectRef{}, err
+				}
+				g.invalidateStaticObjectRef(targetRef)
+				if targetRef.StaticName != "" {
+					g.deleteObjectStaticValues(targetRef.StaticName)
+				}
+				if err := g.genCopyObjectRefToRef(targetRef, sourceRef, pos); err != nil {
+					return objectRef{}, err
+				}
+				freshStatic = false
+				continue
+			}
 			if err := g.validateObjectLiteralScalarValues("Object.assign", src); err != nil {
 				return objectRef{}, err
 			}
@@ -2192,6 +2277,11 @@ func (g *Generator) genObjectLiteralRefInit(target objectRef, obj *ast.ObjectLit
 	slotVar := fmt.Sprintf("_objt_%d_%d", obj.Pos.Line, obj.Pos.Column)
 	g.line(slotVar + "=" + target.SlotExpr)
 	g.line(computedKeyValidation(slotVar))
+	if objectLiteralHasSpread(obj) {
+		g.line("eval \"_objkeys_${" + slotVar + "}=\\\"\\\"\"")
+		_, err := g.genObjectAssignSources(target, objectLiteralAssignCall(obj).Args[1:], false, obj.Pos)
+		return err
+	}
 	g.line("eval \"_objkeys_${" + slotVar + "}=\\\"\\\"\"")
 	for _, field := range obj.Fields {
 		if err := validateStaticObjectKey(field.Key); err != nil {
@@ -2235,7 +2325,38 @@ func (g *Generator) emitObjectAssignFreshReturnSlot(call *ast.BuiltinCallExpr) e
 	return nil
 }
 
+func (g *Generator) emitObjectLiteralFreshReturnSlot(obj *ast.ObjectLit) error {
+	if err := g.validateObjectLiteralScalarValues("object spread", obj); err != nil {
+		return err
+	}
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", returnSlotVar))
+	g.push()
+	targetRef := objectRef{SlotExpr: fmt.Sprintf("\"$%s\"", returnSlotVar)}
+	if err := g.genObjectLiteralRefInit(targetRef, obj); err != nil {
+		return err
+	}
+	g.emitClosureCaptureSync()
+	g.line(fmt.Sprintf("eval \"$%s=\\$%s\"", returnSlotVar, returnSlotVar))
+	g.line("return 0")
+	g.pop()
+	g.line("fi")
+	return nil
+}
+
 func (g *Generator) genCopyObjectLiteralToRef(target objectRef, obj *ast.ObjectLit, keepStatic bool) error {
+	if objectLiteralHasSpread(obj) {
+		sourceRef, ok, err := g.genObjectExprRef(obj)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("Object.assign() requires an object literal or named object")
+		}
+		if err := g.validateObjectRefScalarValues("Object.assign", sourceRef); err != nil {
+			return err
+		}
+		return g.genCopyObjectRefToRef(target, sourceRef, obj.Pos)
+	}
 	for _, field := range obj.Fields {
 		if err := validateStaticObjectKey(field.Key); err != nil {
 			return err
@@ -2879,22 +3000,28 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 
 	initVal := me.Args[1]
 	if obj, ok := initVal.(*ast.ObjectLit); ok {
-		var fields []string
-		for _, field := range obj.Fields {
-			if err := validateStaticObjectKey(field.Key); err != nil {
+		if objectLiteralHasSpread(obj) {
+			if err := g.genObjectLiteralBinding(varName, obj); err != nil {
 				return err
 			}
-			fields = append(fields, field.Key)
-			val, err := g.genExprRHS(field.Value, nil)
-			if err != nil {
-				return err
+		} else {
+			var fields []string
+			for _, field := range obj.Fields {
+				if err := validateStaticObjectKey(field.Key); err != nil {
+					return err
+				}
+				fields = append(fields, field.Key)
+				val, err := g.genExprRHS(field.Value, nil)
+				if err != nil {
+					return err
+				}
+				g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
 			}
-			g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
+			g.objFieldsMap[varName] = fields
+			g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
+			g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
+			g.emitObjectKeysInit(varName, fields)
 		}
-		g.objFieldsMap[varName] = fields
-		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
-		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
-		g.emitObjectKeysInit(varName, fields)
 	} else {
 		val, err := g.genExprRHS(initVal, nil)
 		if err != nil {
@@ -2959,22 +3086,28 @@ func (g *Generator) genReduceFunctionLetDecl(varName, sourceName string, me *ast
 	}
 	accIsObject := false
 	if obj, ok := unwrapAsExpr(initVal).(*ast.ObjectLit); ok {
-		var fields []string
-		for _, field := range obj.Fields {
-			if err := validateStaticObjectKey(field.Key); err != nil {
+		if objectLiteralHasSpread(obj) {
+			if err := g.genObjectLiteralBinding(varName, obj); err != nil {
 				return err
 			}
-			fields = append(fields, field.Key)
-			val, err := g.genExprRHS(field.Value, nil)
-			if err != nil {
-				return err
+		} else {
+			var fields []string
+			for _, field := range obj.Fields {
+				if err := validateStaticObjectKey(field.Key); err != nil {
+					return err
+				}
+				fields = append(fields, field.Key)
+				val, err := g.genExprRHS(field.Value, nil)
+				if err != nil {
+					return err
+				}
+				g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
 			}
-			g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
+			g.objFieldsMap[varName] = fields
+			g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
+			g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
+			g.emitObjectKeysInit(varName, fields)
 		}
-		g.objFieldsMap[varName] = fields
-		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
-		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
-		g.emitObjectKeysInit(varName, fields)
 		accIsObject = true
 	} else {
 		val, err := g.genExprRHS(initVal, nil)
@@ -3425,24 +3558,9 @@ func (g *Generator) genClassDecl(c *ast.ClassDecl) error {
 	for _, prop := range c.StaticProps {
 		if obj, ok := prop.Value.(*ast.ObjectLit); ok {
 			staticVar := classPropVar(c.Name, prop.Name)
-			var fields []string
-			for _, field := range obj.Fields {
-				if err := validateStaticObjectKey(field.Key); err != nil {
-					return err
-				}
-				fields = append(fields, field.Key)
-				val, err := g.genExprRHS(field.Value, nil)
-				if err != nil {
-					return err
-				}
-				if pt := g.inferReceiverType(field.Value); pt != nil {
-					g.objPropTypeMap[staticVar+"."+field.Key] = pt
-				}
-				g.line(fmt.Sprintf("%s=%s", objectPropVar(staticVar, field.Key), val))
+			if err := g.genObjectLiteralBinding(staticVar, obj); err != nil {
+				return err
 			}
-			g.objFieldsMap[staticVar] = fields
-			g.emitObjectKeysInit(staticVar, fields)
-			g.line(fmt.Sprintf("%s=%s", staticVar, shellQuote(staticVar)))
 			continue
 		}
 		val := `""`
@@ -4341,6 +4459,9 @@ func staticObjectScalarValue(expr ast.Expression) (string, bool) {
 func staticObjectLiteralKeys(obj *ast.ObjectLit) ([]string, bool) {
 	keys := make([]string, 0, len(obj.Fields))
 	for _, field := range obj.Fields {
+		if field.Spread != nil {
+			return nil, false
+		}
 		if err := validateStaticObjectKey(field.Key); err != nil {
 			return nil, false
 		}
@@ -4352,6 +4473,9 @@ func staticObjectLiteralKeys(obj *ast.ObjectLit) ([]string, bool) {
 func staticObjectLiteralValues(obj *ast.ObjectLit) ([]string, bool) {
 	values := make([]string, 0, len(obj.Fields))
 	for _, field := range obj.Fields {
+		if field.Spread != nil {
+			return nil, false
+		}
 		if err := validateStaticObjectKey(field.Key); err != nil {
 			return nil, false
 		}
@@ -4367,6 +4491,9 @@ func staticObjectLiteralValues(obj *ast.ObjectLit) ([]string, bool) {
 func staticObjectLiteralEntries(obj *ast.ObjectLit) ([]string, bool) {
 	entries := make([]string, 0, len(obj.Fields))
 	for _, field := range obj.Fields {
+		if field.Spread != nil {
+			return nil, false
+		}
 		if err := validateStaticObjectKey(field.Key); err != nil {
 			return nil, false
 		}
@@ -5034,7 +5161,11 @@ func (g *Generator) genReturn(s *ast.ReturnStmt) error {
 		return nil
 	}
 	if retType != nil && retType.Kind == ast.TypeObject {
-		if call, ok := objectAssignCall(s.Value); ok && len(call.Args) > 0 {
+		if obj, ok := unwrapAsExpr(s.Value).(*ast.ObjectLit); ok {
+			if err := g.emitObjectLiteralFreshReturnSlot(obj); err != nil {
+				return err
+			}
+		} else if call, ok := objectAssignCall(s.Value); ok && len(call.Args) > 0 {
 			if _, ok := unwrapAsExpr(call.Args[0]).(*ast.ObjectLit); ok {
 				if err := g.emitObjectAssignFreshReturnSlot(call); err != nil {
 					return err
@@ -5272,6 +5403,12 @@ func containsOptionalChainExpr(expr ast.Expression) bool {
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				if containsOptionalChainExpr(field.Spread) {
+					return true
+				}
+				continue
+			}
 			if containsOptionalChainExpr(field.Value) {
 				return true
 			}
@@ -5403,6 +5540,11 @@ func (g *Generator) genConsoleLogObject(expr ast.Expression) (string, error) {
 	if obj, ok := inlineObjectLiteral(expr); ok {
 		return g.genInlineObjectPrintCode(obj, "stdout")
 	}
+	if ref, ok, err := g.genObjectExprRef(expr); err != nil {
+		return "", err
+	} else if ok && ref.StaticName != "" {
+		return g.genObjectPrintCode(ref.StaticName, "stdout"), nil
+	}
 	varName := g.resolveObjectVarName(expr)
 	if varName == "" {
 		return "", fmt.Errorf("cannot log object: unable to resolve variable name")
@@ -5414,6 +5556,11 @@ func (g *Generator) genConsoleErrorObject(expr ast.Expression) (string, error) {
 	if obj, ok := inlineObjectLiteral(expr); ok {
 		return g.genInlineObjectPrintCode(obj, "stderr")
 	}
+	if ref, ok, err := g.genObjectExprRef(expr); err != nil {
+		return "", err
+	} else if ok && ref.StaticName != "" {
+		return g.genObjectPrintCode(ref.StaticName, "stderr"), nil
+	}
 	varName := g.resolveObjectVarName(expr)
 	if varName == "" {
 		return "", fmt.Errorf("cannot log object: unable to resolve variable name")
@@ -5424,6 +5571,9 @@ func (g *Generator) genConsoleErrorObject(expr ast.Expression) (string, error) {
 func inlineObjectLiteral(expr ast.Expression) (*ast.ObjectLit, bool) {
 	switch e := expr.(type) {
 	case *ast.ObjectLit:
+		if objectLiteralHasSpread(e) {
+			return nil, false
+		}
 		return e, true
 	case *ast.AsExpr:
 		return inlineObjectLiteral(e.Expr)
@@ -5662,11 +5812,17 @@ func unsupportedObjectValueType(t *ast.Type) bool {
 }
 
 func objectScalarValuesError(api string) error {
+	if strings.HasPrefix(api, "object ") {
+		return fmt.Errorf("%s only supports scalar object values", api)
+	}
 	return fmt.Errorf("%s() only supports scalar object values", api)
 }
 
 func (g *Generator) validateObjectLiteralScalarValues(api string, obj *ast.ObjectLit) error {
 	for _, field := range obj.Fields {
+		if field.Spread != nil {
+			continue
+		}
 		if unsupportedObjectValueType(g.inferReceiverType(field.Value)) {
 			return objectScalarValuesError(api)
 		}
@@ -6109,6 +6265,9 @@ func (g *Generator) genJSONStringify(expr ast.Expression) (string, error) {
 		if err := g.validateObjectLiteralScalarValues("JSON.stringify", e); err != nil {
 			return "", err
 		}
+		if objectLiteralHasSpread(e) {
+			return g.genJSONObjectRef(e)
+		}
 		return g.genJSONObjectLiteral(e)
 	case *ast.ListLit:
 		val, err := g.genListLiteral(e)
@@ -6222,6 +6381,9 @@ func (g *Generator) genJSONListValue(val string, typ *ast.Type, pos ast.Pos) str
 }
 
 func (g *Generator) genJSONObjectLiteral(obj *ast.ObjectLit) (string, error) {
+	if objectLiteralHasSpread(obj) {
+		return g.genJSONObjectRef(obj)
+	}
 	var args []string
 	var pairs []string
 	for i, field := range obj.Fields {
@@ -6266,6 +6428,9 @@ func (g *Generator) genJSONObjectRef(expr ast.Expression) (string, error) {
 		return g.genJSONStaticObjectMetadata(ref.StaticName), nil
 	}
 	if len(fields) == 0 {
+		if _, hasStaticKeys := g.staticObjectMap[ref.StaticName]; !hasStaticKeys {
+			return g.genJSONStaticObjectMetadata(ref.StaticName), nil
+		}
 		return "'{}'", nil
 	}
 	var args []string
@@ -6315,7 +6480,7 @@ func (g *Generator) genObjectKeys(expr ast.Expression) (string, error) {
 	if keys, ok := g.staticNamedObjectKeys(expr); ok {
 		return shellQuote(strings.Join(keys, "\n")), nil
 	}
-	if obj, ok := expr.(*ast.ObjectLit); ok {
+	if obj, ok := expr.(*ast.ObjectLit); ok && !objectLiteralHasSpread(obj) {
 		return g.genObjectLiteralKeys(obj)
 	}
 	if ref, ok, err := g.genObjectExprRef(expr); err != nil {
@@ -6338,7 +6503,7 @@ func (g *Generator) genObjectValues(expr ast.Expression) (string, error) {
 	if as, ok := expr.(*ast.AsExpr); ok {
 		return g.genObjectValues(as.Expr)
 	}
-	if obj, ok := expr.(*ast.ObjectLit); ok {
+	if obj, ok := expr.(*ast.ObjectLit); ok && !objectLiteralHasSpread(obj) {
 		if err := g.validateObjectLiteralScalarValues("Object.values", obj); err != nil {
 			return "", err
 		}
@@ -6370,7 +6535,7 @@ func (g *Generator) genObjectEntries(expr ast.Expression) (string, error) {
 	if as, ok := expr.(*ast.AsExpr); ok {
 		return g.genObjectEntries(as.Expr)
 	}
-	if obj, ok := expr.(*ast.ObjectLit); ok {
+	if obj, ok := expr.(*ast.ObjectLit); ok && !objectLiteralHasSpread(obj) {
 		if err := g.validateObjectLiteralScalarValues("Object.entries", obj); err != nil {
 			return "", err
 		}
@@ -6405,7 +6570,7 @@ func (g *Generator) genObjectHasOwn(objExpr, keyExpr ast.Expression) (string, er
 	if value, ok, err := g.genStaticObjectHasOwn(objExpr, keyExpr); err != nil || ok {
 		return value, err
 	}
-	if obj, ok := objExpr.(*ast.ObjectLit); ok {
+	if obj, ok := objExpr.(*ast.ObjectLit); ok && !objectLiteralHasSpread(obj) {
 		if key, ok := staticScalarValue(keyExpr); ok {
 			return g.genStaticObjectLiteralHasOwn(obj, key)
 		}
@@ -6414,7 +6579,7 @@ func (g *Generator) genObjectHasOwn(objExpr, keyExpr ast.Expression) (string, er
 	if err != nil {
 		return "", err
 	}
-	if obj, ok := objExpr.(*ast.ObjectLit); ok {
+	if obj, ok := objExpr.(*ast.ObjectLit); ok && !objectLiteralHasSpread(obj) {
 		return g.genObjectLiteralHasOwn(obj, keyStr)
 	}
 	if ref, ok, err := g.genObjectExprRef(objExpr); err != nil {
@@ -7842,7 +8007,7 @@ func arrayFromLengthArg(e *ast.BuiltinCallExpr) (ast.Expression, bool) {
 		return nil, false
 	}
 	obj, ok := e.Args[0].(*ast.ObjectLit)
-	if !ok || len(obj.Fields) != 1 || obj.Fields[0].Key != "length" {
+	if !ok || len(obj.Fields) != 1 || obj.Fields[0].Spread != nil || obj.Fields[0].Key != "length" {
 		return nil, false
 	}
 	return obj.Fields[0].Value, true

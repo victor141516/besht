@@ -219,6 +219,12 @@ func (v *fetchSurfaceValidator) expr(expr ast.Expression) error {
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				if err := v.expr(field.Spread); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := v.expr(field.Value); err != nil {
 				return err
 			}

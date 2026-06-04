@@ -1227,6 +1227,10 @@ func rewriteExpr(expr ast.Expression, importMap map[string]string, qualify func(
 		}
 	case *ast.ObjectLit:
 		for _, field := range e.Fields {
+			if field.Spread != nil {
+				rewriteExpr(field.Spread, importMap, qualify, scope)
+				continue
+			}
 			rewriteExpr(field.Value, importMap, qualify, scope)
 		}
 	case *ast.TemplateLit:

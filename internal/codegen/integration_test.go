@@ -3176,6 +3176,38 @@ console.log(dup.name)`)
 	}
 }
 
+func TestIntegration_ObjectSpreadRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let defaults = { name: "Ada", active: false, missing: null }
+let overrides = { active: true, role: "admin" }
+let merged = { ...defaults, name: "Grace", ...overrides }
+defaults.name = "Linus"
+overrides.role = "runtime"
+console.log(Object.keys(merged).join(","))
+console.log(merged.name)
+console.log(merged.active)
+console.log(merged.role)
+console.log(merged.missing ?? "fallback")
+
+let dynamic = {}
+let key = "team"
+dynamic[key] = "compiler"
+let copy = { ...dynamic, extra: "yes" }
+dynamic[key] = "runtime"
+console.log(Object.keys(copy).join(","))
+console.log(copy[key])
+console.log(copy.extra)
+
+let literal = { ...{ first: "A" }, second: "B", ...{ first: "Z" } }
+console.log(Object.keys(literal).join(","))
+console.log(Object.values(literal).join(","))
+console.log(Object.hasOwn({ ...literal }, "second"))
+`)
+	want := "name,active,missing,role\nGrace\ntrue\nadmin\nfallback\nteam,extra\ncompiler\nyes\nfirst,second\nZ,B\ntrue\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
 func TestIntegration_BooleanPropertyConditionRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let user = { name: "Ada", active: true }
 let other = { name: "", active: false }

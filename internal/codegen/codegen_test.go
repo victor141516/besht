@@ -3055,6 +3055,23 @@ let keys = Object.keys(copy)`)
 	assertNotContains(t, out, `_bst_object_assign`)
 }
 
+func TestCodegen_ObjectSpread(t *testing.T) {
+	out := compile(t, `let defaults = { name: "Ada", active: false }
+let overrides = { active: true, role: "admin" }
+let merged = { ...defaults, name: "Grace", ...overrides }
+let literal = { ...{ first: "A" }, second: "B" }
+let keys = Object.keys(merged)
+let literalKeys = Object.keys(literal)`)
+	assertContains(t, out, `merged='merged'`)
+	assertContains(t, out, `_obj_merged_name='Grace'`)
+	assertContains(t, out, `_objs_3_14='defaults'`)
+	assertContains(t, out, `_objs_3_14='overrides'`)
+	assertContains(t, out, `for _objk_3_14 in $_bst_obj_keys; do`)
+	assertContains(t, out, "literalKeys='first\nsecond'")
+	assertContains(t, out, `keys=$(if [ -n "$_objkeys_merged" ]; then printf '%s\n' $_objkeys_merged; fi)`)
+	assertNotContains(t, out, `_bst_object_assign`)
+}
+
 func TestCodegen_StaticNamedObjectKeysAndHasOwn(t *testing.T) {
 	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
 let keys = Object.keys(user)

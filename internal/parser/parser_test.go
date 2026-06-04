@@ -1275,6 +1275,27 @@ func TestParser_ObjectStaticMethodsParseAsBuiltinCalls(t *testing.T) {
 	}
 }
 
+func TestParser_ObjectLiteralSpread(t *testing.T) {
+	prog := mustParse(t, `let merged = { ...defaults, active: true, ...overrides }`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	obj, ok := decl.Value.(*ast.ObjectLit)
+	if !ok {
+		t.Fatalf("value: expected *ast.ObjectLit, got %T", decl.Value)
+	}
+	if len(obj.Fields) != 3 {
+		t.Fatalf("fields: got %d, want 3", len(obj.Fields))
+	}
+	if obj.Fields[0].Spread == nil {
+		t.Fatalf("first field: expected spread")
+	}
+	if obj.Fields[1].Key != "active" || obj.Fields[1].Value == nil {
+		t.Fatalf("second field: got key=%q value=%T, want active field", obj.Fields[1].Key, obj.Fields[1].Value)
+	}
+	if obj.Fields[2].Spread == nil {
+		t.Fatalf("third field: expected spread")
+	}
+}
+
 func TestParser_BracketlessIfElseBodies(t *testing.T) {
 	prog := mustParse(t, `if (m1 === "F") dmgTo2 += 2;
 else if (m1 === "A" && m2 !== "B") dmgTo2 += 1;

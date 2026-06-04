@@ -2100,6 +2100,18 @@ func (p *Parser) parseObjectLit() (*ast.ObjectLit, error) {
 	pos := p.pos2ast(tok)
 	var fields []ast.ObjectField
 	for p.peekType() != lexer.TokRBrace && p.peekType() != lexer.TokEOF {
+		if p.peekType() == lexer.TokEllipsis {
+			spreadTok := p.advance()
+			expr, err := p.parseExpr()
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, ast.ObjectField{Pos: p.pos2ast(spreadTok), Spread: expr})
+			if p.peekType() == lexer.TokComma {
+				p.advance()
+			}
+			continue
+		}
 		keyTok := p.peek()
 		if !isIdentifierName(keyTok.Type) && keyTok.Type != lexer.TokString {
 			return nil, p.errorf(keyTok, "expected object field name")
