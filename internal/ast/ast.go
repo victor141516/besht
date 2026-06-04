@@ -741,7 +741,7 @@ func (n *AsExpr) exprNode()    {}
 func IsBuiltin(name string) bool {
 	switch name {
 	case "fetch", "Boolean",
-		"Array.isArray", "Object.keys", "Object.values", "Object.entries", "Object.hasOwn",
+		"Array.isArray", "Object.keys", "Object.values", "Object.entries", "Object.hasOwn", "Object.assign",
 		"JSON.parse", "JSON.stringify", "console.log", "console.error":
 		return true
 	}

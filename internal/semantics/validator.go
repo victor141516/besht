@@ -479,6 +479,11 @@ func (c *Validator) checkSemanticExpr(expr ast.Expression) error {
 		if err := c.checkBuiltinArity(e); err != nil {
 			return err
 		}
+		if e.Name == "Object.assign" {
+			if ident, ok := unwrapAsExpr(e.Args[0]).(*ast.IdentExpr); ok && c.consts[ident.Name] {
+				return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("cannot assign to const %q", ident.Name)}
+			}
+		}
 		for _, arg := range e.Args {
 			if err := c.checkSemanticExpr(arg); err != nil {
 				return err
@@ -636,6 +641,10 @@ func (c *Validator) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 	case "Object.hasOwn":
 		if len(e.Args) != 2 {
 			return &SemanticError{Pos: e.Pos, Message: "Object.hasOwn() takes 2 arguments"}
+		}
+	case "Object.assign":
+		if len(e.Args) < 1 {
+			return &SemanticError{Pos: e.Pos, Message: "Object.assign() takes at least 1 argument"}
 		}
 	case "JSON.parse", "JSON.stringify":
 		if len(e.Args) != 1 {
@@ -1006,6 +1015,8 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 			return listStrType
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: listStrType}
+		case "Object.assign":
+			return &ast.Type{Kind: ast.TypeObject}
 		case "JSON.parse":
 			return &ast.Type{Kind: ast.TypeJSON}
 		case "JSON.stringify":

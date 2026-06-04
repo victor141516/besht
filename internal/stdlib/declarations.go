@@ -79,6 +79,8 @@ declare namespace Object {
     function values(value: object): string[]
     function entries(value: object): string[][]
     function hasOwn(value: object, key: string): boolean
+    function assign(target: object): object
+    function assign(target: object, source: object): object
 }
 
 declare namespace JSON {

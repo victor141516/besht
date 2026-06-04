@@ -1,0 +1,55 @@
+function clone(obj: object): object {
+    return Object.assign({}, obj);
+}
+
+function mergeInto(target: object, source: object): object {
+    return Object.assign(target, source);
+}
+
+let source = { name: "Ada", missing: null };
+let copy = Object.assign({}, source, { active: true }, { name: "Grace" });
+source.name = "Linus";
+
+console.log(Object.keys(copy).join(","));
+console.log(copy.name);
+console.log(copy.missing ?? "fallback");
+
+let alias = source;
+let result = Object.assign(alias, { role: "admin" });
+console.log(Object.keys(source).join(","));
+console.log(result.role);
+
+let dynamic = {};
+let key = "team";
+dynamic[key] = "compiler";
+let cloned = clone(dynamic);
+dynamic[key] = "runtime";
+console.log(Object.keys(cloned).join(","));
+console.log(cloned[key]);
+let otherDynamic = {};
+otherDynamic[key] = "shell";
+let clonedAgain = clone(otherDynamic);
+console.log(cloned[key]);
+console.log(clonedAgain[key]);
+console.log(Object.keys(clone(dynamic)).join(","));
+let boolSource = { active: true };
+let boolCopy = Object.assign({}, boolSource);
+console.log(Object.values(boolCopy).join(","));
+
+let target = { base: "yes" };
+let mergedTarget = mergeInto(target, cloned);
+console.log(Object.keys(mergedTarget).join(","));
+console.log(mergedTarget.team);
+
+let rebound = { old: "value" };
+rebound = Object.assign({}, target);
+target.team = "changed";
+console.log(rebound.team);
+
+if (Object.assign(target, { checked: true })) {
+    console.log(Object.hasOwn(target, "checked").toString());
+}
+
+let dup = Object.assign({}, { name: "Ada", name: "Grace" });
+console.log(Object.keys(dup).join(","));
+console.log(dup.name);

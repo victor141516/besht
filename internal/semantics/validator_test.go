@@ -810,6 +810,15 @@ let entries: string[][] = Object.entries(user)`},
 		{"Object.hasOwn object", `let user = { id: 1, name: "Victor" }
 let ok: boolean = Object.hasOwn(user, "name")`},
 		{"Object.hasOwn literal", `let ok: boolean = Object.hasOwn({ id: 1, name: "Victor" }, "name")`},
+		{"Object.assign object", `let user = { id: 1, name: "Victor" }
+let updated: object = Object.assign(user, { active: true })`},
+		{"Object.assign literal target", `let updated: object = Object.assign({}, { id: 1, name: "Victor" })`},
+		{"Object.assign multi-source", `let updated: object = Object.assign({}, { id: 1 }, { name: "Victor" })`},
+		{"Object.assign object return", `function copy(obj: object): object {
+    return Object.assign({}, obj)
+}
+let user = { id: 1 }
+let keys: string[] = Object.keys(copy(user))`},
 		{"Boolean value", `let ok: boolean = Boolean("x")`},
 		{"JSON.stringify object", `let user = { id: 1, name: "Victor", active: true }
 let json: string = JSON.stringify(user)`},
@@ -869,6 +878,21 @@ let entries: string[][] = Object.entries(envObj)`, "Object.entries() requires an
 		{"Object.hasOwn type", `let ok: boolean = Object.hasOwn("x", "name")`, "Object.hasOwn() requires an object literal or named object"},
 		{"Object.hasOwn process.env alias", `let envObj = process.env
 let ok: boolean = Object.hasOwn(envObj, "HOME")`, "Object.hasOwn() requires an object literal or named object"},
+		{"Object.assign arity", `let merged = Object.assign()`, "Object.assign() takes at least 1 argument"},
+		{"Object.assign type", `let merged = Object.assign("x", { name: "Ada" })`, "Object.assign() requires an object literal or named object"},
+		{"Object.assign source type", `let merged = Object.assign({}, "x")`, "Object.assign() requires an object literal or named object"},
+		{"Object.assign process.env", `let merged = Object.assign(process.env, { HOME: "x" })`, "Object.assign() requires an object literal or named object"},
+		{"Object.assign nested value", `let merged = Object.assign({}, { values: ["a"] })`, "Object.assign() only supports scalar object values"},
+		{"Object.assign const target", `const user = { name: "Ada" }
+let merged = Object.assign(user, { active: true })`, `cannot assign to const "user"`},
+		{"Object.assign class instance", `class User {}
+let user = new User()
+let merged = Object.assign(user, { name: "Ada" })`, "Object.assign() requires an object literal or named object"},
+		{"Object.assign this", `class User {
+    setName() {
+        Object.assign(this, { name: "Ada" })
+    }
+}`, "Object.assign() requires an object literal or named object"},
 		{"JSON.stringify arity", `let json: string = JSON.stringify()`, "JSON.stringify() takes 1 argument"},
 		{"JSON.parse arity", `let json = JSON.parse()`, "JSON.parse() takes 1 argument"},
 		{"JSON.stringify unsupported", `let cmd = $("echo", "x")

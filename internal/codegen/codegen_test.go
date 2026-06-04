@@ -3036,6 +3036,25 @@ let hasLiteral: boolean = Object.hasOwn({ value: "x", enabled: true }, "enabled"
 	assertNotContains(t, out, `_bst_object_keys`)
 }
 
+func TestCodegen_ObjectAssign(t *testing.T) {
+	out := compile(t, `let source = { name: "Ada" }
+let copy = Object.assign({}, source, { active: true })
+let alias = source
+let result = Object.assign(alias, { role: "admin" })
+let keys = Object.keys(copy)`)
+	assertContains(t, out, `copy='copy'`)
+	assertContains(t, out, `_obj_copy_active=1`)
+	assertContains(t, out, `source='source'`)
+	assertContains(t, out, `_objt_2_12='copy'`)
+	assertContains(t, out, `_objs_2_12='source'`)
+	assertContains(t, out, `for _objk_2_12 in $_bst_obj_keys; do`)
+	assertContains(t, out, `eval "_obj_${_objt_2_12}_${_objk_2_12}=\"\$_bst_obj_value\""`)
+	assertContains(t, out, `case " $_bst_obj_target_keys " in *" ${_objk_2_12} "*)`)
+	assertContains(t, out, `result='source'`)
+	assertContains(t, out, `keys=$(if [ -n "$_objkeys_copy" ]; then printf '%s\n' $_objkeys_copy; fi)`)
+	assertNotContains(t, out, `_bst_object_assign`)
+}
+
 func TestCodegen_StaticNamedObjectKeysAndHasOwn(t *testing.T) {
 	out := compile(t, `let user = { id: 1, name: "Ada", active: true }
 let keys = Object.keys(user)

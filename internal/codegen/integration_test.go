@@ -340,6 +340,12 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "function entries(value: object): string[][]") {
 		t.Fatalf("generated stdlib should declare Object.entries(value)")
 	}
+	if !strings.Contains(stdlib.Declarations, "function assign(target: object): object") {
+		t.Fatalf("generated stdlib should declare Object.assign(target)")
+	}
+	if !strings.Contains(stdlib.Declarations, "function assign(target: object, source: object): object") {
+		t.Fatalf("generated stdlib should declare Object.assign(target, source)")
+	}
 	mainPath := writeFile(t, dir, "main.bsh", `let path: string = process.env.HOME ?? "/tmp"
 let paths: string[] = [path]
 let argc: number = Besht.args.argv().length
@@ -355,10 +361,11 @@ let objectIsArray: boolean = Array.isArray({ value: "x" })
 let objectHasPath: boolean = Object.hasOwn({ path: path }, "path")
 let objectValues: string[] = Object.values({ path: path })
 let objectEntries: string[][] = Object.entries({ path: path })
+let objectAssigned: object = Object.assign({}, { path: path })
 let label: string = Number.parseInt("7").toString()
 let converted: boolean = Boolean(label)
 let existsViaNamespace: boolean = Besht.fs.isFile(first)
-if (converted || indexesIsArray || stringIsArray || objectIsArray || objectHasPath || existsViaNamespace || Besht.fs.isDir(first) || Besht.fs.isReadable(first) || Besht.fs.isWritable(first) || Besht.fs.isExecutable(first) || Besht.strings.isEmpty(label) || Besht.strings.isNonEmpty(label) || hasHome || objectValues.length > 0 || objectEntries.length > 0) {
+if (converted || indexesIsArray || stringIsArray || objectIsArray || objectHasPath || existsViaNamespace || Besht.fs.isDir(first) || Besht.fs.isReadable(first) || Besht.fs.isWritable(first) || Besht.fs.isExecutable(first) || Besht.strings.isEmpty(label) || Besht.strings.isNonEmpty(label) || hasHome || objectValues.length > 0 || objectEntries.length > 0 || Object.hasOwn(objectAssigned, "path")) {
     for (i in Besht.iter.range(0, n)) {
         if (i == argc) break
     }
@@ -3106,6 +3113,64 @@ console.log(Object.values(counts).join(","))
 console.log(Object.hasOwn(counts, "a"))
 console.log(Object.hasOwn(counts, "c"))`)
 	want := "id,name,active,role\n1,Victor,true,admin\nid=1\nactive=true\nrole=admin\nid,name,active,role\nid,name,active,role\ntrue\nfalse\nfalse\ntrue\nhas active\ntrue\nother\nid,name,active,role\neditor:id,name,active,role\nother\nid,name,active,role\nother\n\nvalue,enabled\nx,true\nenabled=true\ntrue\nU,D\nU,D\ntrue\nU,D\na,b\n2,1\ntrue\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectAssignRuntime(t *testing.T) {
+	out := runCompiledShell(t, `function clone(obj: object): object {
+    return Object.assign({}, obj)
+}
+function mergeInto(target: object, source: object): object {
+    return Object.assign(target, source)
+}
+let source = { name: "Ada", missing: null }
+let copy = Object.assign({}, source, { active: true }, { name: "Grace" })
+source.name = "Linus"
+console.log(Object.keys(copy).join(","))
+console.log(copy.name)
+console.log(copy.missing ?? "fallback")
+let alias = source
+let result = Object.assign(alias, { role: "admin" })
+console.log(Object.keys(source).join(","))
+console.log(result.role)
+let dynamic = {}
+let key = "team"
+dynamic[key] = "compiler"
+let cloned = clone(dynamic)
+dynamic[key] = "runtime"
+console.log(Object.keys(cloned).join(","))
+console.log(cloned[key])
+let otherDynamic = {}
+otherDynamic[key] = "shell"
+let clonedAgain = clone(otherDynamic)
+console.log(cloned[key])
+console.log(clonedAgain[key])
+console.log(Object.keys(clone(dynamic)).join(","))
+let boolSource = { active: true }
+let boolCopy = Object.assign({}, boolSource)
+console.log(Object.values(boolCopy).join(","))
+let target = { base: "yes" }
+let mergedTarget = mergeInto(target, cloned)
+console.log(Object.keys(mergedTarget).join(","))
+console.log(mergedTarget.team)
+let rebound = { old: "value" }
+rebound = Object.assign({}, target)
+target.team = "changed"
+console.log(rebound.team)
+if (Object.assign(target, { checked: true })) {
+    console.log(Object.hasOwn(target, "checked"))
+}
+class Config {
+    static defaults: object = { root: ".", verbose: false }
+}
+Object.assign(Config.defaults, { verbose: true })
+if (Config.defaults.verbose) console.log("verbose")
+let dup = Object.assign({}, { name: "Ada", name: "Grace" })
+console.log(Object.keys(dup).join(","))
+console.log(dup.name)`)
+	want := "name,missing,active\nGrace\nfallback\nname,missing,role\nadmin\nteam\ncompiler\ncompiler\nshell\nteam\ntrue\nbase,team\ncompiler\ncompiler\ntrue\nverbose\nname\nGrace\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

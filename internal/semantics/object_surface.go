@@ -20,6 +20,7 @@ func ValidateObjectSurfaceWithTypes(stmts []ast.Statement, varTypes map[string]*
 		processEnvAliases:               map[string]bool{},
 		classStaticObjects:              map[string]bool{},
 		classStaticUnsupportedObjects:   map[string]bool{},
+		fnReturnObjects:                 collectObjectSurfaceFunctionReturns(stmts),
 	}
 	return v.stmts(stmts)
 }
@@ -31,6 +32,7 @@ type objectSurfaceValidator struct {
 	processEnvAliases               map[string]bool
 	classStaticObjects              map[string]bool
 	classStaticUnsupportedObjects   map[string]bool
+	fnReturnObjects                 map[string]bool
 }
 
 func (v *objectSurfaceValidator) stmts(stmts []ast.Statement) error {
@@ -201,19 +203,42 @@ func (v *objectSurfaceValidator) expr(expr ast.Expression) error {
 			}
 		}
 	case *ast.BuiltinCallExpr:
-		if e.Name == "Object.keys" || e.Name == "Object.values" || e.Name == "Object.entries" || e.Name == "Object.hasOwn" {
+		if e.Name == "Object.keys" || e.Name == "Object.values" || e.Name == "Object.entries" || e.Name == "Object.hasOwn" || e.Name == "Object.assign" {
 			wantArgs := 1
 			if e.Name == "Object.hasOwn" {
 				wantArgs = 2
 			}
-			if len(e.Args) != wantArgs {
+			if e.Name == "Object.assign" {
+				wantArgs = 0
+			}
+			if e.Name == "Object.assign" && len(e.Args) < 1 {
+				return &SemanticError{Pos: e.Pos, Message: "Object.assign() takes at least 1 argument"}
+			}
+			if wantArgs > 0 && len(e.Args) != wantArgs {
 				return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes " + objectSurfaceArgCount(wantArgs)}
 			}
 			if v.isProcessEnvValue(e.Args[0]) || !v.isObjectValue(e.Args[0]) {
 				return &SemanticError{Pos: e.Pos, Message: e.Name + "() requires an object literal or named object"}
 			}
-			if (e.Name == "Object.values" || e.Name == "Object.entries") && v.hasUnsupportedObjectValue(e.Args[0]) {
+			if e.Name == "Object.assign" {
+				if _, isThis := unwrapAsExpr(e.Args[0]).(*ast.ThisExpr); isThis {
+					return &SemanticError{Pos: e.Pos, Message: "Object.assign() requires an object literal or named object"}
+				}
+				for _, arg := range e.Args[1:] {
+					if v.isProcessEnvValue(arg) || !v.isObjectValue(arg) {
+						return &SemanticError{Pos: e.Pos, Message: "Object.assign() requires an object literal or named object"}
+					}
+				}
+			}
+			if (e.Name == "Object.values" || e.Name == "Object.entries" || e.Name == "Object.assign") && v.hasUnsupportedObjectValue(e.Args[0]) {
 				return &SemanticError{Pos: e.Pos, Message: e.Name + "() only supports scalar object values"}
+			}
+			if e.Name == "Object.assign" {
+				for _, arg := range e.Args[1:] {
+					if v.hasUnsupportedObjectValue(arg) {
+						return &SemanticError{Pos: e.Pos, Message: "Object.assign() only supports scalar object values"}
+					}
+				}
 			}
 		}
 		for _, arg := range e.Args {
@@ -367,6 +392,10 @@ func (v *objectSurfaceValidator) isObjectValue(expr ast.Expression) bool {
 		return true
 	case *ast.IdentExpr:
 		return v.objectValues[e.Name]
+	case *ast.FnCallExpr:
+		return v.fnReturnObjects[e.Name]
+	case *ast.BuiltinCallExpr:
+		return e.Name == "Object.assign" && len(e.Args) >= 1
 	case *ast.PropertyExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 			return v.classStaticObjects[ident.Name+"."+e.Property]
@@ -375,6 +404,19 @@ func (v *objectSurfaceValidator) isObjectValue(expr ast.Expression) bool {
 		return e.Method == "reduce" && len(e.Args) >= 2 && v.isObjectValue(e.Args[1])
 	}
 	return false
+}
+
+func collectObjectSurfaceFunctionReturns(stmts []ast.Statement) map[string]bool {
+	out := map[string]bool{}
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.FnDecl:
+			out[s.Name] = s.ReturnType != nil && s.ReturnType.Kind == ast.TypeObject
+		case *ast.DeclareFnStmt:
+			out[s.Name] = s.ReturnType != nil && s.ReturnType.Kind == ast.TypeObject
+		}
+	}
+	return out
 }
 
 func (v *objectSurfaceValidator) objectRootForName(name string) string {
@@ -393,6 +435,10 @@ func (v *objectSurfaceValidator) objectRootForExpr(expr ast.Expression) string {
 		return v.objectRootForExpr(e.Expr)
 	case *ast.IdentExpr:
 		return v.objectRootForName(e.Name)
+	case *ast.BuiltinCallExpr:
+		if e.Name == "Object.assign" && len(e.Args) >= 1 {
+			return v.objectRootForExpr(e.Args[0])
+		}
 	case *ast.PropertyExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && v.classStaticObjects[ident.Name+"."+e.Property] {
 			return ident.Name + "." + e.Property
@@ -427,6 +473,14 @@ func (v *objectSurfaceValidator) hasUnsupportedObjectValue(expr ast.Expression) 
 		return objectSurfaceHasUnsupportedValue(e)
 	case *ast.IdentExpr:
 		return v.objectValuesWithUnsupportedData[v.objectRootForName(e.Name)]
+	case *ast.BuiltinCallExpr:
+		if e.Name == "Object.assign" {
+			for _, arg := range e.Args {
+				if v.hasUnsupportedObjectValue(arg) {
+					return true
+				}
+			}
+		}
 	case *ast.PropertyExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 			return v.classStaticUnsupportedObjects[ident.Name+"."+e.Property]
@@ -539,7 +593,7 @@ func objectSurfaceValueUnsupported(expr ast.Expression) bool {
 	case *ast.ListLit, *ast.ObjectLit, *ast.NewExpr, *ast.CmdExpr:
 		return true
 	case *ast.BuiltinCallExpr:
-		return value.Name == "Object.keys" || value.Name == "Object.values" || value.Name == "Object.entries" || value.Name == "Array.from" || value.Name == "Array.of" || value.Name == "fetch"
+		return value.Name == "Object.keys" || value.Name == "Object.values" || value.Name == "Object.entries" || value.Name == "Object.assign" || value.Name == "Array.from" || value.Name == "Array.of" || value.Name == "fetch"
 	case *ast.MethodCallExpr:
 		switch value.Method {
 		case "map", "filter", "slice", "concat", "reverse", "push", "pop", "shift", "unshift", "readStdoutLines":

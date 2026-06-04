@@ -36,6 +36,7 @@ type Generator struct {
 	staticObjectMap      map[string][]string
 	staticObjectEntryMap map[string][]string
 	staticObjectValueMap map[string][]string
+	objectTempSeq        int
 	staticNullishMap     map[string]bool
 	stringConstMap       map[string]string
 	numConstMap          map[string]float64
@@ -1736,40 +1737,16 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 	}
 
 	if obj, ok := s.Value.(*ast.ObjectLit); ok {
-		var fields []string
-		for _, field := range obj.Fields {
-			if err := validateStaticObjectKey(field.Key); err != nil {
-				return err
-			}
-			fields = append(fields, field.Key)
-			val, err := g.genExprRHS(field.Value, nil)
-			if err != nil {
-				return err
-			}
-			pt := g.inferReceiverType(field.Value)
-			if pt != nil {
-				g.objPropTypeMap[varName+"."+field.Key] = pt
-			}
-			g.recordObjectStaticFieldValue(varName, field.Key, field.Value)
-			g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
-		}
-		g.objFieldsMap[varName] = fields
-		g.staticObjectMap[varName] = uniqueStrings(fields)
-		g.staticNullishMap[varName] = false
-		if entries, ok := staticObjectLiteralEntries(obj); ok {
-			g.staticObjectEntryMap[varName] = entries
-		} else {
-			delete(g.staticObjectEntryMap, varName)
-		}
-		if values, ok := staticObjectLiteralValues(obj); ok {
-			g.staticObjectValueMap[varName] = values
-		} else {
-			delete(g.staticObjectValueMap, varName)
-		}
-		g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
 		delete(g.objAliasMap, s.Name)
-		g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
-		g.emitObjectKeysInit(varName, fields)
+		return g.genObjectLiteralBinding(varName, obj)
+	}
+
+	if call, ok := objectAssignCall(s.Value); ok {
+		ref, err := g.genObjectAssignValue(call, varName)
+		if err != nil {
+			return err
+		}
+		g.bindObjectResult(varName, s.Name, ref)
 		return nil
 	}
 
@@ -1844,7 +1821,11 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		} else if inferred := g.inferReceiverType(s.Value); inferred != nil {
 			g.varTypeMap[varName] = inferred
 		}
-		delete(g.objAliasMap, s.Name)
+		if typ := g.varTypeMap[varName]; typ != nil && typ.Kind == ast.TypeObject {
+			g.objAliasMap[s.Name] = objectRef{SlotExpr: fmt.Sprintf("\"$%s\"", varName), RootName: s.Name}
+		} else {
+			delete(g.objAliasMap, s.Name)
+		}
 		delete(g.stringConstMap, varName)
 		delete(g.numConstMap, varName)
 		delete(g.boolConstMap, varName)
@@ -1991,6 +1972,386 @@ func (g *Generator) objectRefValue(expr ast.Expression) (string, bool) {
 		return shellQuote(ref.StaticName), true
 	}
 	return ref.SlotExpr, true
+}
+
+func objectAssignCall(expr ast.Expression) (*ast.BuiltinCallExpr, bool) {
+	as, ok := expr.(*ast.AsExpr)
+	if ok {
+		return objectAssignCall(as.Expr)
+	}
+	call, ok := expr.(*ast.BuiltinCallExpr)
+	return call, ok && call.Name == "Object.assign"
+}
+
+func objectRefRuntimeValue(ref objectRef) string {
+	if ref.StaticName != "" {
+		return shellQuote(ref.StaticName)
+	}
+	return ref.SlotExpr
+}
+
+func (g *Generator) nextObjectTemp(pos ast.Pos) string {
+	g.objectTempSeq++
+	return fmt.Sprintf("_bst_obj_%d_%d_%d", pos.Line, pos.Column, g.objectTempSeq)
+}
+
+func (g *Generator) genObjectLiteralBinding(varName string, obj *ast.ObjectLit) error {
+	var fields []string
+	g.deleteObjectStaticValues(varName)
+	for _, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return err
+		}
+		fields = append(fields, field.Key)
+		val, err := g.genExprRHS(field.Value, nil)
+		if err != nil {
+			return err
+		}
+		pt := g.inferReceiverType(field.Value)
+		if pt != nil {
+			g.objPropTypeMap[varName+"."+field.Key] = pt
+		} else {
+			delete(g.objPropTypeMap, varName+"."+field.Key)
+		}
+		g.recordObjectStaticFieldValue(varName, field.Key, field.Value)
+		g.line(fmt.Sprintf("%s=%s", objectPropVar(varName, field.Key), val))
+	}
+	g.objFieldsMap[varName] = uniqueStrings(fields)
+	g.staticObjectMap[varName] = uniqueStrings(fields)
+	g.staticNullishMap[varName] = false
+	if entries, ok := staticObjectLiteralEntries(obj); ok {
+		g.staticObjectEntryMap[varName] = entries
+	} else {
+		delete(g.staticObjectEntryMap, varName)
+	}
+	if values, ok := staticObjectLiteralValues(obj); ok {
+		g.staticObjectValueMap[varName] = values
+	} else {
+		delete(g.staticObjectValueMap, varName)
+	}
+	g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
+	g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
+	g.emitObjectKeysInit(varName, fields)
+	return nil
+}
+
+func (g *Generator) genObjectExprRef(expr ast.Expression) (objectRef, bool, error) {
+	if call, ok := objectAssignCall(expr); ok {
+		ref, err := g.genObjectAssignValue(call, "")
+		return ref, err == nil, err
+	}
+	if call, ok := unwrapAsExpr(expr).(*ast.FnCallExpr); ok {
+		if typ := g.inferReceiverType(call); typ != nil && typ.Kind == ast.TypeObject && g.fnCallSupportsReturnSlot(call.Name) {
+			name := g.nextObjectTemp(call.Pos)
+			if err := g.genFnCallIntoVar(name, call); err != nil {
+				return objectRef{}, false, err
+			}
+			return objectRef{SlotExpr: fmt.Sprintf("\"$%s\"", name), RootName: name}, true, nil
+		}
+	}
+	ref, ok := g.resolveObjectRef(expr)
+	if !ok {
+		return objectRef{}, false, nil
+	}
+	if g.objectExprIsClassInstance(expr) {
+		return objectRef{}, false, nil
+	}
+	return ref, true, nil
+}
+
+func (g *Generator) objectExprIsClassInstance(expr ast.Expression) bool {
+	switch e := unwrapAsExpr(expr).(type) {
+	case *ast.NewExpr:
+		return e.ClassName != "Set"
+	case *ast.ThisExpr:
+		return true
+	case *ast.IdentExpr:
+		_, ok := g.varClassMap[g.resolveVarName(e.Name)]
+		return ok
+	}
+	return false
+}
+
+func (g *Generator) genObjectAssignValue(call *ast.BuiltinCallExpr, preferred string) (objectRef, error) {
+	if len(call.Args) < 1 {
+		return objectRef{}, fmt.Errorf("Object.assign() takes at least 1 argument")
+	}
+	target := unwrapAsExpr(call.Args[0])
+	var targetRef objectRef
+	freshStatic := false
+
+	switch t := target.(type) {
+	case *ast.ObjectLit:
+		name := preferred
+		if name == "" {
+			name = g.nextObjectTemp(call.Pos)
+		}
+		if err := g.validateObjectLiteralScalarValues("Object.assign", t); err != nil {
+			return objectRef{}, err
+		}
+		if err := g.genObjectLiteralBinding(name, t); err != nil {
+			return objectRef{}, err
+		}
+		targetRef = objectRef{StaticName: name, RootName: name}
+		freshStatic = true
+	case *ast.BuiltinCallExpr:
+		if t.Name != "Object.assign" {
+			return objectRef{}, fmt.Errorf("Object.assign() requires an object literal or named object")
+		}
+		name := preferred
+		if name == "" {
+			name = g.nextObjectTemp(call.Pos)
+		}
+		ref, err := g.genObjectAssignValue(t, name)
+		if err != nil {
+			return objectRef{}, err
+		}
+		targetRef = ref
+		freshStatic = ref.StaticName == name
+	default:
+		ref, ok, err := g.genObjectExprRef(target)
+		if err != nil {
+			return objectRef{}, err
+		}
+		if !ok {
+			return objectRef{}, fmt.Errorf("Object.assign() requires an object literal or named object")
+		}
+		if err := g.validateObjectRefScalarValues("Object.assign", ref); err != nil {
+			return objectRef{}, err
+		}
+		targetRef = ref
+		g.invalidateStaticObjectRef(targetRef)
+		if targetRef.StaticName != "" {
+			g.deleteObjectStaticValues(targetRef.StaticName)
+		}
+	}
+
+	return g.genObjectAssignSources(targetRef, call.Args[1:], freshStatic, call.Pos)
+}
+
+func (g *Generator) genObjectAssignSources(targetRef objectRef, sources []ast.Expression, freshStatic bool, pos ast.Pos) (objectRef, error) {
+	for _, source := range sources {
+		source = unwrapAsExpr(source)
+		switch src := source.(type) {
+		case *ast.ObjectLit:
+			if err := g.validateObjectLiteralScalarValues("Object.assign", src); err != nil {
+				return objectRef{}, err
+			}
+			if err := g.genCopyObjectLiteralToRef(targetRef, src, freshStatic); err != nil {
+				return objectRef{}, err
+			}
+		case *ast.BuiltinCallExpr:
+			if src.Name != "Object.assign" {
+				return objectRef{}, fmt.Errorf("Object.assign() requires an object literal or named object")
+			}
+			sourceRef, err := g.genObjectAssignValue(src, "")
+			if err != nil {
+				return objectRef{}, err
+			}
+			if err := g.validateObjectRefScalarValues("Object.assign", sourceRef); err != nil {
+				return objectRef{}, err
+			}
+			g.invalidateStaticObjectRef(targetRef)
+			if targetRef.StaticName != "" {
+				g.deleteObjectStaticValues(targetRef.StaticName)
+			}
+			if err := g.genCopyObjectRefToRef(targetRef, sourceRef, pos); err != nil {
+				return objectRef{}, err
+			}
+			freshStatic = false
+		default:
+			sourceRef, ok, err := g.genObjectExprRef(source)
+			if err != nil {
+				return objectRef{}, err
+			}
+			if !ok {
+				return objectRef{}, fmt.Errorf("Object.assign() requires an object literal or named object")
+			}
+			if err := g.validateObjectRefScalarValues("Object.assign", sourceRef); err != nil {
+				return objectRef{}, err
+			}
+			g.invalidateStaticObjectRef(targetRef)
+			if targetRef.StaticName != "" {
+				g.deleteObjectStaticValues(targetRef.StaticName)
+			}
+			if err := g.genCopyObjectRefToRef(targetRef, sourceRef, pos); err != nil {
+				return objectRef{}, err
+			}
+			freshStatic = false
+		}
+	}
+
+	targetRef.UnsupportedScalarValues = g.objectRefHasUnsupportedScalarValues(targetRef)
+	return targetRef, nil
+}
+
+func (g *Generator) genObjectLiteralRefInit(target objectRef, obj *ast.ObjectLit) error {
+	if target.StaticName != "" {
+		return g.genObjectLiteralBinding(target.StaticName, obj)
+	}
+	slotVar := fmt.Sprintf("_objt_%d_%d", obj.Pos.Line, obj.Pos.Column)
+	g.line(slotVar + "=" + target.SlotExpr)
+	g.line(computedKeyValidation(slotVar))
+	g.line("eval \"_objkeys_${" + slotVar + "}=\\\"\\\"\"")
+	for _, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return err
+		}
+		val, err := g.genExprRHS(field.Value, nil)
+		if err != nil {
+			return err
+		}
+		valVar := fmt.Sprintf("_objv_%d_%d", field.Pos.Line, field.Pos.Column)
+		g.line(valVar + "=" + val)
+		g.line("eval \"_obj_${" + slotVar + "}_" + field.Key + "=\\\"\\$" + valVar + "\\\"\"")
+		g.line("eval \"_bst_obj_keys=\\\"\\${_objkeys_${" + slotVar + "}}\\\"\"")
+		g.line("case \" $_bst_obj_keys \" in *\" " + field.Key + " \"*) ;; *) _bst_obj_keys=\"${_bst_obj_keys} " + field.Key + "\"; eval \"_objkeys_${" + slotVar + "}=\\\"\\$_bst_obj_keys\\\"\" ;; esac")
+	}
+	return nil
+}
+
+func (g *Generator) emitObjectAssignFreshReturnSlot(call *ast.BuiltinCallExpr) error {
+	target, ok := unwrapAsExpr(call.Args[0]).(*ast.ObjectLit)
+	if !ok {
+		return nil
+	}
+	if err := g.validateObjectLiteralScalarValues("Object.assign", target); err != nil {
+		return err
+	}
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", returnSlotVar))
+	g.push()
+	targetRef := objectRef{SlotExpr: fmt.Sprintf("\"$%s\"", returnSlotVar)}
+	if err := g.genObjectLiteralRefInit(targetRef, target); err != nil {
+		return err
+	}
+	if _, err := g.genObjectAssignSources(targetRef, call.Args[1:], false, call.Pos); err != nil {
+		return err
+	}
+	g.emitClosureCaptureSync()
+	g.line(fmt.Sprintf("eval \"$%s=\\$%s\"", returnSlotVar, returnSlotVar))
+	g.line("return 0")
+	g.pop()
+	g.line("fi")
+	return nil
+}
+
+func (g *Generator) genCopyObjectLiteralToRef(target objectRef, obj *ast.ObjectLit, keepStatic bool) error {
+	for _, field := range obj.Fields {
+		if err := validateStaticObjectKey(field.Key); err != nil {
+			return err
+		}
+		val, err := g.genExprRHS(field.Value, nil)
+		if err != nil {
+			return err
+		}
+		if target.StaticName != "" {
+			g.line(fmt.Sprintf("%s=%s", objectPropVar(target.StaticName, field.Key), val))
+			g.recordObjectStaticFieldType(target.StaticName, field.Key, field.Value)
+			if keepStatic {
+				g.recordObjectStaticFieldValue(target.StaticName, field.Key, field.Value)
+				g.staticObjectMap[target.StaticName] = appendUniqueString(g.staticObjectMap[target.StaticName], field.Key)
+				g.recomputeStaticObjectLists(target.StaticName)
+			}
+		} else {
+			slotVar := fmt.Sprintf("_objs_%d_%d", field.Pos.Line, field.Pos.Column)
+			valVar := fmt.Sprintf("_objv_%d_%d", field.Pos.Line, field.Pos.Column)
+			g.line(slotVar + "=" + target.SlotExpr)
+			g.line(computedKeyValidation(slotVar))
+			g.line(valVar + "=" + val)
+			g.line("eval \"_obj_${" + slotVar + "}_" + field.Key + "=\\\"\\$" + valVar + "\\\"\"")
+		}
+		g.emitObjectKeyAppendRef(target, field.Key, field.Pos)
+	}
+	return nil
+}
+
+func (g *Generator) genCopyObjectRefToRef(target, source objectRef, pos ast.Pos) error {
+	if target.StaticName != "" && source.StaticName != "" {
+		for _, field := range g.objFieldsMap[source.StaticName] {
+			g.objFieldsMap[target.StaticName] = appendUniqueString(g.objFieldsMap[target.StaticName], field)
+			if typ := g.objPropTypeMap[source.StaticName+"."+field]; typ != nil {
+				g.objPropTypeMap[target.StaticName+"."+field] = typ
+			} else {
+				delete(g.objPropTypeMap, target.StaticName+"."+field)
+			}
+		}
+	}
+	targetSlot := objectRefRuntimeValue(target)
+	sourceSlot := objectRefRuntimeValue(source)
+	keyVar := fmt.Sprintf("_objk_%d_%d", pos.Line, pos.Column)
+	targetVar := fmt.Sprintf("_objt_%d_%d", pos.Line, pos.Column)
+	sourceVar := fmt.Sprintf("_objs_%d_%d", pos.Line, pos.Column)
+	g.line(targetVar + "=" + targetSlot)
+	g.line(computedKeyValidation(targetVar))
+	g.line(sourceVar + "=" + sourceSlot)
+	g.line(computedKeyValidation(sourceVar))
+	g.line("eval \"_bst_obj_keys=\\\"\\${_objkeys_${" + sourceVar + "}}\\\"\"")
+	g.line("for " + keyVar + " in $_bst_obj_keys; do")
+	g.push()
+	g.line(computedKeyValidation(keyVar))
+	g.line("eval \"_bst_obj_value=\\\"\\${_obj_${" + sourceVar + "}_${" + keyVar + "}}\\\"\"")
+	g.line("eval \"_obj_${" + targetVar + "}_${" + keyVar + "}=\\\"\\$_bst_obj_value\\\"\"")
+	g.line("eval \"_bst_obj_target_keys=\\\"\\${_objkeys_${" + targetVar + "}}\\\"\"")
+	g.line("case \" $_bst_obj_target_keys \" in *\" ${" + keyVar + "} \"*) ;; *) _bst_obj_target_keys=\"${_bst_obj_target_keys} ${" + keyVar + "}\"; eval \"_objkeys_${" + targetVar + "}=\\\"\\$_bst_obj_target_keys\\\"\" ;; esac")
+	g.pop()
+	g.line("done")
+	return nil
+}
+
+func (g *Generator) recomputeStaticObjectLists(varName string) {
+	keys := g.staticObjectMap[varName]
+	if len(keys) == 0 {
+		delete(g.staticObjectEntryMap, varName)
+		delete(g.staticObjectValueMap, varName)
+		return
+	}
+	var entries []string
+	var values []string
+	for _, key := range keys {
+		val, ok := g.objectConstMap[varName+"."+key]
+		if !ok {
+			delete(g.staticObjectEntryMap, varName)
+			delete(g.staticObjectValueMap, varName)
+			return
+		}
+		raw, ok := shellQuotedValue(val)
+		if !ok {
+			delete(g.staticObjectEntryMap, varName)
+			delete(g.staticObjectValueMap, varName)
+			return
+		}
+		if strings.Contains(raw, "\n") {
+			delete(g.staticObjectEntryMap, varName)
+			delete(g.staticObjectValueMap, varName)
+			return
+		}
+		values = append(values, raw)
+		entries = append(entries, key+"\037"+raw)
+	}
+	g.staticObjectValueMap[varName] = values
+	g.staticObjectEntryMap[varName] = entries
+}
+
+func (g *Generator) bindObjectResult(varName, sourceName string, ref objectRef) {
+	g.paramMap[sourceName] = varName
+	g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
+	g.line(fmt.Sprintf("%s=%s", varName, objectRefRuntimeValue(ref)))
+	if ref.StaticName == varName {
+		delete(g.objAliasMap, sourceName)
+		return
+	}
+	if ref.StaticName != "" {
+		if ref.RootName == "" {
+			ref.RootName = ref.StaticName
+		}
+		g.objAliasMap[sourceName] = ref
+		return
+	}
+	g.objAliasMap[sourceName] = objectRef{
+		SlotExpr:                fmt.Sprintf("\"$%s\"", varName),
+		RootName:                ref.RootName,
+		UnsupportedScalarValues: ref.UnsupportedScalarValues,
+	}
 }
 
 func (g *Generator) isLazyCommandBinding(expr ast.Expression) bool {
@@ -2669,6 +3030,15 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 		return err
 	}
 
+	if call, ok := objectAssignCall(s.Value); ok {
+		ref, err := g.genObjectAssignValue(call, varName)
+		if err != nil {
+			return err
+		}
+		g.bindObjectResult(varName, s.Name, ref)
+		return nil
+	}
+
 	if call, ok := unwrapAsExpr(s.Value).(*ast.FnCallExpr); ok && g.fnCallSupportsReturnSlot(call.Name) {
 		if err := g.genFnCallIntoVar(varName, call); err != nil {
 			return err
@@ -2686,7 +3056,11 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 		if g.listLenMap != nil {
 			delete(g.listLenMap, varName)
 		}
-		delete(g.objAliasMap, s.Name)
+		if typ := g.varTypeMap[varName]; typ != nil && typ.Kind == ast.TypeObject {
+			g.objAliasMap[s.Name] = objectRef{SlotExpr: fmt.Sprintf("\"$%s\"", varName), RootName: s.Name}
+		} else {
+			delete(g.objAliasMap, s.Name)
+		}
 		return nil
 	}
 
@@ -4659,6 +5033,15 @@ func (g *Generator) genReturn(s *ast.ReturnStmt) error {
 		g.line("return 0")
 		return nil
 	}
+	if retType != nil && retType.Kind == ast.TypeObject {
+		if call, ok := objectAssignCall(s.Value); ok && len(call.Args) > 0 {
+			if _, ok := unwrapAsExpr(call.Args[0]).(*ast.ObjectLit); ok {
+				if err := g.emitObjectAssignFreshReturnSlot(call); err != nil {
+					return err
+				}
+			}
+		}
+	}
 
 	if containsRunCall(s.Value) && g.cmdAnalysis != nil && !isImmediateRunTerminalCall(s.Value) {
 		if err := g.emitInlineRunChain(s.Value); err != nil {
@@ -4928,6 +5311,9 @@ func (g *Generator) genDiscardExprStmt(expr ast.Expression) error {
 
 func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 	switch e.Name {
+	case "Object.assign":
+		_, err := g.genObjectAssignValue(e, "")
+		return "", err
 	case "console.log":
 		if len(e.Args) == 1 && g.isObjectArg(e.Args[0]) {
 			return g.genConsoleLogObject(e.Args[0])
@@ -5860,7 +6246,10 @@ func (g *Generator) genJSONObjectLiteral(obj *ast.ObjectLit) (string, error) {
 }
 
 func (g *Generator) genJSONObjectRef(expr ast.Expression) (string, error) {
-	ref, ok := g.resolveObjectRef(expr)
+	ref, ok, err := g.genObjectExprRef(expr)
+	if err != nil {
+		return "", err
+	}
 	if ok {
 		if err := g.validateObjectRefScalarValues("JSON.stringify", ref); err != nil {
 			return "", err
@@ -5929,7 +6318,9 @@ func (g *Generator) genObjectKeys(expr ast.Expression) (string, error) {
 	if obj, ok := expr.(*ast.ObjectLit); ok {
 		return g.genObjectLiteralKeys(obj)
 	}
-	if ref, ok := g.resolveObjectRef(expr); ok {
+	if ref, ok, err := g.genObjectExprRef(expr); err != nil {
+		return "", err
+	} else if ok {
 		if ref.StaticName == "" {
 			return objectKeysRefExpr(ref), nil
 		}
@@ -5956,7 +6347,9 @@ func (g *Generator) genObjectValues(expr ast.Expression) (string, error) {
 	if values, ok := g.staticNamedObjectValues(expr); ok {
 		return shellQuote(strings.Join(values, "\n")), nil
 	}
-	if ref, ok := g.resolveObjectRef(expr); ok {
+	if ref, ok, err := g.genObjectExprRef(expr); err != nil {
+		return "", err
+	} else if ok {
 		if err := g.validateObjectRefScalarValues("Object.values", ref); err != nil {
 			return "", err
 		}
@@ -5986,7 +6379,9 @@ func (g *Generator) genObjectEntries(expr ast.Expression) (string, error) {
 	if entries, ok := g.staticNamedObjectEntries(expr); ok {
 		return shellQuote(strings.Join(entries, "\n")), nil
 	}
-	if ref, ok := g.resolveObjectRef(expr); ok {
+	if ref, ok, err := g.genObjectExprRef(expr); err != nil {
+		return "", err
+	} else if ok {
 		if err := g.validateObjectRefScalarValues("Object.entries", ref); err != nil {
 			return "", err
 		}
@@ -6022,7 +6417,9 @@ func (g *Generator) genObjectHasOwn(objExpr, keyExpr ast.Expression) (string, er
 	if obj, ok := objExpr.(*ast.ObjectLit); ok {
 		return g.genObjectLiteralHasOwn(obj, keyStr)
 	}
-	if ref, ok := g.resolveObjectRef(objExpr); ok {
+	if ref, ok, err := g.genObjectExprRef(objExpr); err != nil {
+		return "", err
+	} else if ok {
 		if ref.StaticName == "" {
 			return objectHasOwnRefExpr(ref, keyStr), nil
 		}
@@ -7694,6 +8091,13 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Object.hasOwn":
 		return g.genObjectHasOwn(e.Args[0], e.Args[1])
 
+	case "Object.assign":
+		ref, err := g.genObjectAssignValue(e, "")
+		if err != nil {
+			return "", err
+		}
+		return objectRefRuntimeValue(ref), nil
+
 	case "JSON.parse":
 		return g.genJSONParse(e.Args[0])
 
@@ -7780,6 +8184,13 @@ func (g *Generator) genProperty(e *ast.PropertyExpr) (string, error) {
 			if _, hasProp := g.objPropTypeMap[ident.Name+"."+e.Property]; hasProp {
 				return fmt.Sprintf("\"$%s\"", objectPropVar(ident.Name, e.Property)), nil
 			}
+		}
+	}
+	if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeObject {
+		if ref, ok, err := g.genObjectExprRef(e.Receiver); err != nil {
+			return "", err
+		} else if ok {
+			return g.genObjectRefProperty(ref, e.Property, e.Pos), nil
 		}
 	}
 	if e.Property == "length" {
@@ -8124,6 +8535,8 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: typeString}}
+		case "Object.assign":
+			return &ast.Type{Kind: ast.TypeObject}
 		case "Number.parseInt", "Number.parseFloat":
 			return typeNumber
 		case "Array.from":
@@ -11682,7 +12095,10 @@ func (g *Generator) genNullishIndexExpr(e *ast.IndexExpr) (string, error) {
 }
 
 func (g *Generator) genComputedPropertyAccess(e *ast.IndexExpr) (string, error) {
-	ref, ok := g.resolveObjectRef(e.Expr)
+	ref, ok, err := g.genObjectExprRef(e.Expr)
+	if err != nil {
+		return "", err
+	}
 	if !ok {
 		return "", fmt.Errorf("computed property access requires a simple identifier as receiver")
 	}
@@ -11918,6 +12334,13 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 			return fmt.Sprintf("! %s", inner), nil
 		}
 	case *ast.BuiltinCallExpr:
+		if e.Name == "Object.assign" {
+			val, err := g.genExprValue(e)
+			if err != nil {
+				return "", err
+			}
+			return truthyCondition(val), nil
+		}
 		return g.genBuiltinCondition(e)
 	case *ast.IdentExpr:
 		if value, ok := g.staticBooleanValue(e); ok {
