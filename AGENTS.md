@@ -941,6 +941,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 
 ## Known Semantic Differences from TypeScript
 
+README.md contains the user-facing TypeScript/Besht divergence table. Keep it synchronized with `skills/besht-scripting/SKILL.md` whenever a syntactically TypeScript-like form intentionally behaves differently in Besht, and add or reference tests for compile-enforced rows.
+
 **Booleans are stored as `1`/`0` in shell variables.** In string contexts besht now renders them as `true`/`false`, but condition generation still relies on `1`/`0`.
 
 **`includes()`, `startsWith()`, `endsWith()` still drive conditions via `1`/`0`, but string contexts now render them as `true`/`false`.**
@@ -950,6 +952,8 @@ Command methods chain on `command` type values. With the lazy Command model:
 **`Number.isNaN()` is always false for currently representable besht values.** Besht has no NaN runtime sentinel, so the API exists for JS-compatible syntax but can't observe NaN.
 
 **`Boolean(value)` is a primitive coercion builtin only.** It returns Besht boolean `1`/`0` and relies on existing boolean string rendering for `true`/`false`. Keep the slice narrow: falsey values are `false`, `0`, `0.0`, `""`, `null`, and `undefined`; non-empty strings including `"0"`/`"false"`, non-zero numbers, arrays, objects, and sets are truthy. Do not add Boolean object wrappers, `new Boolean`, `Boolean.parse`, or runtime type metadata for this API.
+
+**`Array.isArray(value)` is a compiler-known representation predicate, not runtime shape inspection.** A generic or `unknown` function parameter passed an array still returns false unless the parameter is annotated or inferred as a Besht array representation.
 
 ---
 

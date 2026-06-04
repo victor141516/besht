@@ -2980,15 +2980,48 @@ for (i in indexes) {
 	}
 }
 
+func TestIntegration_ArrayFromRejectsUnsupportedForms(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		wantErr string
+	}{
+		{
+			name:    "iterable string",
+			src:     `let chars = Array.from("abc")`,
+			wantErr: "Array.from() currently supports only { length: expr }",
+		},
+		{
+			name:    "mapper callback",
+			src:     `let doubled = Array.from({ length: 3 }, (_, i) => i * 2)`,
+			wantErr: "Array.from() takes 1 argument",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeFile(t, dir, "main.bsh", tt.src)
+			_, err := codegen.CompileFile(path, codegen.Options{})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("CompileFile error: got %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestIntegration_ArrayIsArrayRuntime(t *testing.T) {
-	out := runCompiledShell(t, `console.log(Array.isArray(["a", "b"]))
+	out := runCompiledShell(t, `function probe(value: unknown): boolean {
+    return Array.isArray(value)
+}
+console.log(probe(["a"]))
+console.log(Array.isArray(["a", "b"]))
 console.log(Array.isArray(Array.of("x")))
 console.log(Array.isArray(Array.from({ length: 2 })))
 console.log(Array.isArray("not a list"))
 console.log(Array.isArray({ value: "x" }))
 if (Array.isArray(["condition"])) console.log("condition true")
 if (Array.isArray("condition")) console.log("condition false")`)
-	want := "true\ntrue\ntrue\nfalse\nfalse\ncondition true\n"
+	want := "false\ntrue\ntrue\ntrue\nfalse\nfalse\ncondition true\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

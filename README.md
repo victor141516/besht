@@ -150,6 +150,19 @@ Files use the `.bsh` extension.
 - Arrow functions can be stored in variables, passed to functions, called as function values, and passed to array callback APIs; direct array callbacks still support the compact inline forms and optional zero-based index parameter.
 - Generated shell elides string runtime helpers unless one-argument string `.includes()`, `.startsWith()`, or `.endsWith()` actually needs them.
 
+### TypeScript/Besht behavior differences
+
+Besht accepts TypeScript-flavored syntax, but it compiles to POSIX sh and does not try to behave like a JavaScript runtime in every case.
+
+| Case | Example | TypeScript / JavaScript behavior | Besht behavior |
+| ---- | ------- | -------------------------------- | -------------- |
+| Type annotations | `let n: number = "x"` | TypeScript reports a type error. | Compiles; annotations are ignored except for compiler representation hints. |
+| `Array.from({ length })` | `Array.from({ length: 3 })` | Creates three `undefined` values. | Creates the numeric array `[0, 1, 2]`. |
+| Unsupported `Array.from()` forms | `Array.from("abc")` | Creates `["a", "b", "c"]`. | Fails at Besht compile time; only `{ length }` is supported. |
+| Object reflection boundary | `Object.keys(process.env)` | Returns enumerable environment keys in Node-like runtimes. | Fails at Besht compile time; `process.env` is not enumerable. |
+| Scalar-only object values | `Object.values({ xs: ["a"] })` | Returns the nested array value. | Fails at Besht compile time until nested values are supported. |
+| Static predicates | `Array.isArray(value)` inside `probe(value: unknown)` called with `["a"]` | Checks the runtime value and returns `true`. | Returns `false`; only compiler-known arrays are treated as arrays. |
+
 ### Variables
 
 Declare with `let`. Types are optional and are never validated by the compiler.

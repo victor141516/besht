@@ -55,6 +55,19 @@ count--;
 let next = ++count;
 ```
 
+## TypeScript Differences To Remember
+
+Besht is TypeScript-flavored syntax that compiles to POSIX sh, not a JavaScript runtime. Keep these differences in mind when writing or translating scripts:
+
+| Code shape | Besht behavior |
+| --- | --- |
+| `let n: number = "x"` | Compiles; annotations are ignored unless they provide a representation hint. |
+| `Array.from({ length: 3 })` | Produces `[0, 1, 2]`, not three `undefined` values. |
+| `Array.from("abc")` | Fails at compile time; only `{ length }` is supported. |
+| `Object.keys(process.env)` | Fails at compile time; read a named variable like `process.env.HOME` instead. |
+| `Object.values({ xs: ["a"] })` | Fails at compile time because object reflection/copy APIs are scalar-safe only. |
+| `Array.isArray(value)` | Uses compiler-known representation, not runtime shape inspection. |
+
 ## String Literals
 
 Both `"..."` and `'...'` are plain literals — no interpolation. Use backtick template literals for interpolation:
