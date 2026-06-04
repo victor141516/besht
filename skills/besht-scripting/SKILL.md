@@ -909,6 +909,8 @@ Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Defau
 
 When translating a shell project that sources helper files, make script-owned helpers `.bsh` modules with `export`/`import`. Preserve a `.sh` helper with an asserted shell import when it is genuinely existing shell code or depends on shell behavior you do not want to rewrite. If the helper is just simple text or data manipulation, rewriting it as Besht with string/array methods is usually cleaner.
 
+Declaration files (`.d.bsh` or entry-directory `stdlib.d.bsh`) provide editor/compiler signatures only. They do not source shell code or emit wrappers. If you call a declared external function, make sure that function exists at runtime through a real shell import, the execution environment, or another deliberate integration.
+
 ## Comments
 
 ```ts
