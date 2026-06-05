@@ -335,6 +335,8 @@ Static scalar primitive `Object.is()` calls fold to constants and static boolean
 
 String `localeCompare(other)` is intentionally compact: static ASCII calls fold to `-1`, `0`, or `1`, and dynamic calls lower to `LC_ALL=C awk` bytewise comparison. Do not expand it into full ICU locale collation without a deliberate locale/runtime design.
 
+String `toLocaleUpperCase()` and `toLocaleLowerCase()` are compact aliases for `toUpperCase()` and `toLowerCase()` over the existing POSIX/ASCII-oriented transform path. Do not expand them into full locale-aware casing without a deliberate locale/runtime design.
+
 Static scalar `Object.fromEntries(...)` calls over literal `[key, value]` rows or static `Object.entries(obj)` output may fold to compiler-managed object slots. Dynamic `Object.fromEntries(entries)` must build a fresh object, validate every dynamic key before generated shell uses `eval`, preserve first-seen key order, let later rows overwrite values, and avoid adding a runtime helper.
 
 Array `sort()` / `toSorted()` are the narrow default lexical slice only: no comparator callback support. Static scalar receivers and static scalar method chains should fold with the same constant-array machinery as `reverse()` and `toReversed()`. Dynamic scalar receivers lower to `LC_ALL=C sort`. Keep Besht's existing array-returning convention: value-position `let sorted = items.sort()` returns a sorted value, while statement-position `items.sort()` rebinds the named receiver to that result. `toReversed()`, `toSorted()`, and `toSpliced()` are copy-style APIs and must not be added to statement-position receiver rebinding.
@@ -866,6 +868,8 @@ let leftTrimmed: string = name.trimLeft()
 let rightTrimmed: string = name.trimRight()
 let upper: string = name.toUpperCase()
 let lower: string = name.toLowerCase()
+let localeUpper: string = name.toLocaleUpperCase()
+let localeLower: string = name.toLocaleLowerCase()
 let parts: string[] = name.split(",")
 let chars: string[] = name.split("")
 let r: string = name.replace("old", "new")

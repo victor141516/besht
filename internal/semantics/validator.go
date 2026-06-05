@@ -909,7 +909,7 @@ func (c *Validator) isCallbackValue(expr ast.Expression) bool {
 
 func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
-	case "toString", "valueOf", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase":
+	case "toString", "valueOf", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase", "toLocaleUpperCase", "toLocaleLowerCase":
 		if len(e.Args) != 0 {
 			if e.Method == "toString" || e.Method == "valueOf" {
 				return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}

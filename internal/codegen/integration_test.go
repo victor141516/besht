@@ -3053,6 +3053,8 @@ console.log("  hi  ".trimLeft())
 console.log("  hi  ".trimRight())
 console.log("hello".toUpperCase())
 console.log("HELLO".toLowerCase())
+console.log("hello".toLocaleUpperCase())
+console.log("HELLO".toLocaleLowerCase())
 console.log("hello".slice(1, 4))
 console.log("hello".substring(4, 1))
 console.log("hello".substr(1, 3))
@@ -3064,7 +3066,7 @@ console.log("hello world".replace("world", "besht"))
 console.log("hello world".replaceAll("l", "L"))
 console.log("a.b.c".replaceAll(".", "!"))
 console.log("hello".concat(" ", "besht"))`)
-	want := "hi\nhello\nhi  \n  hi\nHELLO\nhello\nell\nell\nell\nlo\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
+	want := "hi\nhello\nhi  \n  hi\nHELLO\nhello\nHELLO\nhello\nell\nell\nell\nlo\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

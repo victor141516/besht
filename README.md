@@ -110,7 +110,7 @@ Files use the `.bsh` extension.
 - Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, `Math.*` constants, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
 - Static primitive `.toString()` and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 - Static `String(value)` calls over primitives, null/undefined, scalar arrays, object literals, and Set literals compile to constants; dynamic booleans render `true`/`false`, dynamic scalar arrays reuse the comma-join path, and object-producing calls preserve side effects before returning `[object Object]`.
-- Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold transforms such as `.trim()`, `.trimStart()`/`.trimLeft()`, `.trimEnd()`/`.trimRight()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.substr()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `substr()`, `at()`, and indexing use AWK substring extraction.
+- Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold transforms such as `.trim()`, `.trimStart()`/`.trimLeft()`, `.trimEnd()`/`.trimRight()`, `.toUpperCase()`/`.toLocaleUpperCase()`, `.toLowerCase()`/`.toLocaleLowerCase()`, `.slice()`, `.substring()`, `.substr()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `substr()`, `at()`, and indexing use AWK substring extraction.
 - Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
@@ -475,6 +475,8 @@ s.trimLeft(); // alias for trimStart()
 s.trimRight(); // alias for trimEnd()
 s.toUpperCase(); // "  HELLO, WORLD!  "
 s.toLowerCase(); // "  hello, world!  "
+s.toLocaleUpperCase(); // compact alias for toUpperCase()
+s.toLocaleLowerCase(); // compact alias for toLowerCase()
 s.replace("World", "besht"); // "  Hello, besht!  "
 s.replaceAll("l", "L"); // "  HeLLo, WorLd!  "
 s.split(","); // string[] ["  Hello", " World!  "]
@@ -504,7 +506,7 @@ s.length; // int (character count)
 
 One-argument string `includes()`, `startsWith()`, and `endsWith()` use tiny POSIX helper functions that are emitted only when the generated shell calls them. Two-argument string search methods use inline `awk` instead. `localeCompare()` returns `-1`, `0`, or `1` using bytewise C-locale ordering rather than full ICU locale collation. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold indexes, searches, `localeCompare()`, and `charAt()` calls with static arguments to constants.
 
-Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold transforms with static arguments to constants, including `.trimLeft()`/`.trimRight()`, `.substr()`, `.replace()`/`.replaceAll()`, and `.concat()` calls. Dynamic and non-ASCII transforms use POSIX tools such as `sed`, `tr`, and `awk`; dynamic string `slice()`, `substr()`, `at()`, and indexing use AWK substring extraction.
+Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold transforms with static arguments to constants, including `.trimLeft()`/`.trimRight()`, `.toLocaleUpperCase()`/`.toLocaleLowerCase()`, `.substr()`, `.replace()`/`.replaceAll()`, and `.concat()` calls. Dynamic and non-ASCII transforms use POSIX tools such as `sed`, `tr`, and `awk`; dynamic string `slice()`, `substr()`, `at()`, and indexing use AWK substring extraction. Locale case methods are compact aliases for the existing POSIX case transforms, not full locale-aware casing.
 
 Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 

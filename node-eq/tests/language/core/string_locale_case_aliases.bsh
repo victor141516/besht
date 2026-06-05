@@ -1,0 +1,13 @@
+console.log("hello".toLocaleUpperCase())
+console.log("HELLO".toLocaleLowerCase())
+console.log("MiXeD".toLocaleUpperCase())
+console.log("MiXeD".toLocaleLowerCase())
+
+let dynamic = "bye"
+while (true) {
+    dynamic = "Hello"
+    break
+}
+
+console.log(dynamic.toLocaleUpperCase())
+console.log(dynamic.toLocaleLowerCase())

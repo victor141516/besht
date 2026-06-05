@@ -9532,7 +9532,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		switch e.Method {
 		case "split":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
-		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
+		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase", "toLocaleUpperCase", "toLocaleLowerCase",
 			"replace", "replaceAll", "slice", "substring", "substr", "at", "charAt", "concat", "padStart", "padEnd", "toString", "valueOf", "toFixed", "join":
 			return typeString
 		case "indexOf", "lastIndexOf", "localeCompare", "length":
@@ -9864,7 +9864,7 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	}
 	if !isStringMethod && !isListMethod && recvType == nil {
 		switch e.Method {
-		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
+		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase", "toLocaleUpperCase", "toLocaleLowerCase",
 			"replace", "replaceAll", "split", "includes", "startsWith",
 			"endsWith", "indexOf", "lastIndexOf", "localeCompare", "slice", "substring", "substr", "at", "charAt", "padStart", "padEnd",
 			"repeat", "concat", "valueOf":
@@ -12502,6 +12502,12 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 	case "toLowerCase":
 		return fmt.Sprintf("$(printf '%%s' %s | tr '[:upper:]' '[:lower:]')", ensureArgSafe(recv)), nil
 
+	case "toLocaleUpperCase":
+		return fmt.Sprintf("$(printf '%%s' %s | tr '[:lower:]' '[:upper:]')", ensureArgSafe(recv)), nil
+
+	case "toLocaleLowerCase":
+		return fmt.Sprintf("$(printf '%%s' %s | tr '[:upper:]' '[:lower:]')", ensureArgSafe(recv)), nil
+
 	case "includes":
 		a0, err := arg0()
 		if err != nil {
@@ -12917,6 +12923,16 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 	case "toLowerCase":
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("toLowerCase() takes no arguments")
+		}
+		return strings.ToLower(recv), true, nil
+	case "toLocaleUpperCase":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toLocaleUpperCase() takes no arguments")
+		}
+		return strings.ToUpper(recv), true, nil
+	case "toLocaleLowerCase":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("toLocaleLowerCase() takes no arguments")
 		}
 		return strings.ToLower(recv), true, nil
 	case "slice":

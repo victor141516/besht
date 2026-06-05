@@ -543,6 +543,12 @@ func TestValidator_StringToLowerCase(t *testing.T) {
 let l: string = s.toLowerCase()`)
 }
 
+func TestValidator_StringLocaleCaseAliases(t *testing.T) {
+	mustCheck(t, `let s: string = "Hello"
+let u: string = s.toLocaleUpperCase()
+let l: string = s.toLocaleLowerCase()`)
+}
+
 func TestValidator_StringSplit(t *testing.T) {
 	mustCheck(t, `let s: string = "a,b,c"
 let parts: Array<string> = s.split(",")`)
