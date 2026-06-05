@@ -427,6 +427,8 @@ func TestCodegen_StaticFoldedComparisons(t *testing.T) {
 console.log((2 + 3) === 5)
 console.log(Number.parseInt("42") === 42)
 console.log(Number.parseFloat("3.5") > 3)
+console.log(parseInt("42") === 42)
+console.log(parseFloat("3.5") > 3)
 console.log("hello".charAt(99) === "")
 console.log("hi".toUpperCase() === "HI")
 console.log("  hi  ".trim() === "hi")
@@ -601,11 +603,15 @@ func TestCodegen_StaticNumericToStringReceivers(t *testing.T) {
 	out := compile(t, `let rounded = Math.round(2.7).toString()
 let parsed = Number.parseInt("42").toString()
 let hex = Number.parseInt("ff", 16).toString()
+let globalParsed = parseInt("42").toString()
+let globalFloat = parseFloat("3.5").toString()
 let maxed = Math.max(4, 2).toString()
 let arithmetic = (2 + 3).toString()`)
 	assertContains(t, out, `rounded='3'`)
 	assertContains(t, out, `parsed='42'`)
 	assertContains(t, out, `hex='255'`)
+	assertContains(t, out, `globalParsed='42'`)
+	assertContains(t, out, `globalFloat='3.5'`)
 	assertContains(t, out, `maxed='4'`)
 	assertContains(t, out, `arithmetic='5'`)
 	assertNotContains(t, out, `printf '%s' 3`)
@@ -1481,6 +1487,20 @@ func TestCodegen_IntBuiltin(t *testing.T) {
 let n: number = Number.parseInt(s)`)
 	assertContains(t, out, `n=$(awk -v _s="$s" -v _radix=`)
 	assertContains(t, out, `_radix_given=(_radix!="")`)
+	assertNotContains(t, out, `_bst_parse_int()`)
+}
+
+func TestCodegen_GlobalNumberParseAliases(t *testing.T) {
+	out := compile(t, `let a: number = parseInt("2a", 10)
+let b: number = parseInt("ff", 16)
+let c: number = parseFloat("3.14")
+function parse(raw: string) {
+    let n: number = parseInt(raw, 10)
+}`)
+	assertContains(t, out, `a=2`)
+	assertContains(t, out, `b=255`)
+	assertContains(t, out, `c=3.14`)
+	assertContains(t, out, `_parse_n=$(awk -v _s="$_parse_raw"`)
 	assertNotContains(t, out, `_bst_parse_int()`)
 }
 

@@ -741,7 +741,7 @@ func (n *AsExpr) exprNode()    {}
 // IsBuiltin returns true if name is a built-in compile-time function.
 func IsBuiltin(name string) bool {
 	switch name {
-	case "fetch", "Boolean", "String",
+	case "fetch", "Boolean", "String", "parseInt", "parseFloat",
 		"Array.isArray", "Object.keys", "Object.values", "Object.entries", "Object.fromEntries", "Object.hasOwn", "Object.assign",
 		"JSON.parse", "JSON.stringify", "console.log", "console.error":
 		return true

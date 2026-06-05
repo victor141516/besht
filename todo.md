@@ -71,7 +71,7 @@ Current canonical surface:
 
 - `process.env.NAME ?? fallback` for environment variables.
 - `process.exit(code)` for process exit.
-- `value.toString()`, `String(value)`, and `Number.parseInt(value)` for common conversion.
+- `value.toString()`, `String(value)`, `Number.parseInt(value)`, global `parseInt(value)`, and global `parseFloat(value)` for common conversion.
 - Native array-style APIs: indexing, `.at()`, `.length`, `.slice()`, `.push()`, `.concat()`, `.fill()`, default lexical `.sort()`, `.includes()`, `.map()`, `.flatMap()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.findLast()`, `.findLastIndex()`, `.reduce()`, and statement-position `.forEach()`.
 - `Boolean(value)` for primitive boolean coercion.
 - `Object.keys(obj)`, scalar-only `Object.values(obj)`, scalar-only `Object.entries(obj)`, `Object.hasOwn(obj, key)`, scalar-safe `Object.assign(target, ...sources)`, scalar-safe `Object.fromEntries(entries)`, and scalar-safe object spread over compiler-managed object key metadata.
@@ -194,7 +194,7 @@ Expand besht's JS-compatible standard API surface for basic values while preserv
 
 Recommended phases:
 
-- **Number / Math:** `Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, and `Math.SQRT2` are implemented as numeric constants. Consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
+- **Number / Math:** `Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, and `Math.SQRT2` are implemented as numeric constants. `parseInt()` and `parseFloat()` are implemented as global aliases for the existing `Number.parseInt()` / `Number.parseFloat()` lowering. Consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
 - **String:** JS-compatible primitive `String(value)` is implemented for current Besht scalar representations: primitives, null/undefined, scalar arrays, compiler-managed objects, and Sets. It deliberately does not add `new String(...)`, string wrapper objects, `String.raw`, other static `String.*` APIs, or direct `String(JSONValue)` conversion. Consider regex-dependent APIs like `match()` or `search()` only after a regex representation is designed.
 - **Array:** `Array.prototype.at()` is implemented for positive and negative indexes, `Array.from(string)` is implemented for character arrays, `Array.prototype.fill()` is implemented for scalar arrays with JavaScript-style start/end bounds, default lexical `Array.prototype.sort()` is implemented without callback support, scalar-array `findLast()` / `findLastIndex()` callbacks are implemented with reverse traversal and JavaScript-style no-match results, and `Array.prototype.flatMap()` is implemented as one-level flattening for callback-returned scalar arrays. General `flat()` remains deferred until the nested-array representation can preserve empty inner arrays and deeper nesting cleanly.
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
@@ -220,3 +220,4 @@ Priority order from the June 2026 JS API coverage pass:
 7. `Array.prototype.findLast()` and `Array.prototype.findLastIndex()` for reverse scalar-array predicate searches. Implemented.
 8. `Array.prototype.fill(value, start?, end?)` for bounded scalar-array replacement. Implemented.
 9. `Array.prototype.flatMap(callback)` for one-level flattening of callback-returned scalar arrays. Implemented.
+10. Global `parseInt()` and `parseFloat()` aliases for common JavaScript numeric parsing. Implemented.

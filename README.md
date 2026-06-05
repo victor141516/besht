@@ -100,12 +100,12 @@ Files use the `.bsh` extension.
 - Static value-position `||` and `&&` expressions compile to the selected side when the left operand's truthiness is known.
 - Static boolean `console.log()`/`console.error()` arguments such as `Boolean("")`, `true`, `!false`, static comparisons, and variables bound to static boolean expressions render directly as `true`/`false`; `Besht.fs.*` and `Besht.strings.*` predicates also print readable `true`/`false` in console calls. Dynamic boolean console arguments reuse the same shell condition once and print `true`/`false` from it.
 - Strict equality `===` and `!==` compile the same as `==` and `!=`.
-- Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, and parseable `Number.parseInt()`/`Number.parseFloat()` calls. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
+- Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, parseable `Number.parseInt()`/`Number.parseFloat()` calls, and global `parseInt()`/`parseFloat()` aliases. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 - String equality preserves spaces and newlines, including multiline template literals.
 - Static boolean `if` conditions and ternary expressions, including variables bound to static boolean expressions, fold to the selected branch or value; dynamic and control-flow-assigned conditions keep normal shell tests.
 - Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold `[index]`, `.includes()`, `.startsWith()`, `.endsWith()`, `.indexOf()`, `.lastIndexOf()`, and `.charAt()` calls with static arguments to constants; dynamic and non-ASCII string indexes/searches keep the helper/`awk` path.
 - Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to quoted newline-backed arrays and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
-- Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
+- Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
 - Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants; dynamic and control-flow-assigned arithmetic keeps shell arithmetic or POSIX `awk`.
 - Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, `Math.*` constants, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
 - Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
@@ -554,6 +554,8 @@ Number.parseInt("42", 10);    // optional radix argument
 Number.parseInt("2a", 10);    // 2; static parseable prefixes compile to constants
 Number.parseInt(hexByte, 16);  // dynamic radix parsing is supported
 Number.parseFloat("3.14");    // parse string to float
+parseInt("42", 10);           // global alias for Number.parseInt()
+parseFloat("3.14");           // global alias for Number.parseFloat()
 Number.isFinite(n);           // true (no NaN/Infinity in shell)
 Number.isInteger(n);          // check if value is integer
 Number.isSafeInteger(n);      // check if value is a safe integer
@@ -1016,6 +1018,8 @@ Use JS-style conversion APIs for new code:
 | `String(value)`          | Convert primitives, null/undefined, scalar arrays, objects, and Sets to a string |
 | `Number.parseInt(value)` | Parse `string` to `number`                       |
 | `Number.parseInt(value, 10)` | Parse with an optional radix argument        |
+| `parseInt(value, 10)`    | Global alias for `Number.parseInt(value, 10)`    |
+| `parseFloat(value)`      | Global alias for `Number.parseFloat(value)`      |
 | `Boolean(value)`          | Convert a value to a primitive boolean using JavaScript-like truthiness |
 
 ```ts
@@ -1023,7 +1027,7 @@ let n: number = 42
 let msg: string = "Count is " + n.toString()
 
 let raw: string = $("wc", "-l", "file").run().readStdout()
-let lines: number = Number.parseInt(raw)
+let lines: number = parseInt(raw)
 let flag: boolean = Boolean(raw)
 let boolText: string = flag.toString() // "true"
 let label: string = String(["a", "b"]) // "a,b"

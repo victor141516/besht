@@ -8478,7 +8478,7 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "String":
 		return g.genStringCapture(e.Args[0])
 
-	case "Number.parseInt":
+	case "Number.parseInt", "parseInt":
 		if value, ok := staticStringText(e.Args[0]); ok {
 			var radixArg *int
 			if len(e.Args) == 2 {
@@ -8495,7 +8495,7 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	dynamicParseInt:
 		return g.genDynamicParseInt(e)
 
-	case "Number.parseFloat":
+	case "Number.parseFloat", "parseFloat":
 		argStr, err := g.genExprValue(e.Args[0])
 		if err != nil {
 			return "", err
@@ -9035,7 +9035,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: typeString}}
 		case "Object.assign", "Object.fromEntries":
 			return &ast.Type{Kind: ast.TypeObject}
-		case "Number.parseInt", "Number.parseFloat":
+		case "Number.parseInt", "Number.parseFloat", "parseInt", "parseFloat":
 			return typeNumber
 		case "Array.from":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeNumber}
@@ -9662,23 +9662,14 @@ func (g *Generator) staticNumericStringValue(expr ast.Expression) (string, bool,
 	case *ast.AsExpr:
 		return g.staticNumericStringValue(e.Expr)
 	case *ast.BuiltinCallExpr:
-		if e.Name != "Number.parseInt" || len(e.Args) < 1 || len(e.Args) > 2 {
-			return "", false, nil
+		switch e.Name {
+		case "Number.parseInt", "parseInt":
+			value, ok, err := staticParseIntBuiltinValue(e)
+			return value, ok, err
+		case "Number.parseFloat", "parseFloat":
+			value, ok := staticParseFloatBuiltinValue(e)
+			return value, ok, nil
 		}
-		value, ok := staticStringText(e.Args[0])
-		if !ok {
-			return "", false, nil
-		}
-		var radixArg *int
-		if len(e.Args) == 2 {
-			radix, ok := staticIntLiteral(e.Args[1])
-			if !ok {
-				return "", false, nil
-			}
-			radixArg = &radix
-		}
-		parsed, ok := staticParseIntValue(value, radixArg)
-		return parsed, ok, nil
 	case *ast.MethodCallExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && ident.Name == "Math" {
 			return g.genStaticMathMethod(e)
@@ -13516,10 +13507,10 @@ func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bo
 			return staticBoolComparisonValue(value), true, nil
 		}
 		switch e.Name {
-		case "Number.parseInt":
+		case "Number.parseInt", "parseInt":
 			value, ok, err := staticParseIntBuiltinValue(e)
 			return value, ok, err
-		case "Number.parseFloat":
+		case "Number.parseFloat", "parseFloat":
 			value, ok := staticParseFloatBuiltinValue(e)
 			return value, ok, nil
 		}
@@ -13562,7 +13553,7 @@ func (g *Generator) staticNumericComparisonValue(expr ast.Expression) (float64, 
 		return g.staticNumericComparisonValue(e.Expr)
 	case *ast.BuiltinCallExpr:
 		switch e.Name {
-		case "Number.parseInt":
+		case "Number.parseInt", "parseInt":
 			value, ok, err := staticParseIntBuiltinValue(e)
 			if err != nil || !ok {
 				return 0, ok, err
@@ -13572,7 +13563,7 @@ func (g *Generator) staticNumericComparisonValue(expr ast.Expression) (float64, 
 				return 0, false, nil
 			}
 			return parsed, true, nil
-		case "Number.parseFloat":
+		case "Number.parseFloat", "parseFloat":
 			value, ok := staticParseFloatBuiltinValue(e)
 			if !ok {
 				return 0, false, nil

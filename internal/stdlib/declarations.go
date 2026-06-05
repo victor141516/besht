@@ -33,6 +33,9 @@ interface FetchResponse {
 declare function fetch(url: string): FetchResponse
 declare function Boolean(value): boolean
 declare function String(value): string
+declare function parseInt(value: string): number
+declare function parseInt(value: string, radix: number): number
+declare function parseFloat(value: string): number
 type JSONValue = string
 
 declare const process: {
@@ -48,6 +51,7 @@ declare namespace console {
 }
 
 declare namespace Number {
+    function parseInt(value: string): number
     function parseInt(value: string, radix: number): number
     function parseFloat(value: string): number
     function isFinite(value: number): boolean

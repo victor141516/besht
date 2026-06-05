@@ -1,0 +1,8 @@
+console.log(parseInt("42"))
+console.log(parseInt("2a", 10))
+console.log(parseInt("ff", 16))
+console.log(parseFloat("3.5") > 3)
+
+let raw = "15px"
+console.log(parseInt(raw, 10))
+console.log(parseInt("10") === Number.parseInt("10"))

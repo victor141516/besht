@@ -8,7 +8,7 @@ description: >
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
   array/string/number methods, Math constants/methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.values(), Object.entries(), Object.hasOwn(), Object.assign(), Object.fromEntries(), JSON.parse(), JSON.stringify(), Set<T>, nested arrays, object literals, object spread, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
-  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), String(value), Boolean(value), Number.parseInt(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
+  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), String(value), Boolean(value), Number.parseInt(), parseInt(), parseFloat(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
   fetch(url).text().
 ---
 
@@ -231,7 +231,7 @@ b`                                // multiline-safe string equality
 
 `||` and `&&` in value position return actual values (JS semantics): `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. Static known-left `||`/`&&` expressions compile directly to the selected value. In condition position (`if`/`while`), they return 1/0 as booleans. `a ?? b` returns `b` only when `a` is `null`/`undefined`; it preserves empty string, `0`, and `false`. Static `??` expressions compile to the selected side when the left side is known.
 
-Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, and parseable `Number.parseInt()`/`Number.parseFloat()` calls. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
+Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons over already-folded arithmetic, string methods/transforms, `Math.*`, parseable `Number.parseInt()`/`Number.parseFloat()` calls, and global `parseInt()`/`parseFloat()` aliases. Dynamic relational comparisons over compiler-known integer expressions use POSIX `[ ]`; floats and unknown values keep the `awk` path. Dynamic equality keeps the multiline-safe shell path.
 
 ## Switch / Case
 
@@ -465,6 +465,8 @@ Getters take no parameters, must return a value, and cannot assign to `this.prop
 let n = Number.parseInt("42")
 let n10 = Number.parseInt("42", 10)
 let f = Number.parseFloat("3.14")
+let aliasN = parseInt("42", 10)
+let aliasF = parseFloat("3.14")
 let fin = Number.isFinite(f)
 let isInt = Number.isInteger(n)
 let safe = Number.isSafeInteger(n)
@@ -478,7 +480,7 @@ let eps = Number.EPSILON
 
 ## Type Conversion
 
-Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` accepts one argument or an optional radix argument, including non-decimal radix values such as 16.
+Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` and global `parseInt(value)` accept one argument or an optional radix argument, including non-decimal radix values such as 16. Global `parseFloat(value)` is available as an alias for `Number.parseFloat(value)`.
 
 ```ts
 let countText = count.toString()
@@ -486,6 +488,7 @@ let flagText = flag.toString()
 let label = String(["a", "b"]) // "a,b"
 let lines = Number.parseInt(raw)
 let lines10 = Number.parseInt(raw, 10)
+let globalLines = parseInt(raw, 10)
 let red = Number.parseInt(hexByte, 16)
 ```
 
@@ -493,7 +496,7 @@ let red = Number.parseInt(hexByte, 16)
 
 Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants. Dynamic arithmetic and variables assigned inside control flow keep shell arithmetic or POSIX `awk`.
 
-Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `Number.parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 
 ## Command Execution
 
@@ -1025,7 +1028,7 @@ let n: number = 42;
 let s: string = n.toString(); // number -> string
 let label: string = String(["a", "b"]); // "a,b"
 let raw: string = $("wc", "-l", "file.txt").run().readStdout();
-let lines: number = Number.parseInt(raw); // string -> number
+let lines: number = parseInt(raw); // string -> number
 
 // Older helpers remain supported for now:
 ```
@@ -1036,7 +1039,7 @@ let lines: number = Number.parseInt(raw); // string -> number
 - `boolean` values work directly in `if`/`while` conditions and render as `true`/`false` in string contexts
 - Array values (`T[]` / `Array<T>`) can be indexed, joined, and iterated with `for`
 - `status` type holds exit codes; only usable in `catch` clauses
-- String, number, boolean, and status values can be converted with `.toString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()`
+- String, number, boolean, and status values can be converted with `.toString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()` or global `parseInt()`
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
 - `===`/`!==` are aliases for `==`/`!=`

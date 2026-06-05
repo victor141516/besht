@@ -337,6 +337,18 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "declare function String(value): string") {
 		t.Fatalf("generated stdlib should declare String(value)")
 	}
+	if !strings.Contains(stdlib.Declarations, "declare function parseInt(value: string): number") {
+		t.Fatalf("generated stdlib should declare parseInt(value)")
+	}
+	if !strings.Contains(stdlib.Declarations, "declare function parseInt(value: string, radix: number): number") {
+		t.Fatalf("generated stdlib should declare parseInt(value, radix)")
+	}
+	if !strings.Contains(stdlib.Declarations, "declare function parseFloat(value: string): number") {
+		t.Fatalf("generated stdlib should declare parseFloat(value)")
+	}
+	if !strings.Contains(stdlib.Declarations, "\n    function parseInt(value: string): number") {
+		t.Fatalf("generated stdlib should declare Number.parseInt(value)")
+	}
 	if !strings.Contains(stdlib.Declarations, "function hasOwn(value: object, key: string): boolean") {
 		t.Fatalf("generated stdlib should declare Object.hasOwn(value, key)")
 	}
@@ -1512,12 +1524,14 @@ func TestIntegration_StaticFoldedComparisonsRuntime(t *testing.T) {
 console.log((2 + 3) === 5)
 console.log(Number.parseInt("42") === 42)
 console.log(Number.parseFloat("3.5") > 3)
+console.log(parseInt("42") === 42)
+console.log(parseFloat("3.5") > 3)
 console.log("hello".charAt(99) === "")
 console.log("hi".toUpperCase() === "HI")
 console.log("  hi  ".trim() === "hi")
 console.log(Math.max(4, 2) < 4)
 console.log("hi".toUpperCase() !== "HI")`)
-	want := "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\n"
+	want := "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\nfalse\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -1598,14 +1612,32 @@ func TestIntegration_StaticNumericToStringReceiversRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let rounded = Math.round(2.7).toString()
 let parsed = Number.parseInt("42").toString()
 let hex = Number.parseInt("ff", 16).toString()
+let globalParsed = parseInt("42").toString()
+let globalFloat = parseFloat("3.5").toString()
 let maxed = Math.max(4, 2).toString()
 let arithmetic = (2 + 3).toString()
 console.log(rounded)
 console.log(parsed)
 console.log(hex)
+console.log(globalParsed)
+console.log(globalFloat)
 console.log(maxed)
 console.log(arithmetic)`)
-	want := "3\n42\n255\n4\n5\n"
+	want := "3\n42\n255\n42\n3.5\n4\n5\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_GlobalNumberParseAliasesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(parseInt("42"))
+console.log(parseInt("2a", 10))
+console.log(parseInt("ff", 16))
+console.log(parseFloat("3.5") > 3)
+let raw = "15px"
+console.log(parseInt(raw, 10))
+console.log(parseInt("10") === Number.parseInt("10"))`)
+	want := "42\n2\n255\ntrue\n15\ntrue\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

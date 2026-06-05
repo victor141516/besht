@@ -391,6 +391,10 @@ let out: string = b.toString("bad")`, "toString() takes no arguments")
 func TestValidator_NumberParseIntOneAndTwoArgs(t *testing.T) {
 	mustCheck(t, `let n: number = Number.parseInt("42")`)
 	mustCheck(t, `let n: number = Number.parseInt("42", 10)`)
+	mustCheck(t, `let n: number = parseInt("42")`)
+	mustCheck(t, `let n: number = parseInt("42", 10)`)
+	mustCheck(t, `let n: number = parseFloat("3.14")`)
+	expectError(t, `let n: number = parseInt()`, "parseInt() takes 1 or 2 arguments")
 }
 
 func TestValidator_NumberToFixedMethod(t *testing.T) {
@@ -500,6 +504,8 @@ let s: string = b.toString()`)
 func TestValidator_IntBuiltin(t *testing.T) {
 	mustCheck(t, `let s: string = "42"
 let n: number = Number.parseInt(s)`)
+	mustCheck(t, `let s: string = "42"
+let n: number = parseInt(s)`)
 }
 
 func TestValidator_ListConcatMethod(t *testing.T) {

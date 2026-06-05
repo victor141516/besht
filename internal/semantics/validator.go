@@ -628,7 +628,7 @@ func (c *Validator) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes 1 argument", e.Name)}
 		}
-	case "Number.parseInt", "Number.parseFloat":
+	case "Number.parseInt", "Number.parseFloat", "parseInt", "parseFloat":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 1 or 2 arguments"}
 		}
@@ -1021,7 +1021,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 			return boolType
 		case "String":
 			return strType
-		case "Number.parseInt", "Number.parseFloat":
+		case "Number.parseInt", "Number.parseFloat", "parseInt", "parseFloat":
 			return numType
 		case "Array.from", "Array.of", "Object.keys", "Object.values":
 			return listStrType
