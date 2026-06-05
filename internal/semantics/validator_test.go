@@ -1012,7 +1012,9 @@ func TestValidator_ListPredicateCallbacks(t *testing.T) {
 	mustCheck(t, `let items: string[] = ["alpha", "beta"]
 let hasAlpha: boolean = items.some((item: string) => item.startsWith("a"))
 let allIndexed: boolean = items.every((item, i: number) => i >= 0)
-let found: string = items.find((item, i) => i == 1)`)
+let found: string = items.find((item, i) => i == 1)
+let foundLast: string = items.findLast((item, i) => i == 1)
+let lastIndex: number = items.findLastIndex((item, i) => item.startsWith("a"))`)
 }
 
 func TestValidator_ListPredicateCallbacksRejectInvalidArgs(t *testing.T) {
@@ -1027,8 +1029,14 @@ let ok: boolean = items.some("a")`, "array callback must be an arrow expression 
 let ok: boolean = items.every((a, b, c) => true)`, "arrow callbacks take 1 or 2 parameters"},
 		{"find wrong arity", `let items: string[] = ["a"]
 let hit: string = items.find()`, "find() takes 1 arrow callback"},
+		{"findLast wrong arity", `let items: string[] = ["a"]
+let hit: string = items.findLast()`, "findLast() takes 1 arrow callback"},
 		{"some block body", `let items: string[] = ["a"]
 let ok: boolean = items.some(x => { return true })`, "some() predicate callback must be expression-bodied"},
+		{"findLast block body", `let items: string[] = ["a"]
+let hit: string = items.findLast(x => { return true })`, "findLast() predicate callback must be expression-bodied"},
+		{"findLastIndex block body", `let items: string[] = ["a"]
+let hit: number = items.findLastIndex(x => { return true })`, "findLastIndex() predicate callback must be expression-bodied"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

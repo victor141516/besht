@@ -688,6 +688,8 @@ let anyA = l.some(x => x.startsWith("a")); // true if any callback result is tru
 let allNamed = l.every(x => x.length > 0); // true if all callback results are truthy; true for an empty array
 let hit = l.find((x, i) => i == 1) ?? "missing"; // first matching element, or nullish when no match
 let at = l.findIndex(x => x == "beta"); // 1, or -1 if no match
+let lastHit = l.findLast(x => x.startsWith("a")) ?? "missing"; // last matching element
+let lastAt = l.findLastIndex(x => x.startsWith("a")); // last matching index, or -1
 let copied = [...l, "omega"]; // array spread in array literals
 l.length; // number
 matrix[0][1]; // nested indexing
@@ -715,7 +717,7 @@ if (visited.has("0,0")) {
 
 ### Arrow callbacks
 
-Arrow functions can be stored in variables, passed to functions, called as function values, and passed to array callback APIs. Direct arrows support expression-bodied and block-bodied forms for array `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-array predicate callbacks for `.some()`, `.every()`, `.find()`, and `.findIndex()` may be direct arrow expressions or stored callbacks.
+Arrow functions can be stored in variables, passed to functions, called as function values, and passed to array callback APIs. Direct arrows support expression-bodied and block-bodied forms for array `.map()`, `.filter()`, `.reduce()`, and statement-position `.forEach()`. Scalar-array predicate callbacks for `.some()`, `.every()`, `.find()`, `.findIndex()`, `.findLast()`, and `.findLastIndex()` may be direct arrow expressions or stored callbacks.
 
 When translating shell pipelines that process already-known text or numbers, prefer native Besht data operations over spawning `sed`/`awk`/`grep`/`tr`. Use `map`, `filter`, `reduce`, `forEach((item, index) => ...)`, `join`, and string methods such as `trim()`, `startsWith()`, and `toUpperCase()` for in-memory transformations. Keep command pipelines for external data sources and tool-specific work.
 
@@ -728,6 +730,8 @@ let aNames = shouted.filter(name => name.startsWith("A"))
 let hasAnna = names.some(name => name == "anna")
 let allShort = names.every((name, i) => name.length < 10 && i >= 0)
 let firstB = names.find(name => name.startsWith("b")) ?? "none"
+let lastA = names.findLast(name => name.startsWith("a")) ?? "none"
+let lastAIndex = names.findLastIndex(name => name.startsWith("a"))
 console.log(aNames.join(","))
 
 let initials = ""
@@ -789,7 +793,7 @@ let storedCounts = words.reduce(countWord, {})
 console.log(counts)
 ```
 
-`.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty array. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty array. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows and stored callbacks support scalar/array accumulators, and stored Besht callbacks can mutate compiler-managed object accumulators. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, runs stored callback calls in the current shell so outer assignments and `Set.add()` side effects persist, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Arrow values lower to generated shell functions or closure ids; returned arrows get independent captured environments, callback factories can be passed directly to array methods, and direct function-value calls in value position use Besht's return-slot path so captured mutations persist. Array callback expressions used in value or condition position run in the current shell, so assignment, `Set.add()`, and returned-closure mutations persist after `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` complete.
+`.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.findLast()`, and `.findLastIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty array. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty array. `.find()` returns the first matching scalar element, and `.findLast()` scans from the end and returns the last matching scalar element; both return a nullish value when no element matches so `??` fallbacks work. `.findIndex()` and `.findLastIndex()` return the zero-based matching index or `-1`. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows and stored callbacks support scalar/array accumulators, and stored Besht callbacks can mutate compiler-managed object accumulators. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, runs stored callback calls in the current shell so outer assignments and `Set.add()` side effects persist, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Arrow values lower to generated shell functions or closure ids; returned arrows get independent captured environments, callback factories can be passed directly to array methods, and direct function-value calls in value position use Besht's return-slot path so captured mutations persist. Array callback expressions used in value or condition position run in the current shell, so assignment, `Set.add()`, and returned-closure mutations persist after `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.findLast()`, and `.findLastIndex()` complete.
 
 `items.sort()` returns a default lexical sorted array. Static scalar receivers fold to constants; dynamic receivers use POSIX `LC_ALL=C sort`. Comparator callbacks are not supported yet. Like other Besht array-returning methods, `let sorted = items.sort()` leaves `items` unchanged, while a statement-position `items.sort()` rebinds the named array to the sorted result.
 

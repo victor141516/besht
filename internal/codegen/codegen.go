@@ -9166,9 +9166,9 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 				return typeString
 			case "includes", "some", "every":
 				return &ast.Type{Kind: ast.TypeBoolean}
-			case "find", "at":
+			case "find", "findLast", "at":
 				return recvType.Elem
-			case "indexOf", "lastIndexOf", "findIndex", "length":
+			case "indexOf", "lastIndexOf", "findIndex", "findLastIndex", "length":
 				return typeNumber
 			}
 		}
@@ -9934,6 +9934,8 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 
 	case "findIndex":
 		return g.genListFindIndex(recv, e)
+	case "findLastIndex":
+		return g.genListFindLastIndex(recv, e)
 
 	case "some":
 		return g.genListSomeEvery(recv, e, true)
@@ -9943,6 +9945,8 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 
 	case "find":
 		return g.genListFind(recv, e)
+	case "findLast":
+		return g.genListFindLast(recv, e)
 
 	case "lastIndexOf":
 		a0, err := arg0()
@@ -10108,7 +10112,7 @@ func (g *Generator) genListCallbackMethodIntoVar(targetVar string, e *ast.Method
 		return false, nil
 	}
 	switch e.Method {
-	case "map", "filter", "some", "every", "find", "findIndex":
+	case "map", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex":
 	default:
 		return false, nil
 	}
@@ -10133,6 +10137,10 @@ func (g *Generator) genListCallbackMethodIntoVar(targetVar string, e *ast.Method
 		return true, g.genListFindIntoVar(targetVar, recv, e, cb)
 	case "findIndex":
 		return true, g.genListFindIndexIntoVar(targetVar, recv, e, cb)
+	case "findLast":
+		return true, g.genListFindLastIntoVar(targetVar, recv, e, cb)
+	case "findLastIndex":
+		return true, g.genListFindLastIndexIntoVar(targetVar, recv, e, cb)
 	default:
 		return false, nil
 	}
@@ -10475,31 +10483,72 @@ func (g *Generator) genListFindIntoVar(targetVar, recv string, e *ast.MethodCall
 	}
 	g.requireRuntimeHelper("nullish")
 	g.line(fmt.Sprintf("%s=\"$%s\"", targetVar, nullishSentinelVar))
-	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, false)
+	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, false, false)
 }
 
 func (g *Generator) genListFindIndexIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
 	g.line(fmt.Sprintf("%s=-1", targetVar))
-	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, true)
+	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, true, false)
 }
 
-func (g *Generator) genListFindLikeIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef, indexResult bool) error {
+func (g *Generator) genListFindLastIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
+	if cb.Arrow != nil && cb.Arrow.BlockBody != nil {
+		return fmt.Errorf("findLast() predicate callback must be expression-bodied")
+	}
+	g.requireRuntimeHelper("nullish")
+	g.line(fmt.Sprintf("%s=\"$%s\"", targetVar, nullishSentinelVar))
+	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, false, true)
+}
+
+func (g *Generator) genListFindLastIndexIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
+	if cb.Arrow != nil && cb.Arrow.BlockBody != nil {
+		return fmt.Errorf("findLastIndex() predicate callback must be expression-bodied")
+	}
+	g.line(fmt.Sprintf("%s=-1", targetVar))
+	return g.genListFindLikeIntoVar(targetVar, recv, e, cb, true, true)
+}
+
+func (g *Generator) genListFindLikeIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef, indexResult bool, reverse bool) error {
 	dataVar := fmt.Sprintf("_find_%d_%d_data", e.Pos.Line, e.Pos.Column)
 	itemVar := fmt.Sprintf("_find_%d_%d_item", e.Pos.Line, e.Pos.Column)
 	idxVar := fmt.Sprintf("_find_%d_%d_index", e.Pos.Line, e.Pos.Column)
 	retVar := fmt.Sprintf("_find_%d_%d_return", e.Pos.Line, e.Pos.Column)
+	countVar := fmt.Sprintf("_find_%d_%d_count", e.Pos.Line, e.Pos.Column)
+	slotVar := fmt.Sprintf("_find_%d_%d_slot", e.Pos.Line, e.Pos.Column)
+	valuePrefix := fmt.Sprintf("_find_%d_%d_value", e.Pos.Line, e.Pos.Column)
 	tag := fmt.Sprintf("__BESHT_FIND_%d_%d", e.Pos.Line, e.Pos.Column)
 	g.line(fmt.Sprintf("%s=%s", dataVar, recv))
 	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
 	g.push()
-	g.line(fmt.Sprintf("%s=0", idxVar))
+	if reverse {
+		g.line(fmt.Sprintf("%s=0", countVar))
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+		g.push()
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", countVar, countVar))
+		g.line(fmt.Sprintf("eval \"%s_${%s}=\\$%s\"", valuePrefix, countVar, itemVar))
+		g.pop()
+		g.line("done <<" + tag)
+		g.raw(fmt.Sprintf("$%s\n", dataVar))
+		g.raw(tag + "\n")
+		g.line(fmt.Sprintf("%s=$(( %s - 1 ))", idxVar, countVar))
+	} else {
+		g.line(fmt.Sprintf("%s=0", idxVar))
+	}
 	if cb.Arrow == nil {
 		fn, err := g.callbackCommand(cb.Expr)
 		if err != nil {
 			return err
 		}
-		g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+		if reverse {
+			g.line(fmt.Sprintf("while [ \"$%s\" -ge 0 ]; do", idxVar))
+		} else {
+			g.line(fmt.Sprintf("while IFS= read -r %s; do", itemVar))
+		}
 		g.push()
+		if reverse {
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", slotVar, idxVar))
+			g.line(fmt.Sprintf("eval \"%s=\\$%s_${%s}\"", itemVar, valuePrefix, slotVar))
+		}
 		args := []string{fmt.Sprintf("\"$%s\"", itemVar), fmt.Sprintf("\"$%s\"", idxVar)}
 		if g.callbackSupportsReturnSlot(cb.Expr) {
 			g.emitCommandIntoVar(retVar, e.Pos, fn, args)
@@ -10512,14 +10561,26 @@ func (g *Generator) genListFindLikeIntoVar(targetVar, recv string, e *ast.Method
 		} else {
 			g.line(fmt.Sprintf("if %s; then %s=\"$%s\"; break; fi", cond, targetVar, itemVar))
 		}
-		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		if reverse {
+			g.line(fmt.Sprintf("%s=$(( %s - 1 ))", idxVar, idxVar))
+		} else {
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+		}
 		g.pop()
 	} else {
 		arrow := cb.Arrow
 		err := g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
 			param := ctx.ParamVars[0]
-			g.line(fmt.Sprintf("while IFS= read -r %s; do", param))
+			if reverse {
+				g.line(fmt.Sprintf("while [ \"$%s\" -ge 0 ]; do", idxVar))
+			} else {
+				g.line(fmt.Sprintf("while IFS= read -r %s; do", param))
+			}
 			g.push()
+			if reverse {
+				g.line(fmt.Sprintf("%s=$(( %s + 1 ))", slotVar, idxVar))
+				g.line(fmt.Sprintf("eval \"%s=\\$%s_${%s}\"", param, valuePrefix, slotVar))
+			}
 			if len(ctx.ParamVars) > 1 {
 				g.line(fmt.Sprintf("%s=$%s", ctx.ParamVars[1], idxVar))
 			}
@@ -10532,7 +10593,11 @@ func (g *Generator) genListFindLikeIntoVar(targetVar, recv string, e *ast.Method
 			} else {
 				g.line(fmt.Sprintf("if %s; then %s=\"$%s\"; break; fi", cond, targetVar, param))
 			}
-			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+			if reverse {
+				g.line(fmt.Sprintf("%s=$(( %s - 1 ))", idxVar, idxVar))
+			} else {
+				g.line(fmt.Sprintf("%s=$(( %s + 1 ))", idxVar, idxVar))
+			}
 			g.pop()
 			return nil
 		})
@@ -10540,9 +10605,13 @@ func (g *Generator) genListFindLikeIntoVar(targetVar, recv string, e *ast.Method
 			return err
 		}
 	}
-	g.line("done <<" + tag)
-	g.raw(fmt.Sprintf("$%s\n", dataVar))
-	g.raw(tag + "\n")
+	if reverse {
+		g.line("done")
+	} else {
+		g.line("done <<" + tag)
+		g.raw(fmt.Sprintf("$%s\n", dataVar))
+		g.raw(tag + "\n")
+	}
 	g.pop()
 	g.line("fi")
 	return nil
@@ -11119,6 +11188,80 @@ func (g *Generator) genListFind(recv string, e *ast.MethodCallExpr) (string, err
 				indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
 			}
 			out = fmt.Sprintf("$(%s=%s; %s=$%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s%sif %s; then %s=$%s; break; fi; %s=$(( %s + 1 )); done <<__BESHT_LIST_FIND_%d_%d\n$%s\n__BESHT_LIST_FIND_%d_%d\nfi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, nullishSentinelVar, idx, dataVar, param, indexAssign, prelude, cond, resultVar, param, idx, idx, arrow.Pos.Line, arrow.Pos.Column, dataVar, arrow.Pos.Line, arrow.Pos.Column, resultVar)
+			return nil
+		})
+	})
+	return out, err
+}
+
+func (g *Generator) genListFindLastIndex(recv string, e *ast.MethodCallExpr) (string, error) {
+	return g.genListFindLastExpr(recv, e, true)
+}
+
+func (g *Generator) genListFindLast(recv string, e *ast.MethodCallExpr) (string, error) {
+	g.requireRuntimeHelper("nullish")
+	return g.genListFindLastExpr(recv, e, false)
+}
+
+func (g *Generator) genListFindLastExpr(recv string, e *ast.MethodCallExpr, indexResult bool) (string, error) {
+	cb, err := g.listCallbackArg(e)
+	if err != nil {
+		return "", err
+	}
+	if cb.Arrow != nil && cb.Arrow.BlockBody != nil {
+		return "", fmt.Errorf("%s() predicate callback must be expression-bodied", e.Method)
+	}
+	initial := "-1"
+	if !indexResult {
+		initial = "$" + nullishSentinelVar
+	}
+	if cb.Arrow == nil {
+		fn, err := g.callbackCommand(cb.Expr)
+		if err != nil {
+			return "", err
+		}
+		itemVar := fmt.Sprintf("_listfindlast_%d_%d_item", cb.Pos.Line, cb.Pos.Column)
+		idx := fmt.Sprintf("_listfindlast_%d_%d_index", cb.Pos.Line, cb.Pos.Column)
+		countVar := fmt.Sprintf("_listfindlast_%d_%d_count", cb.Pos.Line, cb.Pos.Column)
+		slotVar := fmt.Sprintf("_listfindlast_%d_%d_slot", cb.Pos.Line, cb.Pos.Column)
+		valuePrefix := fmt.Sprintf("_listfindlast_%d_%d_value", cb.Pos.Line, cb.Pos.Column)
+		dataVar := fmt.Sprintf("_listfindlast_%d_%d_data", cb.Pos.Line, cb.Pos.Column)
+		resultVar := fmt.Sprintf("_listfindlast_%d_%d_result", cb.Pos.Line, cb.Pos.Column)
+		tag := fmt.Sprintf("__BESHT_LIST_FIND_LAST_%d_%d", cb.Pos.Line, cb.Pos.Column)
+		call := fmt.Sprintf("%s \"$%s\" \"$%s\"", fn, itemVar, idx)
+		cond := truthyCondition("$(" + call + ")")
+		assignResult := fmt.Sprintf("%s=\"$%s\"", resultVar, itemVar)
+		if indexResult {
+			assignResult = fmt.Sprintf("%s=\"$%s\"", resultVar, idx)
+		}
+		return fmt.Sprintf("$(%s=%s; %s=%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s=$(( %s + 1 )); eval \"%s_${%s}=\\$%s\"; done <<%s\n$%s\n%s\n%s=$(( %s - 1 )); while [ \"$%s\" -ge 0 ]; do %s=$(( %s + 1 )); eval \"%s=\\$%s_${%s}\"; if %s; then %s; break; fi; %s=$(( %s - 1 )); done; fi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, initial, countVar, dataVar, itemVar, countVar, countVar, valuePrefix, countVar, itemVar, tag, dataVar, tag, idx, countVar, idx, slotVar, idx, itemVar, valuePrefix, slotVar, cond, assignResult, idx, idx, resultVar), nil
+	}
+	arrow := cb.Arrow
+	var out string
+	err = g.withDeferredFnCallPreEval(func() error {
+		return g.withCallbackParams(arrow, nil, func(ctx callbackLoopCtx) error {
+			prelude, cond, err := g.genDelayedConditionSource(arrow.Body)
+			if err != nil {
+				return err
+			}
+			param := ctx.ParamVars[0]
+			idx := fmt.Sprintf("_listfindlast_%d_%d_index", arrow.Pos.Line, arrow.Pos.Column)
+			countVar := fmt.Sprintf("_listfindlast_%d_%d_count", arrow.Pos.Line, arrow.Pos.Column)
+			slotVar := fmt.Sprintf("_listfindlast_%d_%d_slot", arrow.Pos.Line, arrow.Pos.Column)
+			valuePrefix := fmt.Sprintf("_listfindlast_%d_%d_value", arrow.Pos.Line, arrow.Pos.Column)
+			dataVar := fmt.Sprintf("_listfindlast_%d_%d_data", arrow.Pos.Line, arrow.Pos.Column)
+			resultVar := fmt.Sprintf("_listfindlast_%d_%d_result", arrow.Pos.Line, arrow.Pos.Column)
+			itemVar := fmt.Sprintf("_listfindlast_%d_%d_item", arrow.Pos.Line, arrow.Pos.Column)
+			tag := fmt.Sprintf("__BESHT_LIST_FIND_LAST_%d_%d", arrow.Pos.Line, arrow.Pos.Column)
+			indexAssign := ""
+			if len(ctx.ParamVars) > 1 {
+				indexAssign = ctx.ParamVars[1] + "=$" + idx + "; "
+			}
+			assignResult := fmt.Sprintf("%s=\"$%s\"", resultVar, param)
+			if indexResult {
+				assignResult = fmt.Sprintf("%s=\"$%s\"", resultVar, idx)
+			}
+			out = fmt.Sprintf("$(%s=%s; %s=%s; %s=0; if [ -n \"$%s\" ]; then while IFS= read -r %s; do %s=$(( %s + 1 )); eval \"%s_${%s}=\\$%s\"; done <<%s\n$%s\n%s\n%s=$(( %s - 1 )); while [ \"$%s\" -ge 0 ]; do %s=$(( %s + 1 )); eval \"%s=\\$%s_${%s}\"; %s%sif %s; then %s; break; fi; %s=$(( %s - 1 )); done; fi; printf '%%s' \"$%s\")", dataVar, recv, resultVar, initial, countVar, dataVar, itemVar, countVar, countVar, valuePrefix, countVar, itemVar, tag, dataVar, tag, idx, countVar, idx, slotVar, idx, param, valuePrefix, slotVar, indexAssign, prelude, cond, assignResult, idx, idx, resultVar)
 			return nil
 		})
 	})

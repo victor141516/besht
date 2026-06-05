@@ -1,0 +1,18 @@
+let items = ["apple", "banana", "apricot"]
+let empty: string[] = []
+
+console.log(items.findLast(x => x.startsWith("a")) ?? "missing")
+console.log(items.findLast(x => x.startsWith("z")) ?? "missing")
+console.log(items.findLast((x, i) => i < 2))
+console.log(items.findLastIndex(x => x.startsWith("a")))
+console.log(items.findLastIndex((x, i) => x.startsWith("a") && i < 2))
+console.log(empty.findLast(x => true) ?? "missing")
+console.log(empty.findLastIndex(x => true))
+
+let trace = ""
+function recordLast(item: string, index: number): boolean {
+    trace = trace + index.toString()
+    return item.startsWith("a")
+}
+console.log(items.findLast(recordLast) ?? "missing")
+console.log(trace)

@@ -1987,8 +1987,19 @@ console.log(empty.every(x => false))
 console.log(items.find(x => x.startsWith("b")) ?? "missing")
 console.log(items.find(x => x.startsWith("z")) ?? "missing")
 console.log(items.find((x, i) => i == 2))
+console.log(items.findLast(x => x.startsWith("a")) ?? "missing")
+console.log(items.findLastIndex((x, i) => x.startsWith("a") && i >= 0))
+console.log(empty.findLast(x => true) ?? "missing")
+console.log(empty.findLastIndex(x => true))
+let trace = ""
+function recordLast(item: string, index: number): boolean {
+    trace = trace + index.toString()
+    return item.startsWith("a")
+}
+console.log(items.findLast(recordLast) ?? "missing")
+console.log(trace)
 `)
-	if out != "true\nfalse\nfalse\ntrue\ntrue\nbanana\nmissing\napricot\n" {
+	if out != "true\nfalse\nfalse\ntrue\ntrue\nbanana\nmissing\napricot\napricot\n2\nmissing\n-1\napricot\n2\n" {
 		t.Fatalf("unexpected output: %q", out)
 	}
 }

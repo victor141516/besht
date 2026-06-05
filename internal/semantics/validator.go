@@ -824,7 +824,7 @@ func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return &SemanticError{Pos: e.Pos, Message: "slice() takes 1 or 2 arguments"}
 		}
-	case "map", "filter", "some", "every", "find", "findIndex":
+	case "map", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex":
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
 		}
@@ -836,7 +836,7 @@ func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 			if len(arrow.Params) < 1 || len(arrow.Params) > 2 {
 				return &SemanticError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
 			}
-			if (e.Method == "some" || e.Method == "every" || e.Method == "find") && arrow.BlockBody != nil {
+			if (e.Method == "some" || e.Method == "every" || e.Method == "find" || e.Method == "findIndex" || e.Method == "findLast" || e.Method == "findLastIndex") && arrow.BlockBody != nil {
 				return &SemanticError{Pos: arrow.Pos, Message: e.Method + "() predicate callback must be expression-bodied"}
 			}
 		}
@@ -1093,11 +1093,11 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 				return strType
 			case "includes":
 				return boolType
-			case "indexOf", "lastIndexOf", "findIndex":
+			case "indexOf", "lastIndexOf", "findIndex", "findLastIndex":
 				return numType
 			case "some", "every":
 				return boolType
-			case "find", "at":
+			case "find", "findLast", "at":
 				return recvType.Elem
 			case "map":
 				if len(e.Args) == 1 {
