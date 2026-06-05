@@ -1909,12 +1909,14 @@ func TestCodegen_StaticListMethodChains(t *testing.T) {
 	out := compile(t, `let inlineJoined = ["a", "b"].concat(["c"]).join(",")
 let slicedJoined = ["a", "b", "c"].slice(1).join(",")
 let reversedJoined = ["a", "b"].reverse().join(",")
+let sortedJoined = ["c", "a", "b"].sort().join(",")
 let pushedJoined = ["a", "b"].push("c").join(",")
 let factoryJoined = Array.of("a", "b").concat(Array.of("c")).join("|")
 let xs = ["a", "b"]
 let varJoined = xs.concat(["c"]).join(",")
 let varSlice = xs.slice(1).join(",")
 let varReverse = xs.reverse().join(",")
+let varSort = ["c", "a", "b"].sort().join(",")
 let varPush = xs.push("c").join(",")
 let count = xs.concat(["c"]).length
 let item = xs.concat(["c"])[2]
@@ -1927,11 +1929,13 @@ for (value in xs.concat(["d"])) {
 	assertContains(t, out, `inlineJoined='a,b,c'`)
 	assertContains(t, out, `slicedJoined='b,c'`)
 	assertContains(t, out, `reversedJoined='b,a'`)
+	assertContains(t, out, `sortedJoined='a,b,c'`)
 	assertContains(t, out, `pushedJoined='a,b,c'`)
 	assertContains(t, out, `factoryJoined='a|b|c'`)
 	assertContains(t, out, `varJoined='a,b,c'`)
 	assertContains(t, out, `varSlice='b'`)
 	assertContains(t, out, `varReverse='b,a'`)
+	assertContains(t, out, `varSort='a,b,c'`)
 	assertContains(t, out, `varPush='a,b,c'`)
 	assertContains(t, out, `count=3`)
 	assertContains(t, out, `item='c'`)
@@ -1941,6 +1945,7 @@ for (value in xs.concat(["d"])) {
 	assertNotContains(t, out, `awk -v s=','`)
 	assertNotContains(t, out, `tail -n +$(( 1 + 1 ))`)
 	assertNotContains(t, out, `tail -r`)
+	assertNotContains(t, out, `LC_ALL=C sort`)
 	assertNotContains(t, out, `printf '%s\n%s' 'a`)
 }
 
@@ -2043,6 +2048,28 @@ func TestCodegen_ListReverse(t *testing.T) {
 let r: Array<string> = l.reverse()`)
 	assertContains(t, out, "r='a\nb\nc'")
 	assertNotContains(t, out, `tail -r`)
+}
+
+func TestCodegen_ListSort(t *testing.T) {
+	out := compile(t, `let l: Array<string> = ["c", "a", "b"]
+let r: Array<string> = l.sort()`)
+	assertContains(t, out, "r='a\nb\nc'")
+	assertNotContains(t, out, `LC_ALL=C sort`)
+}
+
+func TestCodegen_ListSortFallsBackForDynamicLists(t *testing.T) {
+	out := compile(t, `let l: Array<string> = ["c", "a", "b"]
+while (true) {
+    l = l.push("aa")
+    break
+}
+let r: Array<string> = l.sort()
+l.sort()
+let joined = l.join(",")`)
+	assertContains(t, out, `r=$(printf '%s\n' "$l" | LC_ALL=C sort)`)
+	assertContains(t, out, `l=$(printf '%s\n' "$l" | LC_ALL=C sort)`)
+	assertContains(t, out, `joined=$(printf '%s`)
+	assertContains(t, out, `awk -v s=','`)
 }
 
 func TestCodegen_ListConcat(t *testing.T) {

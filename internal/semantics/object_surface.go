@@ -636,7 +636,7 @@ func objectSurfaceValueUnsupported(expr ast.Expression) bool {
 		return value.Name == "Object.keys" || value.Name == "Object.values" || value.Name == "Object.entries" || value.Name == "Object.assign" || value.Name == "Object.fromEntries" || value.Name == "Array.from" || value.Name == "Array.of" || value.Name == "fetch"
 	case *ast.MethodCallExpr:
 		switch value.Method {
-		case "map", "filter", "slice", "concat", "reverse", "push", "pop", "shift", "unshift", "readStdoutLines":
+		case "map", "filter", "slice", "concat", "reverse", "sort", "push", "pop", "shift", "unshift", "readStdoutLines":
 			return true
 		}
 	}

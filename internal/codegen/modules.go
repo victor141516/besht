@@ -853,7 +853,7 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 		switch e.Method {
 		case "includes", "startsWith", "endsWith", "has", "some", "every":
 			return &ast.Type{Kind: ast.TypeBoolean}
-		case "map", "filter", "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "split":
+		case "map", "filter", "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "sort", "split":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
 		case "length", "indexOf", "lastIndexOf", "findIndex":
 			return &ast.Type{Kind: ast.TypeNumber}

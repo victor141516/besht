@@ -630,6 +630,11 @@ func TestValidator_ListReverse(t *testing.T) {
 let r: Array<string> = l.reverse()`)
 }
 
+func TestValidator_ListSort(t *testing.T) {
+	mustCheck(t, `let l: Array<string> = ["c", "a", "b"]
+let r: Array<string> = l.sort()`)
+}
+
 func TestValidator_ListSlice(t *testing.T) {
 	mustCheck(t, `let l: Array<string> = ["a", "b", "c", "d"]
 let s: Array<string> = l.slice(1, 3)`)
@@ -872,6 +877,8 @@ let sub: string = s.substring()`, "substring() takes 1 or 2 arguments"},
 let i: number = s.lastIndexOf()`, "lastIndexOf() takes 1 or 2 arguments"},
 		{"list lastIndexOf arity", `let l: string[] = ["a"]
 let i: number = l.lastIndexOf()`, "lastIndexOf() takes 1 argument"},
+		{"list sort arity", `let l: string[] = ["a"]
+let next: string[] = l.sort((a, b) => 0)`, "sort() takes no arguments"},
 		{"string lastIndexOf arity", `let s: string = "abc"
 let i: number = s.lastIndexOf("a", 1, 2)`, "lastIndexOf() takes 1 or 2 arguments"},
 		{"safe integer arity", `let ok: boolean = Number.isSafeInteger()`, "Number.isSafeInteger() takes 1 argument"},

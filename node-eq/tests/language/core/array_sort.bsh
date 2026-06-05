@@ -1,0 +1,20 @@
+let words = ["banana", "apple", "cherry", "apple"]
+let sortedWords = words.sort()
+console.log(sortedWords.join(","))
+
+words.sort()
+console.log(words.join(","))
+
+let nums = [10, 2, 1]
+console.log(nums.sort().join(","))
+
+let dynamic = ["c", "a"]
+for (let i = 0; i < 1; i++) {
+    dynamic = ["c", "a", "b"]
+}
+let dynamicSorted = dynamic.sort()
+console.log(dynamicSorted.join("|"))
+dynamic.sort()
+console.log(dynamic.join("|"))
+
+console.log(["b a", "b", "aa"].sort().join("/"))

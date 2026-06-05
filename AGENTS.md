@@ -333,6 +333,8 @@ The compiler assigns each `$()` call a unique identity during the semantic analy
 
 Static scalar `Object.fromEntries(...)` calls over literal `[key, value]` rows or static `Object.entries(obj)` output may fold to compiler-managed object slots. Dynamic `Object.fromEntries(entries)` must build a fresh object, validate every dynamic key before generated shell uses `eval`, preserve first-seen key order, let later rows overwrite values, and avoid adding a runtime helper.
 
+Array `sort()` is the narrow default lexical slice only: no comparator callback support. Static scalar receivers and static scalar method chains should fold with the same constant-array machinery as `reverse()`. Dynamic scalar receivers lower to `LC_ALL=C sort`. Keep Besht's existing array-returning convention: value-position `let sorted = items.sort()` returns a sorted value, while statement-position `items.sort()` rebinds the named receiver to that result.
+
 Array `.at()` must return the nullish sentinel for out-of-range indexes so `items.at(99) ?? fallback` behaves like JavaScript `undefined ?? fallback`; do not collapse missing elements to an empty string.
 
 Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep runtime formatting.
@@ -398,7 +400,7 @@ The `rewriteFnCalls()` AST pass in `modules.go` walks the entire program AST bef
 | `status`   | exit code captured as `$?`                                        |
 | `command`  | lazy pipeline description; no shell code until `.run()` is called |
 
-Prefer native array APIs for new user-facing examples and compiler work: `items.length`, `items[0]`, `items.slice(1)`, `items.push(value)` or `[...items, value]`, `items.includes(value)`, and `items.concat(other)`. The old global list helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers.
+Prefer native array APIs for new user-facing examples and compiler work: `items.length`, `items[0]`, `items.slice(1)`, `items.push(value)` or `[...items, value]`, `items.includes(value)`, `items.concat(other)`, and `items.sort()`. The old global list helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers.
 
 ### POSIX Compliance Invariants
 
@@ -866,6 +868,7 @@ let joined: string = files.join(", ")
 let arrayText: string = files.toString() // scalar arrays only; same as files.join(",")
 let merged: string[] = files.concat(other)
 let rev: string[] = files.reverse()
+let sorted: string[] = files.sort()
 let compactText: string = ["a", "b"].concat(["c"]).join(",") // static chains compile to 'a,b,c'
 let copied: string[] = [...files, "extra"]
 let indexes: number[] = Array.from({ length: 3 })
@@ -1121,7 +1124,7 @@ Module rewriting must stay lexical-scope aware: `rewriteFnCalls` qualifies real 
 10. **SKILL.md**: update `skills/besht-scripting/SKILL.md`
 11. **AGENTS.md**: update this file (Syntax Reference, Types, Architecture, Pitfalls)
 
-**Prefer native array APIs over global list helpers.** New language work, examples, and docs should use `items.length`, `items[0]`, `items.slice(1)`, `items.push(value)` or `[...items, value]`, `items.includes(value)`, and `items.concat(other)`. The old global helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers or present them as the primary API.
+**Prefer native array APIs over global list helpers.** New language work, examples, and docs should use `items.length`, `items[0]`, `items.slice(1)`, `items.push(value)` or `[...items, value]`, `items.includes(value)`, `items.concat(other)`, and `items.sort()`. The old global helpers `len`, `head`, `tail`, `append`, `contains`, and `concat` remain supported for compatibility, but do not add new global list helpers or present them as the primary API.
 
 **`Set<T>` is a compiler-backed membership collection.** `new Set<T>()` initializes an empty newline-delimited set, `.has(value)` emits a POSIX `grep -qxF` membership test, and `.add(value)` mutates the set with an `awk` uniqueness filter. Straight-line static scalar `.add()` calls track known values and fold static `.has()` calls to `1`/`0`; invalidate that static Set map on reassignment, dynamic adds, control-flow adds, callback adds, or newline-containing values. Type parameters are annotations only; do not add runtime type checks.
 

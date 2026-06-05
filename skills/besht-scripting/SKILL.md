@@ -837,11 +837,14 @@ let compactText: string = ["a", "b"].concat(["c"]).join(",") // compiles to 'a,b
 let last: string = files.at(-1)
 let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
+let sortedFiles = files.sort()
 ```
 
 Scalar array `.toString()` is supported as comma-join output; nested-array JavaScript flattening is not part of this slice. Static scalar array literals and variables bound to static scalar arrays fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static.
 
-Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the generated `printf` builder.
+Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `sort`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the generated `printf` builder.
+
+`items.sort()` returns a default lexical sorted array. Static scalar receivers fold to constants; dynamic receivers use POSIX `LC_ALL=C sort`. Comparator callbacks such as `items.sort((a, b) => ...)` are not supported yet. Like other Besht array-returning methods, `let sorted = items.sort()` leaves `items` unchanged, while a statement-position `items.sort()` rebinds the named array to the sorted result.
 
 Static scalar `Array.of(...)` calls, static `Array.from("text")` calls, and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder. Besht `Array.from({ length })` creates a numeric range and does not support general iterable or mapper forms.
 
@@ -943,6 +946,7 @@ files.lastIndexOf("a"); // 2
 files.at(-1); // "a"
 files.at(99) ?? "missing"; // out-of-range at() is nullish
 files.toString(); // "z,a,b,a" for scalar arrays
+files.sort(); // ["a", "a", "b", "z"]
 Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known arrays
 ```

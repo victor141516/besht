@@ -113,7 +113,7 @@ Files use the `.bsh` extension.
 - Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
-- Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the `printf` builder.
+- Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `sort`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the `printf` builder.
 - Static scalar `Array.of(...)` calls, static `Array.from("text")` calls, and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
 - Static string literals, variables bound to static string literals, static scalar array expressions, and variables bound to static scalar arrays compile `.length` properties to numeric constants; dynamic lengths keep the POSIX `wc` path.
 - `for (... in [...])` and loops over static scalar array expressions or variables bound to them compile to compact shell `for` loops when values do not contain newlines; dynamic arrays keep the newline-safe read loop.
@@ -159,6 +159,7 @@ Besht accepts TypeScript-flavored syntax, but it compiles to POSIX sh and does n
 | Type annotations | `let n: number = "x"` | TypeScript reports a type error. | Compiles; annotations are ignored except for compiler representation hints. |
 | `Array.from({ length })` | `Array.from({ length: 3 })` | Creates three `undefined` values. | Creates the numeric array `[0, 1, 2]`. |
 | Unsupported `Array.from()` forms | `Array.from(["a"])` | Copies an iterable array. | Fails at Besht compile time; only strings and `{ length }` are supported. |
+| Unsupported `sort()` callbacks | `items.sort((a, b) => a.localeCompare(b))` | Sorts with a comparator callback. | Fails at Besht compile time; only default lexical `items.sort()` is supported. |
 | Object reflection boundary | `Object.keys(process.env)` | Returns enumerable environment keys in Node-like runtimes. | Fails at Besht compile time; `process.env` is not enumerable. |
 | Scalar-only object values | `Object.values({ xs: ["a"] })` | Returns the nested array value. | Fails at Besht compile time until nested values are supported. |
 | Object key boundary | `Object.fromEntries([["bad-key", "x"]])` | Creates an object with a `"bad-key"` property. | Fails because Besht object keys must contain only letters, numbers, and `_`. |
@@ -674,6 +675,7 @@ l.lastIndexOf("beta"); // int (last zero-based match, -1 if not found)
 l.at(-1); // "gamma", negative indexes count from the end
 l.at(99) ?? "missing"; // out-of-range at() is nullish
 l.reverse(); // ["gamma", "beta", "alpha"]
+l.sort(); // default lexical sort, no comparator callback support yet
 l.map(x => x + "!"); // new array with callback expression applied to each item
 l.map((x, i) => i.toString() + ":" + x); // second callback arg is zero-based index
 l.forEach((x, i) => console.log(i.toString() + ":" + x)); // statement-only side effects
@@ -784,6 +786,8 @@ console.log(counts)
 ```
 
 `.map()` supports expression or block bodies and one or two direct arrow parameters: `(item)` or `(item, index)`. `return` inside a block-bodied `.map()` callback emits that mapped value for the current item and continues the callback loop. Block-bodied `.map()` callbacks currently support `return`, `if`/`else`, and assignment statements; arbitrary expression statements are rejected. `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` use JavaScript-style truthiness and may receive `(item, index)`. `.some()` short-circuits on the first truthy callback result and returns `false` for an empty array. `.every()` short-circuits on the first falsey callback result and returns `true` for an empty array. `.find()` returns the first matching scalar element, or a nullish value when no element matches so `??` fallbacks work. `.reduce()` takes a 2-parameter callback plus an initial value; direct arrows and stored callbacks support scalar/array accumulators, and stored Besht callbacks can mutate compiler-managed object accumulators. `.forEach()` is statement-only, takes a direct arrow or stored callback with `(item)` or `(item, index)`, compiles static scalar direct-arrow receivers to compact `for` loops, runs stored callback calls in the current shell so outer assignments and `Set.add()` side effects persist, and rejects direct-arrow callback `return`, `break`, `continue`, and pure value expressions. Arrow values lower to generated shell functions or closure ids; returned arrows get independent captured environments, callback factories can be passed directly to array methods, and direct function-value calls in value position use Besht's return-slot path so captured mutations persist. Array callback expressions used in value or condition position run in the current shell, so assignment, `Set.add()`, and returned-closure mutations persist after `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, and `.findIndex()` complete.
+
+`items.sort()` returns a default lexical sorted array. Static scalar receivers fold to constants; dynamic receivers use POSIX `LC_ALL=C sort`. Comparator callbacks are not supported yet. Like other Besht array-returning methods, `let sorted = items.sort()` leaves `items` unchanged, while a statement-position `items.sort()` rebinds the named array to the sorted result.
 
 ### Array indexing
 
@@ -943,6 +947,7 @@ Array operations should use native array syntax and methods:
 | `[...items, value]`     | New array with value appended  |
 | `items.includes(value)` | True if value is in the array  |
 | `items.concat(other)`   | Concatenate two arrays         |
+| `items.sort()`          | Default lexical sorted array   |
 
 Array helpers:
 
