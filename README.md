@@ -108,7 +108,7 @@ Files use the `.bsh` extension.
 - Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
 - Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants; dynamic and control-flow-assigned arithmetic keeps shell arithmetic or POSIX `awk`.
 - Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, `Math.*` constants, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
-- Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+- Static primitive `.toString()` and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 - Static `String(value)` calls over primitives, null/undefined, scalar arrays, object literals, and Set literals compile to constants; dynamic booleans render `true`/`false`, dynamic scalar arrays reuse the comma-join path, and object-producing calls preserve side effects before returning `[object Object]`.
 - Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold transforms such as `.trim()`, `.trimStart()`/`.trimLeft()`, `.trimEnd()`/`.trimRight()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `at()`, and indexing use AWK substring extraction.
 - Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
@@ -468,6 +468,7 @@ Strings have TypeScript-compatible methods:
 let s: string = "  Hello, World!  ";
 
 s.trim(); // "Hello, World!"
+s.valueOf(); // original string primitive
 s.trimStart(); // "Hello, World!  "
 s.trimEnd(); // "  Hello, World!"
 s.trimLeft(); // alias for trimStart()
@@ -1024,6 +1025,7 @@ Use JS-style conversion APIs for new code:
 | API                      | Description                                      |
 | ------------------------ | ------------------------------------------------ |
 | `value.toString()`       | Convert `string`, `number`, `boolean`, or `status` to `string` |
+| `value.valueOf()`        | Return the primitive string, number, boolean, or status value |
 | `items.toString()`       | Convert a scalar array to a comma-joined string, like `items.join(",")` |
 | `String(value)`          | Convert primitives, null/undefined, scalar arrays, objects, and Sets to a string |
 | `Number.parseInt(value)` | Parse `string` to `number`                       |
@@ -1040,10 +1042,11 @@ let raw: string = $("wc", "-l", "file").run().readStdout()
 let lines: number = parseInt(raw)
 let flag: boolean = Boolean(raw)
 let boolText: string = flag.toString() // "true"
+let sameFlag: boolean = flag.valueOf()
 let label: string = String(["a", "b"]) // "a,b"
 ```
 
-`Boolean(value)` returns a primitive Besht boolean, not a Boolean object wrapper. It treats `false`, `0`, `0.0`, `""`, `null`, and `undefined` as false; non-empty strings such as `"0"` and `"false"`, non-zero numbers, arrays, and objects are true.
+`valueOf()` is a primitive identity method for Besht strings, numbers, booleans, and status values; it does not create wrapper objects. `Boolean(value)` returns a primitive Besht boolean, not a Boolean object wrapper. It treats `false`, `0`, `0.0`, `""`, `null`, and `undefined` as false; non-empty strings such as `"0"` and `"false"`, non-zero numbers, arrays, and objects are true.
 
 `String(value)` is a primitive conversion builtin, not a `new String(...)` wrapper. It follows the current Besht scalar representations: null becomes `"null"`, undefined becomes `"undefined"`, booleans become `"true"`/`"false"`, scalar arrays join with commas, compiler-managed objects become `"[object Object]"`, and Sets become `"[object Set]"`. Static `String.*` APIs such as `String.raw` and `String(JSONValue)` are not supported; extract a scalar from JSON or use `JSON.stringify()` for JSON text.
 

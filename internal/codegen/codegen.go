@@ -9304,6 +9304,12 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		if recvType != nil && recvType.Kind == ast.TypeFetchResponse && e.Method == "text" {
 			return typeString
 		}
+		if recvType != nil && e.Method == "valueOf" {
+			switch recvType.Kind {
+			case ast.TypeString, ast.TypeNumber, ast.TypeBoolean, ast.TypeStatus:
+				return recvType
+			}
+		}
 		if recvType != nil && recvType.Kind == ast.TypeList {
 			switch e.Method {
 			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "toReversed", "sort", "toSorted", "toSpliced", "filter", "fill":
@@ -9361,7 +9367,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		case "split":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
-			"replace", "replaceAll", "slice", "substring", "at", "charAt", "concat", "padStart", "padEnd", "toString", "toFixed", "join":
+			"replace", "replaceAll", "slice", "substring", "at", "charAt", "concat", "padStart", "padEnd", "toString", "valueOf", "toFixed", "join":
 			return typeString
 		case "indexOf", "lastIndexOf", "localeCompare", "length":
 			return typeNumber
@@ -9450,6 +9456,10 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 		switch e.Method {
 		case "includes", "startsWith", "endsWith", "has", "some", "every":
 			return true
+		case "valueOf":
+			if t := g.inferReceiverType(e); t != nil {
+				return t.Kind == ast.TypeBoolean
+			}
 		}
 	case *ast.FnCallExpr:
 		if rt := g.fnCallReturnType(e.Name); rt != nil {
@@ -9659,6 +9669,9 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	isNumberMethod := recvType != nil && recvType.Kind == ast.TypeNumber
 	isBooleanMethod := recvType != nil && recvType.Kind == ast.TypeBoolean
 	isStatusMethod := recvType != nil && recvType.Kind == ast.TypeStatus
+	if e.Method == "valueOf" && (isStringMethod || isNumberMethod || isBooleanMethod || isStatusMethod) {
+		return recv, nil
+	}
 	if e.Method == "toString" && (isStringMethod || isBooleanMethod || isStatusMethod) {
 		if isBooleanMethod {
 			return fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(recv)), nil
@@ -9669,6 +9682,8 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 		switch e.Method {
 		case "toString":
 			return fmt.Sprintf("$(printf '%%s' %s)", recv), nil
+		case "valueOf":
+			return recv, nil
 		case "toFixed":
 			digits := "0"
 			if len(e.Args) > 0 {
@@ -9686,7 +9701,7 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
 			"replace", "replaceAll", "split", "includes", "startsWith",
 			"endsWith", "indexOf", "lastIndexOf", "localeCompare", "slice", "substring", "at", "charAt", "padStart", "padEnd",
-			"repeat", "concat":
+			"repeat", "concat", "valueOf":
 			isStringMethod = true
 		}
 	}
@@ -9734,6 +9749,11 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 			return "", true, fmt.Errorf("toString() takes no arguments")
 		}
 		return shellQuote(formatStaticNumber(value)), true, nil
+	case "valueOf":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("valueOf() takes no arguments")
+		}
+		return formatStaticNumber(value), true, nil
 	case "toFixed":
 		digits := 0
 		if len(e.Args) > 1 {
@@ -12278,6 +12298,12 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 		return g.genExprValue(e.Args[0])
 	}
 	switch e.Method {
+	case "valueOf":
+		if len(e.Args) != 0 {
+			return "", fmt.Errorf("valueOf() takes no arguments")
+		}
+		return recv, nil
+
 	case "split":
 		a0, err := arg0()
 		if err != nil {
@@ -12669,6 +12695,14 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 	}
 
 	switch e.Method {
+	case "valueOf":
+		if recvType := g.inferReceiverType(e.Receiver); recvType == nil || recvType.Kind != ast.TypeString {
+			return "", false, nil
+		}
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("valueOf() takes no arguments")
+		}
+		return recv, true, nil
 	case "trim":
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("trim() takes no arguments")
@@ -13340,6 +13374,15 @@ func (g *Generator) genCondition(expr ast.Expression) (string, error) {
 	case *ast.MethodCallExpr:
 		if builtin, ok := beshtBuiltinCall(e); ok {
 			return g.genBuiltinCondition(builtin)
+		}
+		if e.Method == "valueOf" {
+			if t := g.inferReceiverType(e); t != nil && t.Kind == ast.TypeBoolean {
+				val, err := g.genExprValue(e)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("[ %s = 1 ]", ensureArgSafe(val)), nil
+			}
 		}
 		if e.Optional {
 			val, err := g.genExprValue(e)

@@ -1725,6 +1725,7 @@ func TestCodegen_StringReplaceAll(t *testing.T) {
 
 func TestCodegen_StaticStringTransforms(t *testing.T) {
 	out := compile(t, `let trimmed: string = "  hi  ".trim()
+let stringValue: string = "hello".valueOf()
 let upper: string = "hello".toUpperCase()
 let lower: string = "HELLO".toLowerCase()
 let left: string = "  hi  ".trimLeft()
@@ -1739,6 +1740,7 @@ let replacedAll: string = "hello world".replaceAll("l", "L")
 let literalMeta: string = "a.b.c".replaceAll(".", "!")
 let joined: string = "hello".concat(" ", "besht")`)
 	assertContains(t, out, `trimmed='hi'`)
+	assertContains(t, out, `stringValue='hello'`)
 	assertContains(t, out, `upper='HELLO'`)
 	assertContains(t, out, `lower='hello'`)
 	assertContains(t, out, `left='hi  '`)
@@ -1757,6 +1759,22 @@ let joined: string = "hello".concat(" ", "besht")`)
 	assertNotContains(t, out, `tr '[:lower:]'`)
 	assertNotContains(t, out, `cut -c`)
 	assertNotContains(t, out, `awk`)
+}
+
+func TestCodegen_PrimitiveValueOf(t *testing.T) {
+	out := compile(t, `let text: string = "hello".valueOf()
+let num: number = (40 + 2).valueOf()
+let truthy: boolean = true.valueOf()
+let falsy: boolean = false.valueOf()
+console.log(truthy)
+console.log(falsy)`)
+	assertContains(t, out, `text='hello'`)
+	assertContains(t, out, `num=42`)
+	assertContains(t, out, `truthy=1`)
+	assertContains(t, out, `falsy=0`)
+	assertContains(t, out, `printf '%s\n' true`)
+	assertContains(t, out, `printf '%s\n' false`)
+	assertNotContains(t, out, `valueOf`)
 }
 
 func TestCodegen_StaticStringVariableTransforms(t *testing.T) {

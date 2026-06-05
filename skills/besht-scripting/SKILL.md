@@ -481,7 +481,7 @@ let eps = Number.EPSILON
 
 ## Type Conversion
 
-Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` and global `parseInt(value)` accept one argument or an optional radix argument, including non-decimal radix values such as 16. Global `parseFloat(value)` is available as an alias for `Number.parseFloat(value)`.
+Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `value.valueOf()` returns the primitive string, number, boolean, or status value without creating wrapper objects. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` and global `parseInt(value)` accept one argument or an optional radix argument, including non-decimal radix values such as 16. Global `parseFloat(value)` is available as an alias for `Number.parseFloat(value)`.
 
 ```ts
 let countText = count.toString()
@@ -497,7 +497,7 @@ let red = Number.parseInt(hexByte, 16)
 
 Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants. Dynamic arithmetic and variables assigned inside control flow keep shell arithmetic or POSIX `awk`.
 
-Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 
 ## Command Execution
 

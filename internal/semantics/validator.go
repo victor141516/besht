@@ -739,11 +739,11 @@ func (c *Validator) checkMethodArity(e *ast.MethodCallExpr) error {
 	case ast.TypeNumber:
 		return c.checkNumberMethodArity(e)
 	case ast.TypeBoolean, ast.TypeStatus:
-		if e.Method != "toString" {
+		if e.Method != "toString" && e.Method != "valueOf" {
 			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
 		}
 		if len(e.Args) != 0 {
-			return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
 	}
 	return nil
@@ -909,10 +909,10 @@ func (c *Validator) isCallbackValue(expr ast.Expression) bool {
 
 func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
-	case "toString", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase":
+	case "toString", "valueOf", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase":
 		if len(e.Args) != 0 {
-			if e.Method == "toString" {
-				return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			if e.Method == "toString" || e.Method == "valueOf" {
+				return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 			}
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
@@ -940,9 +940,9 @@ func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 
 func (c *Validator) checkNumberMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
-	case "toString":
+	case "toString", "valueOf":
 		if len(e.Args) != 0 {
-			return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
 	case "toFixed":
 		if len(e.Args) > 1 {
@@ -1150,6 +1150,9 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 		case ast.TypeBoolean, ast.TypeStatus:
 			if e.Method == "toString" {
 				return strType
+			}
+			if e.Method == "valueOf" {
+				return recvType
 			}
 		}
 		return strType

@@ -3013,6 +3013,7 @@ console.log("hello".charAt(99))`)
 
 func TestIntegration_StaticStringTransformsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log("  hi  ".trim())
+console.log("hello".valueOf())
 console.log("  hi  ".trimLeft())
 console.log("  hi  ".trimRight())
 console.log("hello".toUpperCase())
@@ -3026,7 +3027,7 @@ console.log("hello world".replace("world", "besht"))
 console.log("hello world".replaceAll("l", "L"))
 console.log("a.b.c".replaceAll(".", "!"))
 console.log("hello".concat(" ", "besht"))`)
-	want := "hi\nhi  \n  hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
+	want := "hi\nhello\nhi  \n  hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -3062,6 +3063,17 @@ console.log(greeting.replaceAll("l", "L"))
 console.log(greeting.concat("!", needle))
 if (greeting.includes(needle)) console.log("yes")`)
 	want := "HELLO\nhi\nhi  \n  hi\ntrue\ntrue\ntrue\n2\n3\n-1\nhippo\nheLLo\nhello!ell\nyes\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_PrimitiveValueOfRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log("hello".valueOf())
+console.log((40 + 2).valueOf())
+console.log(true.valueOf())
+console.log(false.valueOf())`)
+	want := "hello\n42\ntrue\nfalse\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

@@ -1,0 +1,12 @@
+console.log("hello".valueOf())
+console.log((40 + 2).valueOf())
+console.log(true.valueOf())
+console.log(false.valueOf())
+
+let dynamic = "bye"
+while (true) {
+    dynamic = "hello"
+    break
+}
+
+console.log(dynamic.valueOf())

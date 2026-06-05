@@ -345,7 +345,7 @@ Array `flatMap(callback)` is a one-level scalar-array callback slice built as `m
 
 Array `.at()` must return the nullish sentinel for out-of-range indexes so `items.at(99) ?? fallback` behaves like JavaScript `undefined ?? fallback`; do not collapse missing elements to an empty string.
 
-Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep runtime formatting.
+Static primitive `.toString()` and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep runtime formatting.
 
 Static `String(value)` calls fold primitives, null/undefined, scalar arrays, object literals, and Set literals to JS-compatible display strings. Dynamic booleans render `true`/`false`, dynamic scalar arrays reuse comma-join lowering, object-producing expressions such as `Object.assign(...)` must still emit their side effects before the returned label becomes `"[object Object]"`, and direct `String(JSONValue)` remains unsupported in favor of scalar extraction or `JSON.stringify()`.
 
@@ -842,7 +842,9 @@ let sg: number = Math.sign(-5)      // static literal → -1
 let pw: number = Math.pow(2, 8)     // static literals → 256
 let sq: number = Math.sqrt(16)      // static literal → 4
 let ns: string = count.toString()
+let nv: number = count.valueOf()
 let bs: string = flag.toString()    // true or false
+let bv: boolean = flag.valueOf()
 let fixed: string = price.toFixed(2)
 
 Reassignment updates float metadata from the new right-hand side: float-producing values keep later arithmetic on `awk`, while integer/non-float reassignment clears the float marker so later integer arithmetic can lower back to `$((...))` when applicable.
@@ -853,6 +855,7 @@ let negf: number = -1.5
 
 // String methods
 let trimmed: string = name.trim()
+let stringValue: string = name.valueOf()
 let leftTrimmed: string = name.trimLeft()
 let rightTrimmed: string = name.trimRight()
 let upper: string = name.toUpperCase()
