@@ -9204,6 +9204,16 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 					}
 				}
 				return &ast.Type{Kind: ast.TypeList, Elem: typeString}
+			case "flatMap":
+				if len(e.Args) == 1 {
+					if t := g.callbackExprReturnType(e.Args[0]); t != nil && t.Kind != ast.TypeVoid {
+						if t.Kind == ast.TypeList {
+							return &ast.Type{Kind: ast.TypeList, Elem: t.Elem}
+						}
+						return &ast.Type{Kind: ast.TypeList, Elem: t}
+					}
+				}
+				return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 			case "reduce":
 				if len(e.Args) == 2 {
 					return g.inferReceiverType(e.Args[1])
@@ -10028,6 +10038,8 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 
 	case "map":
 		return g.genListMap(recv, e)
+	case "flatMap":
+		return g.genListFlatMap(recv, e)
 
 	case "filter":
 		return g.genListFilter(recv, e)
@@ -10204,7 +10216,7 @@ func (g *Generator) genListCallbackMethodIntoVar(targetVar string, e *ast.Method
 		return false, nil
 	}
 	switch e.Method {
-	case "map", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex":
+	case "map", "flatMap", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex":
 	default:
 		return false, nil
 	}
@@ -10219,6 +10231,8 @@ func (g *Generator) genListCallbackMethodIntoVar(targetVar string, e *ast.Method
 	switch e.Method {
 	case "map":
 		return true, g.genListMapIntoVar(targetVar, recv, e, cb)
+	case "flatMap":
+		return true, g.genListFlatMapIntoVar(targetVar, recv, e, cb)
 	case "filter":
 		return true, g.genListFilterIntoVar(targetVar, recv, e, cb)
 	case "some":
@@ -10340,6 +10354,26 @@ func (g *Generator) genListMapIntoVar(targetVar, recv string, e *ast.MethodCallE
 		g.line("fi")
 		return nil
 	})
+}
+
+func callbackReturnsList(cb listCallbackRef) bool {
+	return cb.ReturnType != nil && cb.ReturnType.Kind == ast.TypeList
+}
+
+func flattenMappedListExpr(mapped string) string {
+	return fmt.Sprintf("$(printf '%%s\\n' %s | tr '\\037' '\\n')", ensureArgSafe(mapped))
+}
+
+func (g *Generator) genListFlatMapIntoVar(targetVar, recv string, e *ast.MethodCallExpr, cb listCallbackRef) error {
+	if !callbackReturnsList(cb) {
+		return g.genListMapIntoVar(targetVar, recv, e, cb)
+	}
+	mappedVar := fmt.Sprintf("_flatmap_%d_%d_mapped", e.Pos.Line, e.Pos.Column)
+	if err := g.genListMapIntoVar(mappedVar, recv, e, cb); err != nil {
+		return err
+	}
+	g.line(fmt.Sprintf("%s=%s", targetVar, flattenMappedListExpr(fmt.Sprintf("\"$%s\"", mappedVar))))
+	return nil
 }
 
 func (g *Generator) genMapCallbackBlockIntoVar(targetVar, appendVar string, block *ast.Block) error {
@@ -11101,6 +11135,21 @@ func (g *Generator) genListMap(recv string, e *ast.MethodCallExpr) (string, erro
 		})
 	})
 	return out, err
+}
+
+func (g *Generator) genListFlatMap(recv string, e *ast.MethodCallExpr) (string, error) {
+	cb, err := g.listCallbackArg(e)
+	if err != nil {
+		return "", err
+	}
+	mapped, err := g.genListMap(recv, e)
+	if err != nil {
+		return "", err
+	}
+	if !callbackReturnsList(cb) {
+		return mapped, nil
+	}
+	return flattenMappedListExpr(mapped), nil
 }
 
 func (g *Generator) genListFilter(recv string, e *ast.MethodCallExpr) (string, error) {

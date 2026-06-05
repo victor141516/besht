@@ -2020,6 +2020,28 @@ console.log(oneBlank.fill("x").join(","))`)
 	}
 }
 
+func TestIntegration_ListFlatMapRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let words = ["ab", "c"]
+console.log(words.flatMap(word => word.split("")).join(","))
+console.log(words.flatMap((word, i) => [i.toString(), word]).join("|"))
+console.log(words.flatMap(word => word.toUpperCase()).join(","))
+let trace = ""
+let block = words.flatMap(word => {
+    trace = trace + word
+    return word.split("")
+})
+console.log(block.join(""))
+console.log(trace)
+function chars(word: string): string[] {
+    return word.split("")
+}
+console.log(words.flatMap(chars).join("-"))`)
+	want := "a,b,c\n0|ab|1|c\nAB,C\nabc\nabc\na-b-c\n"
+	if out != want {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
 func TestIntegration_StaticListLiteralSearchRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(["a", "b"].includes("b"))
 console.log(["a", "b"].includes("z"))

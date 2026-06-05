@@ -72,7 +72,7 @@ Current canonical surface:
 - `process.env.NAME ?? fallback` for environment variables.
 - `process.exit(code)` for process exit.
 - `value.toString()`, `String(value)`, and `Number.parseInt(value)` for common conversion.
-- Native array-style APIs: indexing, `.at()`, `.length`, `.slice()`, `.push()`, `.concat()`, `.fill()`, default lexical `.sort()`, `.includes()`, `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.findLast()`, `.findLastIndex()`, `.reduce()`, and statement-position `.forEach()`.
+- Native array-style APIs: indexing, `.at()`, `.length`, `.slice()`, `.push()`, `.concat()`, `.fill()`, default lexical `.sort()`, `.includes()`, `.map()`, `.flatMap()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.findLast()`, `.findLastIndex()`, `.reduce()`, and statement-position `.forEach()`.
 - `Boolean(value)` for primitive boolean coercion.
 - `Object.keys(obj)`, scalar-only `Object.values(obj)`, scalar-only `Object.entries(obj)`, `Object.hasOwn(obj, key)`, scalar-safe `Object.assign(target, ...sources)`, scalar-safe `Object.fromEntries(entries)`, and scalar-safe object spread over compiler-managed object key metadata.
 - Besht-only helpers under `Besht.fs.*`, `Besht.strings.*`, `Besht.args.*`, and `Besht.iter.*`.
@@ -108,7 +108,7 @@ Implementation notes:
 
 - Parser/semantics/codegen recognize `Besht.*`, `process.*`, `Array.*`, `Object.*`, `Boolean`, `Number`, `Math`, and other standard namespaces enough for the implemented slices. Future namespaces such as `JSON` must continue to be exempt from module qualification.
 - Static namespaces should keep using handling similar to the existing `Number.*` and `Object.*` paths instead of ad-hoc emitted runtime libraries.
-- Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `findLast`, `findLastIndex`, `reduce`, and statement-position `forEach`.
+- Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `flatMap`, `filter`, `some`, `every`, `find`, `findIndex`, `findLast`, `findLastIndex`, `reduce`, and statement-position `forEach`.
 - Any API that introduces dynamic object keys or slots must validate names before generated shell uses `eval`; tests should cover polluted `_objkeys_*` metadata and unsafe computed keys.
 - Future migration work should keep README.md, AGENTS.md, `skills/besht-scripting/SKILL.md`, stdlib declarations, semantics/codegen tests, and node-eq fixtures in sync.
 
@@ -196,7 +196,7 @@ Recommended phases:
 
 - **Number / Math:** `Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, and `Math.SQRT2` are implemented as numeric constants. Consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
 - **String:** JS-compatible primitive `String(value)` is implemented for current Besht scalar representations: primitives, null/undefined, scalar arrays, compiler-managed objects, and Sets. It deliberately does not add `new String(...)`, string wrapper objects, `String.raw`, other static `String.*` APIs, or direct `String(JSONValue)` conversion. Consider regex-dependent APIs like `match()` or `search()` only after a regex representation is designed.
-- **Array:** `Array.prototype.at()` is implemented for positive and negative indexes, `Array.from(string)` is implemented for character arrays, `Array.prototype.fill()` is implemented for scalar arrays with JavaScript-style start/end bounds, default lexical `Array.prototype.sort()` is implemented without callback support, and scalar-array `findLast()` / `findLastIndex()` callbacks are implemented with reverse traversal and JavaScript-style no-match results. Next high-value array candidates are `flat()`/`flatMap()` only if the nested-array representation can preserve semantics cleanly.
+- **Array:** `Array.prototype.at()` is implemented for positive and negative indexes, `Array.from(string)` is implemented for character arrays, `Array.prototype.fill()` is implemented for scalar arrays with JavaScript-style start/end bounds, default lexical `Array.prototype.sort()` is implemented without callback support, scalar-array `findLast()` / `findLastIndex()` callbacks are implemented with reverse traversal and JavaScript-style no-match results, and `Array.prototype.flatMap()` is implemented as one-level flattening for callback-returned scalar arrays. General `flat()` remains deferred until the nested-array representation can preserve empty inner arrays and deeper nesting cleanly.
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
 - **Object:** `Object.keys()`, narrow scalar-value `Object.values()`, scalar-value `Object.entries()`, `Object.hasOwn(obj, key)`, scalar-safe `Object.assign(target, ...sources)`, scalar-safe `Object.fromEntries(entries)`, and scalar-safe object spread are implemented over compiler-managed object key metadata. Future richer known-shape APIs should keep the same no-runtime-metadata boundary unless a broader object model is designed.
 - **Object copying:** `Object.assign()`, `Object.fromEntries()`, and object spread are implemented for scalar-safe compiler-managed objects. Future work should evaluate richer nested-value support.
@@ -206,7 +206,7 @@ Implementation notes:
 
 - Static namespaces such as `Boolean`, `String`, and `JSON` use parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, `Object.hasOwn()`, `Object.assign()`, `Object.fromEntries()`, object spread, and opt-in JSON slices are implemented.
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
-- Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `findLast`, `findLastIndex`, `reduce`, and statement-position `forEach`.
+- Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `flatMap`, `filter`, `some`, `every`, `find`, `findIndex`, `findLast`, `findLastIndex`, `reduce`, and statement-position `forEach`.
 - Every added API needs semantics, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.
 
 Priority order from the June 2026 JS API coverage pass:
@@ -219,3 +219,4 @@ Priority order from the June 2026 JS API coverage pass:
 6. Common `Math` constants (`Math.PI`, `Math.E`, logarithm constants, and square-root constants). Implemented.
 7. `Array.prototype.findLast()` and `Array.prototype.findLastIndex()` for reverse scalar-array predicate searches. Implemented.
 8. `Array.prototype.fill(value, start?, end?)` for bounded scalar-array replacement. Implemented.
+9. `Array.prototype.flatMap(callback)` for one-level flattening of callback-returned scalar arrays. Implemented.

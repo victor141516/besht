@@ -2162,6 +2162,17 @@ let mapped = items.map(x => x + "!")`)
 	assertNotContains(t, out, `local `)
 }
 
+func TestCodegen_ListFlatMapArrow(t *testing.T) {
+	out := compile(t, `let items = ["ab", "c"]
+let chars = items.flatMap(x => x.split(""))
+let upper = items.flatMap(x => x.toUpperCase())`)
+	assertContains(t, out, `_flatmap_2_18_mapped=`)
+	assertContains(t, out, `_bst_expr_2_18=$(printf '%s\n' "$_flatmap_2_18_mapped" | tr '\037' '\n')`)
+	assertContains(t, out, `upper=`)
+	assertContains(t, out, `_cb_3_27_x`)
+	assertNotContains(t, out, `local `)
+}
+
 func TestCodegen_ArrowFunctionValueDecl(t *testing.T) {
 	out := compile(t, `let suffix = "!"
 let add = (x: string): string => x + suffix

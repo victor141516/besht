@@ -828,7 +828,7 @@ func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return &SemanticError{Pos: e.Pos, Message: "slice() takes 1 or 2 arguments"}
 		}
-	case "map", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex":
+	case "map", "flatMap", "filter", "some", "every", "find", "findIndex", "findLast", "findLastIndex":
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 arrow callback"}
 		}
@@ -1106,6 +1106,16 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 			case "map":
 				if len(e.Args) == 1 {
 					if t := c.callbackReturnType(e.Args[0]); t != nil && t.Kind != ast.TypeVoid {
+						return &ast.Type{Kind: ast.TypeList, Elem: t}
+					}
+				}
+				return &ast.Type{Kind: ast.TypeList, Elem: strType}
+			case "flatMap":
+				if len(e.Args) == 1 {
+					if t := c.callbackReturnType(e.Args[0]); t != nil && t.Kind != ast.TypeVoid {
+						if t.Kind == ast.TypeList {
+							return &ast.Type{Kind: ast.TypeList, Elem: t.Elem}
+						}
 						return &ast.Type{Kind: ast.TypeList, Elem: t}
 					}
 				}
