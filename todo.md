@@ -71,7 +71,7 @@ Current canonical surface:
 
 - `process.env.NAME ?? fallback` for environment variables.
 - `process.exit(code)` for process exit.
-- `value.toString()` and `Number.parseInt(value)` for common conversion.
+- `value.toString()`, `String(value)`, and `Number.parseInt(value)` for common conversion.
 - Native array-style APIs: indexing, `.at()`, `.length`, `.slice()`, `.push()`, `.concat()`, default lexical `.sort()`, `.includes()`, `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.reduce()`, and statement-position `.forEach()`.
 - `Boolean(value)` for primitive boolean coercion.
 - `Object.keys(obj)`, scalar-only `Object.values(obj)`, scalar-only `Object.entries(obj)`, `Object.hasOwn(obj, key)`, scalar-safe `Object.assign(target, ...sources)`, scalar-safe `Object.fromEntries(entries)`, and scalar-safe object spread over compiler-managed object key metadata.
@@ -83,7 +83,7 @@ Removed public APIs:
 - `exit()`
 - `to_str()`
 - `to_int()`
-- current non-JS-compatible `String(value)` alias
+- old non-JS-compatible `String(value)` alias behavior
 - global list helpers `len`, `head`, `tail`, `append`, `contains`, `concat`
 - bare `range()`
 - global condition helpers `file_exists`, `is_dir`, `is_readable`, `is_writable`, `is_executable`, `is_empty`, `is_set`
@@ -195,7 +195,7 @@ Expand besht's JS-compatible standard API surface for basic values while preserv
 Recommended phases:
 
 - **Number / Math:** consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
-- **String:** the old non-JS-compatible global `String(value)` alias has been removed. Besht should eventually have a JS-compatible global `String` object, but only after designing what native-like `String(...)`, static `String.*` APIs, and string wrapper behavior mean under Besht's no-runtime-metadata constraint. Consider regex-dependent APIs like `match()` or `search()` after lower-risk string methods.
+- **String:** JS-compatible primitive `String(value)` is implemented for current Besht scalar representations: primitives, null/undefined, scalar arrays, compiler-managed objects, and Sets. It deliberately does not add `new String(...)`, string wrapper objects, `String.raw`, other static `String.*` APIs, or direct `String(JSONValue)` conversion. Consider regex-dependent APIs like `match()` or `search()` only after a regex representation is designed.
 - **Array:** `Array.prototype.at()` is implemented for positive and negative indexes, `Array.from(string)` is implemented for character arrays, and default lexical `Array.prototype.sort()` is implemented without callback support. Next high-value array candidates are `flat()`/`flatMap()` only if the nested-array representation can preserve semantics cleanly.
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
 - **Object:** `Object.keys()`, narrow scalar-value `Object.values()`, scalar-value `Object.entries()`, `Object.hasOwn(obj, key)`, scalar-safe `Object.assign(target, ...sources)`, scalar-safe `Object.fromEntries(entries)`, and scalar-safe object spread are implemented over compiler-managed object key metadata. Future richer known-shape APIs should keep the same no-runtime-metadata boundary unless a broader object model is designed.
@@ -204,7 +204,7 @@ Recommended phases:
 
 Implementation notes:
 
-- Static namespaces such as `Boolean` and `JSON` use parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, `Object.hasOwn()`, `Object.assign()`, `Object.fromEntries()`, object spread, and opt-in JSON slices are implemented.
+- Static namespaces such as `Boolean`, `String`, and `JSON` use parser/codegen handling similar to the existing `Number.*` special case. `Array.*`, `Object.keys()`, `Object.values()`, `Object.entries()`, `Object.hasOwn()`, `Object.assign()`, `Object.fromEntries()`, object spread, and opt-in JSON slices are implemented.
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
 - Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Every added API needs semantics, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.
@@ -215,4 +215,4 @@ Priority order from the June 2026 JS API coverage pass:
 2. `Array.from(string)` for character arrays. Implemented.
 3. `Object.fromEntries()` over scalar-safe `[key, value]` entries. Implemented.
 4. Default lexical `Array.prototype.sort()` without callback support. Implemented.
-5. Revisit a JavaScript-compatible `String(value)` design.
+5. Revisit a JavaScript-compatible `String(value)` design. Implemented for primitive stringification without wrappers or static `String.*` APIs.

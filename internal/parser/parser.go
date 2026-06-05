@@ -1954,6 +1954,9 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 		if name == "String" && p.peekType() == lexer.TokDot && isIdentifierName(p.peekN(1).Type) && p.peekN(1).Literal == "raw" && p.peekN(2).Type == lexer.TokTemplateLit {
 			return nil, p.errorf(p.peekN(1), "String.raw tagged templates are not supported; use a normal quoted string")
 		}
+		if name == "String" && p.peekType() == lexer.TokDot && isIdentifierName(p.peekN(1).Type) {
+			return nil, p.errorf(p.peekN(1), "String.%s is not supported; only String(value) is supported", p.peekN(1).Literal)
+		}
 		if name == "Number" && p.peekType() == lexer.TokDot && isIdentifierName(p.peekN(1).Type) {
 			p.advance()
 			memberTok := p.advance()

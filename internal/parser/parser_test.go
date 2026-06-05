@@ -1244,6 +1244,26 @@ func TestParser_BooleanParsesAsBuiltinCall(t *testing.T) {
 	}
 }
 
+func TestParser_StringParsesAsBuiltinCall(t *testing.T) {
+	prog := mustParse(t, `let text = String(42)`)
+	decl := prog.Statements[0].(*ast.LetDecl)
+	builtin, ok := decl.Value.(*ast.BuiltinCallExpr)
+	if !ok {
+		t.Fatalf("value: expected *ast.BuiltinCallExpr, got %T", decl.Value)
+	}
+	if builtin.Name != "String" {
+		t.Fatalf("builtin name: got %q, want String", builtin.Name)
+	}
+	if len(builtin.Args) != 1 {
+		t.Fatalf("args: got %d, want 1", len(builtin.Args))
+	}
+}
+
+func TestParser_StringStaticMethodsRejectClearly(t *testing.T) {
+	expectParseErrorContains(t, "let text = String.raw(\"x\")", "String.raw is not supported; only String(value) is supported")
+	expectParseErrorContains(t, "let text = String.raw`x`", "String.raw tagged templates are not supported")
+}
+
 func TestParser_ObjectStaticMethodsParseAsBuiltinCalls(t *testing.T) {
 	tests := []struct {
 		name     string

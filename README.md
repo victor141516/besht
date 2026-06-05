@@ -109,6 +109,7 @@ Files use the `.bsh` extension.
 - Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants; dynamic and control-flow-assigned arithmetic keeps shell arithmetic or POSIX `awk`.
 - Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
 - Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+- Static `String(value)` calls over primitives, null/undefined, scalar arrays, object literals, and Set literals compile to constants; dynamic booleans render `true`/`false`, dynamic scalar arrays reuse the comma-join path, and object-producing calls preserve side effects before returning `[object Object]`.
 - Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `at()`, and indexing use AWK substring extraction.
 - Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
 - `switch/case/default` compiles to shell `case/esac`.
@@ -1003,6 +1004,7 @@ Use JS-style conversion APIs for new code:
 | ------------------------ | ------------------------------------------------ |
 | `value.toString()`       | Convert `string`, `number`, `boolean`, or `status` to `string` |
 | `items.toString()`       | Convert a scalar array to a comma-joined string, like `items.join(",")` |
+| `String(value)`          | Convert primitives, null/undefined, scalar arrays, objects, and Sets to a string |
 | `Number.parseInt(value)` | Parse `string` to `number`                       |
 | `Number.parseInt(value, 10)` | Parse with an optional radix argument        |
 | `Boolean(value)`          | Convert a value to a primitive boolean using JavaScript-like truthiness |
@@ -1015,9 +1017,12 @@ let raw: string = $("wc", "-l", "file").run().readStdout()
 let lines: number = Number.parseInt(raw)
 let flag: boolean = Boolean(raw)
 let boolText: string = flag.toString() // "true"
+let label: string = String(["a", "b"]) // "a,b"
 ```
 
 `Boolean(value)` returns a primitive Besht boolean, not a Boolean object wrapper. It treats `false`, `0`, `0.0`, `""`, `null`, and `undefined` as false; non-empty strings such as `"0"` and `"false"`, non-zero numbers, arrays, and objects are true.
+
+`String(value)` is a primitive conversion builtin, not a `new String(...)` wrapper. It follows the current Besht scalar representations: null becomes `"null"`, undefined becomes `"undefined"`, booleans become `"true"`/`"false"`, scalar arrays join with commas, compiler-managed objects become `"[object Object]"`, and Sets become `"[object Set]"`. Static `String.*` APIs such as `String.raw` and `String(JSONValue)` are not supported; extract a scalar from JSON or use `JSON.stringify()` for JSON text.
 
 Other:
 

@@ -8,7 +8,7 @@ description: >
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
   array/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.values(), Object.entries(), Object.hasOwn(), Object.assign(), Object.fromEntries(), JSON.parse(), JSON.stringify(), Set<T>, nested arrays, object literals, object spread, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
-  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), Boolean(value), Number.parseInt(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
+  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), String(value), Boolean(value), Number.parseInt(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
   fetch(url).text().
 ---
 
@@ -476,15 +476,18 @@ let eps = Number.EPSILON
 
 ## Type Conversion
 
-Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `Number.parseInt(value)` accepts one argument or an optional radix argument, including non-decimal radix values such as 16.
+Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` accepts one argument or an optional radix argument, including non-decimal radix values such as 16.
 
 ```ts
 let countText = count.toString()
 let flagText = flag.toString()
+let label = String(["a", "b"]) // "a,b"
 let lines = Number.parseInt(raw)
 let lines10 = Number.parseInt(raw, 10)
 let red = Number.parseInt(hexByte, 16)
 ```
+
+`String(value)` stringifies null as `"null"`, undefined as `"undefined"`, booleans as `"true"`/`"false"`, scalar arrays as comma-joined text, compiler-managed objects as `"[object Object]"`, and Sets as `"[object Set]"`. `new String(...)`, `String.raw`, other static `String.*` APIs, and direct `String(JSONValue)` conversion are not supported; extract a JSON scalar or use `JSON.stringify()` for JSON text.
 
 Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants. Dynamic arithmetic and variables assigned inside control flow keep shell arithmetic or POSIX `awk`.
 
@@ -1016,6 +1019,7 @@ try {
 ```ts
 let n: number = 42;
 let s: string = n.toString(); // number -> string
+let label: string = String(["a", "b"]); // "a,b"
 let raw: string = $("wc", "-l", "file.txt").run().readStdout();
 let lines: number = Number.parseInt(raw); // string -> number
 
@@ -1028,7 +1032,7 @@ let lines: number = Number.parseInt(raw); // string -> number
 - `boolean` values work directly in `if`/`while` conditions and render as `true`/`false` in string contexts
 - Array values (`T[]` / `Array<T>`) can be indexed, joined, and iterated with `for`
 - `status` type holds exit codes; only usable in `catch` clauses
-- String, number, boolean, and status values can be converted with `.toString()`; strings can be parsed with `Number.parseInt()`
+- String, number, boolean, and status values can be converted with `.toString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()`
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
 - `===`/`!==` are aliases for `==`/`!=`

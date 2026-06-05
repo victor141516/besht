@@ -32,6 +32,7 @@ interface FetchResponse {
 }
 declare function fetch(url: string): FetchResponse
 declare function Boolean(value): boolean
+declare function String(value): string
 type JSONValue = string
 
 declare const process: {

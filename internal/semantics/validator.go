@@ -612,7 +612,7 @@ func (c *Validator) checkSemanticExpr(expr ast.Expression) error {
 
 func isSemanticGlobalIdent(name string) bool {
 	switch name {
-	case "Besht", "process", "Math", "Number", "Object", "Array", "Boolean", "JSON", "console", "Set":
+	case "Besht", "process", "Math", "Number", "Object", "Array", "Boolean", "String", "JSON", "console", "Set":
 		return true
 	}
 	return false
@@ -624,7 +624,7 @@ func (c *Validator) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: "fetch() takes 1 URL argument; options are not supported yet"}
 		}
-	case "Boolean", "Array.isArray":
+	case "Boolean", "String", "Array.isArray":
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("%s() takes 1 argument", e.Name)}
 		}
@@ -1015,6 +1015,8 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeFetchResponse}
 		case "Boolean", "Array.isArray", "Object.hasOwn", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
 			return boolType
+		case "String":
+			return strType
 		case "Number.parseInt", "Number.parseFloat":
 			return numType
 		case "Array.from", "Array.of", "Object.keys", "Object.values":

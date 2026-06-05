@@ -3033,6 +3033,33 @@ let listValue: boolean = Boolean([])`)
 	assertContains(t, out, `listValue=1`)
 }
 
+func TestCodegen_StringBuiltin(t *testing.T) {
+	out := compile(t, `let text: string = String("besht")
+let count: string = String(42)
+let yes: string = String(true)
+let no: string = String(false)
+let none: string = String(null)
+let missing: string = String(undefined)
+let items: string = String(["a", "b"])
+let obj: string = String({ name: "Ada" })
+let words = ["b", "a"]
+while (Boolean("x")) {
+    words = ["c", "a"]
+    break
+}
+let dynamicItems: string = String(words)`)
+	assertContains(t, out, `text='besht'`)
+	assertContains(t, out, `count='42'`)
+	assertContains(t, out, `yes='true'`)
+	assertContains(t, out, `no='false'`)
+	assertContains(t, out, `none='null'`)
+	assertContains(t, out, `missing='undefined'`)
+	assertContains(t, out, `items='a,b'`)
+	assertContains(t, out, `obj='[object Object]'`)
+	assertContains(t, out, `dynamicItems=$(printf '%s`)
+	assertContains(t, out, `"$words" | awk -v s=','`)
+}
+
 func TestCodegen_ObjectKeys(t *testing.T) {
 	out := compile(t, `let user = { id: 1, name: "Victor" }
 user.active = true

@@ -801,6 +801,8 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 		switch e.Name {
 		case "fetch":
 			return &ast.Type{Kind: ast.TypeFetchResponse}
+		case "String":
+			return &ast.Type{Kind: ast.TypeString}
 		case "Besht.iter.range":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeNumber}}
 		case "Object.keys", "Object.values":

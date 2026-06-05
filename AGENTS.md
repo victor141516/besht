@@ -339,6 +339,8 @@ Array `.at()` must return the nullish sentinel for out-of-range indexes so `item
 
 Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep runtime formatting.
 
+Static `String(value)` calls fold primitives, null/undefined, scalar arrays, object literals, and Set literals to JS-compatible display strings. Dynamic booleans render `true`/`false`, dynamic scalar arrays reuse comma-join lowering, object-producing expressions such as `Object.assign(...)` must still emit their side effects before the returned label becomes `"[object Object]"`, and direct `String(JSONValue)` remains unsupported in favor of scalar extraction or `JSON.stringify()`.
+
 Static `??` expressions compile to the selected side when the left operand is provably nullish or non-nullish. Preserve `""`, `0`, and `false` as non-nullish; control-flow assigned variables and optional/dynamic nullish sources must keep the sentinel path.
 
 Static numeric API receivers of `.toString()`, such as `Math.round(2.7).toString()` and `Number.parseInt("42").toString()`, compile to quoted constants; dynamic receivers keep runtime formatting.
@@ -529,6 +531,7 @@ let bodyAgain: string = response.text() // reuses stored response text
 // Type conversion
 let s: string = count.toString()
 let b: string = flag.toString() // true or false
+let label: string = String(["a", "b"]) // "a,b"
 let n: number = Number.parseInt(s)
 let n10: number = Number.parseInt(s, 10)
 let truthy: boolean = Boolean(s)
@@ -961,6 +964,8 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 **`Number.isNaN()` is always false for currently representable besht values.** Besht has no NaN runtime sentinel, so the API exists for JS-compatible syntax but can't observe NaN.
 
 **`Boolean(value)` is a primitive coercion builtin only.** It returns Besht boolean `1`/`0` and relies on existing boolean string rendering for `true`/`false`. Keep the slice narrow: falsey values are `false`, `0`, `0.0`, `""`, `null`, and `undefined`; non-empty strings including `"0"`/`"false"`, non-zero numbers, arrays, objects, and sets are truthy. Do not add Boolean object wrappers, `new Boolean`, `Boolean.parse`, or runtime type metadata for this API.
+
+**`String(value)` is primitive stringification only.** It does not add `new String(...)`, string wrapper objects, `String.raw`, or other static `String.*` APIs. Keep it aligned with JavaScript display values for current Besht representations: null/undefined, booleans, numbers, strings, scalar arrays, compiler-managed objects, and Sets. Do not fold object-producing calls if doing so would skip mutations or object metadata updates.
 
 **`Array.isArray(value)` is a compiler-known representation predicate, not runtime shape inspection.** A generic or `unknown` function parameter passed an array still returns false unless the parameter is annotated or inferred as a Besht array representation.
 

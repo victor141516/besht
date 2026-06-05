@@ -334,6 +334,9 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "declare function Boolean(value): boolean") {
 		t.Fatalf("generated stdlib should declare Boolean(value)")
 	}
+	if !strings.Contains(stdlib.Declarations, "declare function String(value): string") {
+		t.Fatalf("generated stdlib should declare String(value)")
+	}
 	if !strings.Contains(stdlib.Declarations, "function hasOwn(value: object, key: string): boolean") {
 		t.Fatalf("generated stdlib should declare Object.hasOwn(value, key)")
 	}
@@ -1628,6 +1631,39 @@ try {
     console.log(code.toString())
 }`)
 	want := "x\ntrue\nfalse\n42\n42\n2\n255\n255\n16\n2\n1\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_StringConstructorRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(String("besht"))
+console.log(String(42))
+console.log(String(3.5))
+console.log(String(true))
+console.log(String(false))
+console.log(String(null))
+console.log(String(undefined))
+console.log(String(["a", "b", "c"]))
+console.log(String({ name: "Ada" }))
+const seen = new Set<string>()
+console.log(String(seen))
+let dynamic = "a"
+for (let i = 0; i < 1; i++) {
+    dynamic = dynamic + "b"
+}
+console.log(String(dynamic))
+console.log(String(Boolean(dynamic)))
+let words = ["b", "a"]
+for (let i = 0; i < 1; i++) {
+    words = ["c", "a"]
+}
+console.log(String(words))
+let target = { a: "1" }
+let label = String(Object.assign(target, { b: "2" }))
+console.log(label)
+console.log(Object.keys(target).join(","))`)
+	want := "besht\n42\n3.5\ntrue\nfalse\nnull\nundefined\na,b,c\n[object Object]\n[object Set]\nab\ntrue\nc,a\n[object Object]\na,b\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

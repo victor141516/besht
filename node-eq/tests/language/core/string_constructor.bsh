@@ -1,0 +1,26 @@
+console.log(String("besht"))
+console.log(String(42))
+console.log(String(3.5))
+console.log(String(true))
+console.log(String(false))
+console.log(String(null))
+console.log(String(undefined))
+console.log(String(["a", "b", "c"]))
+console.log(String({ name: "Ada" }))
+const seen = new Set<string>()
+console.log(String(seen))
+
+let dynamic = "a"
+for (let i = 0; i < 1; i++) {
+    dynamic = dynamic + "b"
+}
+console.log(String(dynamic))
+
+let flag = Boolean(dynamic)
+console.log(String(flag))
+
+let words = ["b", "a"]
+for (let i = 0; i < 1; i++) {
+    words = ["c", "a"]
+}
+console.log(String(words))

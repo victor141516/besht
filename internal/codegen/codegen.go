@@ -1182,6 +1182,8 @@ func (g *Generator) inferExprType(expr ast.Expression) *ast.Type {
 			return typeJSON
 		case "JSON.stringify":
 			return typeString
+		case "String":
+			return typeString
 		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
 			return typeBoolean
 		}
@@ -7471,6 +7473,107 @@ func (g *Generator) genBooleanCapture(expr ast.Expression) (string, error) {
 	}
 }
 
+func (g *Generator) genStringCapture(expr ast.Expression) (string, error) {
+	if value, ok, err := g.staticStringConstructorValue(expr); ok || err != nil {
+		return shellQuote(value), err
+	}
+
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.genStringCapture(e.Expr)
+	case *ast.NewExpr:
+		if e.ClassName == "Set" {
+			return shellQuote("[object Set]"), nil
+		}
+		return "", fmt.Errorf("String(new %s(...)) is not supported; bind the instance first", e.ClassName)
+	}
+
+	typ := g.inferReceiverType(expr)
+	if typ != nil {
+		switch typ.Kind {
+		case ast.TypeString, ast.TypeNumber, ast.TypeStatus:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("$(printf '%%s' %s)", ensureArgSafe(val)), nil
+		case ast.TypeBoolean:
+			return g.genBooleanArg(expr)
+		case ast.TypeList:
+			val, err := g.genExprValue(expr)
+			if err != nil {
+				return "", err
+			}
+			return g.genListJoin(val, &ast.MethodCallExpr{Receiver: expr}, ","), nil
+		case ast.TypeObject:
+			if _, ok := expr.(*ast.ObjectLit); !ok {
+				if _, err := g.genExprValue(expr); err != nil {
+					return "", err
+				}
+			}
+			return shellQuote("[object Object]"), nil
+		case ast.TypeSet:
+			if _, ok := expr.(*ast.NewExpr); !ok {
+				if _, err := g.genExprValue(expr); err != nil {
+					return "", err
+				}
+			}
+			return shellQuote("[object Set]"), nil
+		case ast.TypeJSON:
+			return "", fmt.Errorf("String(JSONValue) is not supported; extract a scalar with an annotation or use JSON.stringify()")
+		}
+	}
+
+	g.requireRuntimeHelper("nullish")
+	val, err := g.genNullishValue(expr)
+	if err != nil {
+		return "", err
+	}
+	pos := jsonExprPos(expr)
+	tmp := fmt.Sprintf("_bst_string_%d_%d", pos.Line, pos.Column)
+	return fmt.Sprintf("$(%s=%s; if [ \"${%s}\" = \"$%s\" ]; then printf undefined; else printf '%%s' \"${%s}\"; fi)", tmp, val, tmp, nullishSentinelVar, tmp), nil
+}
+
+func (g *Generator) staticStringConstructorValue(expr ast.Expression) (string, bool, error) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticStringConstructorValue(e.Expr)
+	case *ast.UndefinedLit:
+		return "undefined", true, nil
+	case *ast.NullLit:
+		return "null", true, nil
+	case *ast.ListLit:
+		values := make([]string, 0, len(e.Elements))
+		for _, elem := range e.Elements {
+			value, ok, err := g.staticStringConstructorValue(elem)
+			if err != nil || !ok || strings.Contains(value, "\n") {
+				return "", ok, err
+			}
+			values = append(values, value)
+		}
+		return strings.Join(values, ","), true, nil
+	case *ast.ObjectLit:
+		return "[object Object]", true, nil
+	case *ast.NewExpr:
+		if e.ClassName == "Set" {
+			return "[object Set]", true, nil
+		}
+		return "", false, nil
+	case *ast.BuiltinCallExpr:
+		if e.Name == "String" && len(e.Args) == 1 {
+			return g.staticStringConstructorValue(e.Args[0])
+		}
+	}
+
+	if values, ok := g.staticScalarListValuesWithoutNewlines(expr); ok {
+		return strings.Join(values, ","), true, nil
+	}
+	if value, ok, err := g.staticStringFragment(expr); ok || err != nil {
+		return value, ok, err
+	}
+	return "", false, nil
+}
+
 func (g *Generator) genArgs(args []ast.Expression) ([]string, error) {
 	var out []string
 	for _, arg := range args {
@@ -8324,6 +8427,9 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 
 	case "Boolean":
 		return g.genBooleanCapture(e.Args[0])
+
+	case "String":
+		return g.genStringCapture(e.Args[0])
 
 	case "Number.parseInt":
 		if value, ok := staticStringText(e.Args[0]); ok {

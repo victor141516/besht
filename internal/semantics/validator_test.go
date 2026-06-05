@@ -841,6 +841,7 @@ let updated: object = Object.assign(user, { active: true })`},
 let user = { id: 1 }
 let keys: string[] = Object.keys(copy(user))`},
 		{"Boolean value", `let ok: boolean = Boolean("x")`},
+		{"String value", `let text: string = String(42)`},
 		{"JSON.stringify object", `let user = { id: 1, name: "Victor", active: true }
 let json: string = JSON.stringify(user)`},
 		{"JSON.stringify list", `let json: string = JSON.stringify(["a", "b"])`},
@@ -929,6 +930,8 @@ let json: string = JSON.stringify(cmd)`, "JSON.stringify() cannot encode command
 		{"JSON.stringify nested object value", `let json: string = JSON.stringify({ values: ["a"] })`, "JSON.stringify() only supports scalar object values"},
 		{"Boolean arity zero", `let ok: boolean = Boolean()`, "Boolean() takes 1 argument"},
 		{"Boolean arity two", `let ok: boolean = Boolean("x", "y")`, "Boolean() takes 1 argument"},
+		{"String arity zero", `let text: string = String()`, "String() takes 1 argument"},
+		{"String arity two", `let text: string = String("x", "y")`, "String() takes 1 argument"},
 		{"forEach arity", `let l: string[] = ["a"]
 l.forEach()`, "forEach() takes 1 arrow callback"},
 		{"forEach non-arrow", `let l: string[] = ["a"]
