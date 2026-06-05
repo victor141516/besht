@@ -346,6 +346,12 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "declare function parseFloat(value: string): number") {
 		t.Fatalf("generated stdlib should declare parseFloat(value)")
 	}
+	if !strings.Contains(stdlib.Declarations, "declare function isFinite(value): boolean") {
+		t.Fatalf("generated stdlib should declare isFinite(value)")
+	}
+	if !strings.Contains(stdlib.Declarations, "declare function isNaN(value): boolean") {
+		t.Fatalf("generated stdlib should declare isNaN(value)")
+	}
 	if !strings.Contains(stdlib.Declarations, "\n    function parseInt(value: string): number") {
 		t.Fatalf("generated stdlib should declare Number.parseInt(value)")
 	}
@@ -1641,6 +1647,32 @@ let raw = "15px"
 console.log(parseInt(raw, 10))
 console.log(parseInt("10") === Number.parseInt("10"))`)
 	want := "42\n2\n255\ntrue\n15\ntrue\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_GlobalNumberPredicatesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(isFinite(42))
+console.log(isFinite("42"))
+console.log(isFinite(""))
+console.log(isFinite("x"))
+console.log(isFinite(undefined))
+console.log(isNaN(42))
+console.log(isNaN("42"))
+console.log(isNaN(""))
+console.log(isNaN("x"))
+console.log(isNaN(undefined))
+let raw = "42"
+while (true) {
+    raw = "x"
+    break
+}
+console.log(isNaN(raw))
+if (isNaN(raw)) {
+    console.log("nan")
+}`)
+	want := "true\ntrue\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\ntrue\ntrue\ntrue\nnan\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

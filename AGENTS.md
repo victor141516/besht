@@ -563,6 +563,8 @@ let pi10: number = Number.parseInt("42", 10)
 let pf: number = Number.parseFloat("3.14")
 let gpi: number = parseInt("42", 10)
 let gpf: number = parseFloat("3.14")
+let gfinite: boolean = isFinite("42")
+let gnan: boolean = isNaN("x")
 let fin: boolean = Number.isFinite(pf)
 let isInt: boolean = Number.isInteger(pi)
 let safe: boolean = Number.isSafeInteger(pi)
@@ -995,6 +997,8 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 **Float literals use awk for arithmetic.** `3.7 + 1.2` → `$(awk -v _a=3.7 -v _b=1.2 'BEGIN{print _a + _b}')`. `$((...))` is integer-only in POSIX sh.
 
 **`Number.isNaN()` is always false for currently representable besht values.** Besht has no NaN runtime sentinel, so the API exists for JS-compatible syntax but can't observe NaN.
+
+**Global `isFinite()` and `isNaN()` are coercive scalar predicates.** They should follow JavaScript-style numeric coercion for currently representable scalar values: numeric strings and empty strings are finite/non-NaN, nonnumeric strings and `undefined` are NaN, and booleans/null coerce to finite numbers. Dynamic lowering should use a small inline predicate and avoid adding runtime helpers.
 
 **`Boolean(value)` is a primitive coercion builtin only.** It returns Besht boolean `1`/`0` and relies on existing boolean string rendering for `true`/`false`. Keep the slice narrow: falsey values are `false`, `0`, `0.0`, `""`, `null`, and `undefined`; non-empty strings including `"0"`/`"false"`, non-zero numbers, arrays, objects, and sets are truthy. Do not add Boolean object wrappers, `new Boolean`, `Boolean.parse`, or runtime type metadata for this API.
 

@@ -1,0 +1,25 @@
+console.log(isFinite(42))
+console.log(isFinite("42"))
+console.log(isFinite(""))
+console.log(isFinite("  "))
+console.log(isFinite("x"))
+console.log(isFinite(undefined))
+console.log(isNaN(42))
+console.log(isNaN("42"))
+console.log(isNaN(""))
+console.log(isNaN("  "))
+console.log(isNaN("x"))
+console.log(isNaN(undefined))
+
+let raw = "42"
+while (true) {
+    raw = "x"
+    break
+}
+
+console.log(isFinite(raw))
+console.log(isNaN(raw))
+
+if (isNaN(raw)) {
+    console.log("nan")
+}

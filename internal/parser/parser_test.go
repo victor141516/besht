@@ -836,6 +836,8 @@ func TestParser_BuiltinCalls(t *testing.T) {
 		{`let _ : number = Number.parseInt(value)`, "Number.parseInt"},
 		{`let _ : number = parseInt(value)`, "parseInt"},
 		{`let _ : number = parseFloat(value)`, "parseFloat"},
+		{`let _ : boolean = isFinite(value)`, "isFinite"},
+		{`let _ : boolean = isNaN(value)`, "isNaN"},
 		{`let _ : string[] = Object.keys(value)`, "Object.keys"},
 	}
 	for _, tt := range tests {

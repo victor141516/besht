@@ -1504,6 +1504,28 @@ function parse(raw: string) {
 	assertNotContains(t, out, `_bst_parse_int()`)
 }
 
+func TestCodegen_GlobalNumberPredicateAliases(t *testing.T) {
+	out := compile(t, `let finiteNumber = isFinite(42)
+let finiteString = isFinite("42")
+let finiteEmpty = isFinite("")
+let notFinite = isFinite("x")
+let nanText = isNaN("x")
+let nanNumber = isNaN(42)
+let raw = "42"
+while (true) {
+    raw = "x"
+    break
+}
+let dynamicNaN = isNaN(raw)`)
+	assertContains(t, out, `finiteNumber=1`)
+	assertContains(t, out, `finiteString=1`)
+	assertContains(t, out, `finiteEmpty=1`)
+	assertContains(t, out, `notFinite=0`)
+	assertContains(t, out, `nanText=1`)
+	assertContains(t, out, `nanNumber=0`)
+	assertContains(t, out, `dynamicNaN=$(awk -v _x="$raw"`)
+}
+
 func TestCodegen_NumberParseIntOneAndTwoArgs(t *testing.T) {
 	out := compile(t, `let a: number = Number.parseInt("42")
 let b: number = Number.parseInt("42", 10)`)

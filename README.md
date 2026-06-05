@@ -561,6 +561,8 @@ Number.parseInt(hexByte, 16);  // dynamic radix parsing is supported
 Number.parseFloat("3.14");    // parse string to float
 parseInt("42", 10);           // global alias for Number.parseInt()
 parseFloat("3.14");           // global alias for Number.parseFloat()
+isFinite("42");               // global numeric-coercion predicate
+isNaN("x");                   // global numeric-coercion predicate
 Number.isFinite(n);           // true (no NaN/Infinity in shell)
 Number.isInteger(n);          // check if value is integer
 Number.isSafeInteger(n);      // check if value is a safe integer
@@ -570,7 +572,7 @@ Number.MIN_SAFE_INTEGER;      // -9007199254740991
 Number.EPSILON;               // 2.220446049250313e-16
 ```
 
-`Number.isNaN()` is always false for currently representable besht values because besht has no NaN runtime sentinel.
+Global `isFinite(value)` and `isNaN(value)` use JavaScript-style scalar numeric coercion for strings, numbers, booleans, `null`, and `undefined`; `Number.isNaN()` is always false for currently representable besht values because besht has no NaN runtime sentinel.
 
 ### Objects
 
@@ -1035,6 +1037,8 @@ Use JS-style conversion APIs for new code:
 | `Number.parseInt(value, 10)` | Parse with an optional radix argument        |
 | `parseInt(value, 10)`    | Global alias for `Number.parseInt(value, 10)`    |
 | `parseFloat(value)`      | Global alias for `Number.parseFloat(value)`      |
+| `isFinite(value)`        | Global numeric-coercion finite check             |
+| `isNaN(value)`           | Global numeric-coercion NaN check                |
 | `Boolean(value)`          | Convert a value to a primitive boolean using JavaScript-like truthiness |
 
 ```ts

@@ -394,7 +394,10 @@ func TestValidator_NumberParseIntOneAndTwoArgs(t *testing.T) {
 	mustCheck(t, `let n: number = parseInt("42")`)
 	mustCheck(t, `let n: number = parseInt("42", 10)`)
 	mustCheck(t, `let n: number = parseFloat("3.14")`)
+	mustCheck(t, `let ok: boolean = isFinite("42")`)
+	mustCheck(t, `let ok: boolean = isNaN("x")`)
 	expectError(t, `let n: number = parseInt()`, "parseInt() takes 1 or 2 arguments")
+	expectError(t, `let ok: boolean = isFinite()`, "isFinite() takes 1 argument")
 }
 
 func TestValidator_NumberToFixedMethod(t *testing.T) {

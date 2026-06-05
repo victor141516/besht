@@ -1185,7 +1185,7 @@ func (g *Generator) inferExprType(expr ast.Expression) *ast.Type {
 			return typeString
 		case "String":
 			return typeString
-		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
+		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "isFinite", "isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 			return typeBoolean
 		}
 	case *ast.PropertyExpr:
@@ -8130,6 +8130,18 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 			return false, true
+		case "isFinite":
+			if len(e.Args) != 1 {
+				return false, false
+			}
+			value, ok := g.staticGlobalIsFiniteValue(e.Args[0])
+			return value, ok
+		case "isNaN":
+			if len(e.Args) != 1 {
+				return false, false
+			}
+			value, ok := g.staticGlobalIsNaNValue(e.Args[0])
+			return value, ok
 		case "Object.hasOwn":
 			if len(e.Args) != 2 {
 				return false, false
@@ -8783,6 +8795,12 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Number.isNaN":
 		return "0", nil
 
+	case "isFinite":
+		return g.genGlobalIsFinite(e.Args[0])
+
+	case "isNaN":
+		return g.genGlobalIsNaN(e.Args[0])
+
 	case "Array.from":
 		lengthExpr, ok := arrayFromLengthArg(e)
 		if !ok {
@@ -9289,7 +9307,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		switch e.Name {
 		case "fetch":
 			return &ast.Type{Kind: ast.TypeFetchResponse}
-		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
+		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "isFinite", "isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 			return typeBoolean
 		case "JSON.parse":
 			return typeJSON
@@ -9582,7 +9600,7 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 		return pt != nil && pt.Kind == ast.TypeBoolean
 	case *ast.BuiltinCallExpr:
 		switch e.Name {
-		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
+		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "isFinite", "isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 			return true
 		default:
 			if isBeshtPredicateBuiltin(e.Name) {
@@ -13984,6 +14002,130 @@ func (g *Generator) staticScalarComparisonValue(expr ast.Expression) (string, bo
 	return "", false, nil
 }
 
+type staticGlobalNumberCoercion struct {
+	Finite bool
+	NaN    bool
+}
+
+func (g *Generator) genGlobalIsFinite(expr ast.Expression) (string, error) {
+	if value, ok := g.staticGlobalIsFiniteValue(expr); ok {
+		if value {
+			return "1", nil
+		}
+		return "0", nil
+	}
+	value, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("$(awk %s 'BEGIN{_s=_x;gsub(/^[ \\t\\r\\n\\f\\v]+/,\"\",_s);gsub(/[ \\t\\r\\n\\f\\v]+$/,\"\",_s);_num=(_s==\"\"||_s~/^[-+]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][-+]?[0-9]+)?$/);printf _num?1:0}')", awkArg("_x", value)), nil
+}
+
+func (g *Generator) genGlobalIsNaN(expr ast.Expression) (string, error) {
+	if value, ok := g.staticGlobalIsNaNValue(expr); ok {
+		if value {
+			return "1", nil
+		}
+		return "0", nil
+	}
+	value, err := g.genExprValue(expr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("$(awk %s 'BEGIN{_s=_x;gsub(/^[ \\t\\r\\n\\f\\v]+/,\"\",_s);gsub(/[ \\t\\r\\n\\f\\v]+$/,\"\",_s);_num=(_s==\"\"||_s~/^[-+]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][-+]?[0-9]+)?$/);_inf=(_s~/^[-+]?Infinity$/);printf (!_num&&!_inf)?1:0}')", awkArg("_x", value)), nil
+}
+
+func (g *Generator) staticGlobalIsFiniteValue(expr ast.Expression) (bool, bool) {
+	value, ok := g.staticGlobalNumberCoercion(expr)
+	if !ok {
+		return false, false
+	}
+	return value.Finite, true
+}
+
+func (g *Generator) staticGlobalIsNaNValue(expr ast.Expression) (bool, bool) {
+	value, ok := g.staticGlobalNumberCoercion(expr)
+	if !ok {
+		return false, false
+	}
+	return value.NaN, true
+}
+
+func (g *Generator) staticGlobalNumberCoercion(expr ast.Expression) (staticGlobalNumberCoercion, bool) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticGlobalNumberCoercion(e.Expr)
+	case *ast.UndefinedLit:
+		return staticGlobalNumberCoercion{NaN: true}, true
+	case *ast.NullLit:
+		return staticGlobalNumberCoercion{Finite: true}, true
+	case *ast.BoolLit:
+		return staticGlobalNumberCoercion{Finite: true}, true
+	case *ast.IntLit:
+		return staticGlobalNumberCoercion{Finite: true}, true
+	case *ast.FloatLit:
+		return staticGlobalNumberCoercionFromString(e.Value), true
+	case *ast.StringLit:
+		return staticGlobalNumberCoercionFromString(e.Value), true
+	case *ast.TemplateLit:
+		if len(e.Exprs) == 0 {
+			return staticGlobalNumberCoercionFromString(strings.Join(e.Parts, "")), true
+		}
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return staticGlobalNumberCoercion{}, false
+		}
+		varName := g.resolveVarName(e.Name)
+		if value, ok := g.stringConstMap[varName]; ok {
+			return staticGlobalNumberCoercionFromString(value), true
+		}
+		if value, ok := g.numConstMap[varName]; ok {
+			return staticGlobalNumberCoercionFromFloat(value), true
+		}
+		if _, ok := g.boolConstMap[varName]; ok {
+			return staticGlobalNumberCoercion{Finite: true}, true
+		}
+	case *ast.BuiltinCallExpr:
+		if e.Name == "String" && len(e.Args) == 1 {
+			value, ok, err := g.staticStringConstructorValue(e.Args[0])
+			if err == nil && ok {
+				return staticGlobalNumberCoercionFromString(value), true
+			}
+		}
+		switch e.Name {
+		case "Number.parseInt", "parseInt", "Number.parseFloat", "parseFloat":
+			value, ok, err := g.staticScalarComparisonValue(e)
+			if err == nil && ok {
+				return staticGlobalNumberCoercionFromString(value), true
+			}
+		}
+	case *ast.UnaryExpr, *ast.BinaryExpr:
+		if value, ok := g.staticArithmeticNumberValue(expr); ok {
+			return staticGlobalNumberCoercionFromFloat(value), true
+		}
+	}
+	return staticGlobalNumberCoercion{}, false
+}
+
+func staticGlobalNumberCoercionFromString(value string) staticGlobalNumberCoercion {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return staticGlobalNumberCoercion{Finite: true}
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return staticGlobalNumberCoercion{NaN: true}
+	}
+	return staticGlobalNumberCoercionFromFloat(parsed)
+}
+
+func staticGlobalNumberCoercionFromFloat(value float64) staticGlobalNumberCoercion {
+	return staticGlobalNumberCoercion{
+		Finite: !math.IsInf(value, 0) && !math.IsNaN(value),
+		NaN:    math.IsNaN(value),
+	}
+}
+
 func (g *Generator) staticNumericComparisonValue(expr ast.Expression) (float64, bool, error) {
 	if value, ok := g.staticArithmeticNumberValue(expr); ok {
 		return value, true, nil
@@ -14185,7 +14327,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		return fmt.Sprintf("[ -n %s ]", arg0), nil
 	case "Number.isFinite":
 		return "true", nil
-	case "Boolean", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
+	case "Boolean", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "isFinite", "isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 		val, err := g.genBuiltinCapture(e)
 		if err != nil {
 			return "", err

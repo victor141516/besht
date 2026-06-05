@@ -36,6 +36,8 @@ declare function String(value): string
 declare function parseInt(value: string): number
 declare function parseInt(value: string, radix: number): number
 declare function parseFloat(value: string): number
+declare function isFinite(value): boolean
+declare function isNaN(value): boolean
 type JSONValue = string
 
 declare const process: {

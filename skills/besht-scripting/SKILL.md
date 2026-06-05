@@ -8,7 +8,7 @@ description: >
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
   array/string/number methods, Math constants/methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.values(), Object.entries(), Object.hasOwn(), Object.is(), Object.assign(), Object.fromEntries(), JSON.parse(), JSON.stringify(), Set<T>, nested arrays, object literals, object spread, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
-  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), String(value), Boolean(value), Number.parseInt(), parseInt(), parseFloat(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
+  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), String(value), Boolean(value), Number.parseInt(), parseInt(), parseFloat(), isFinite(), isNaN(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
   fetch(url).text().
 ---
 
@@ -469,6 +469,8 @@ let n10 = Number.parseInt("42", 10)
 let f = Number.parseFloat("3.14")
 let aliasN = parseInt("42", 10)
 let aliasF = parseFloat("3.14")
+let aliasFinite = isFinite("42")
+let aliasNaN = isNaN("x")
 let fin = Number.isFinite(f)
 let isInt = Number.isInteger(n)
 let safe = Number.isSafeInteger(n)
@@ -478,11 +480,11 @@ let minSafe = Number.MIN_SAFE_INTEGER
 let eps = Number.EPSILON
 ```
 
-`Number.isNaN()` is always false for currently representable besht values because besht has no NaN runtime sentinel.
+Global `isFinite(value)` and `isNaN(value)` use JavaScript-style scalar numeric coercion for strings, numbers, booleans, `null`, and `undefined`; `Number.isNaN()` is always false for currently representable besht values because besht has no NaN runtime sentinel.
 
 ## Type Conversion
 
-Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `value.valueOf()` returns the primitive string, number, boolean, or status value without creating wrapper objects. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` and global `parseInt(value)` accept one argument or an optional radix argument, including non-decimal radix values such as 16. Global `parseFloat(value)` is available as an alias for `Number.parseFloat(value)`.
+Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `value.valueOf()` returns the primitive string, number, boolean, or status value without creating wrapper objects. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` and global `parseInt(value)` accept one argument or an optional radix argument, including non-decimal radix values such as 16. Global `parseFloat(value)` is available as an alias for `Number.parseFloat(value)`, and global `isFinite(value)` / `isNaN(value)` use numeric coercion predicates.
 
 ```ts
 let countText = count.toString()
@@ -1046,7 +1048,7 @@ let lines: number = parseInt(raw); // string -> number
 - `boolean` values work directly in `if`/`while` conditions and render as `true`/`false` in string contexts
 - Array values (`T[]` / `Array<T>`) can be indexed, joined, and iterated with `for`
 - `status` type holds exit codes; only usable in `catch` clauses
-- String, number, boolean, and status values can be converted with `.toString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()` or global `parseInt()`
+- String, number, boolean, and status values can be converted with `.toString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()` or global `parseInt()`; global `isFinite()` and `isNaN()` coerce scalar values like JavaScript
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
 - `===`/`!==` are aliases for `==`/`!=`
