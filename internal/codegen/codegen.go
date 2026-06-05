@@ -9367,7 +9367,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		case "split":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
-			"replace", "replaceAll", "slice", "substring", "at", "charAt", "concat", "padStart", "padEnd", "toString", "valueOf", "toFixed", "join":
+			"replace", "replaceAll", "slice", "substring", "substr", "at", "charAt", "concat", "padStart", "padEnd", "toString", "valueOf", "toFixed", "join":
 			return typeString
 		case "indexOf", "lastIndexOf", "localeCompare", "length":
 			return typeNumber
@@ -9700,7 +9700,7 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 		switch e.Method {
 		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
 			"replace", "replaceAll", "split", "includes", "startsWith",
-			"endsWith", "indexOf", "lastIndexOf", "localeCompare", "slice", "substring", "at", "charAt", "padStart", "padEnd",
+			"endsWith", "indexOf", "lastIndexOf", "localeCompare", "slice", "substring", "substr", "at", "charAt", "padStart", "padEnd",
 			"repeat", "concat", "valueOf":
 			isStringMethod = true
 		}
@@ -12523,6 +12523,21 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 		}
 		return fmt.Sprintf("$(awk %s %s%s 'BEGIN{OFMT=\"%%.17g\";_len=length(_s);_a=int(_start);_b=int(%s);if(_a<0)_a=0;if(_b<0)_b=0;if(_a>_len)_a=_len;if(_b>_len)_b=_len;if(_a>_b){_t=_a;_a=_b;_b=_t}printf \"%%s\", substr(_s,_a+1,_b-_a)}')", awkArg("_s", recv), awkArg("_start", startStr), endArg, endExpr), nil
 
+	case "substr":
+		startStr, err := g.genExprValue(e.Args[0])
+		if err != nil {
+			return "", err
+		}
+		lengthArg := " " + awkArg("_hasLength", "0") + " " + awkArg("_length", "0")
+		if len(e.Args) == 2 {
+			lengthStr, err := g.genExprValue(e.Args[1])
+			if err != nil {
+				return "", err
+			}
+			lengthArg = " " + awkArg("_hasLength", "1") + " " + awkArg("_length", lengthStr)
+		}
+		return fmt.Sprintf("$(awk %s %s%s 'BEGIN{_len=length(_s);_a=int(_start);if(_a<0)_a=_len+_a;if(_a<0)_a=0;if(_a>_len)_a=_len;if(int(_hasLength)){_n=int(_length);if(_n<0)_n=0}else _n=_len-_a;printf \"%%s\", substr(_s,_a+1,_n)}')", awkArg("_s", recv), awkArg("_start", startStr), lengthArg), nil
+
 	case "concat":
 		parts := []string{strInner(recv)}
 		for _, arg := range e.Args {
@@ -12779,6 +12794,31 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 		if start > end {
 			start, end = end, start
 		}
+		return recv[start:end], true, nil
+	case "substr":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			return "", true, fmt.Errorf("substr() takes one or two arguments")
+		}
+		start, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		if start < 0 {
+			start = len(recv) + start
+		}
+		start = clampInt(start, 0, len(recv))
+		length := len(recv) - start
+		if len(e.Args) == 2 {
+			length, ok = staticIntValue(e.Args[1])
+			if !ok {
+				return "", false, nil
+			}
+			if length < 0 {
+				length = 0
+			}
+		}
+		end := start + length
+		end = clampInt(end, start, len(recv))
 		return recv[start:end], true, nil
 	case "repeat":
 		if len(e.Args) != 1 {

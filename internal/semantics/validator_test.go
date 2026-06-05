@@ -830,6 +830,8 @@ func TestValidator_FirstPureJSCompatibleAPIBatchValid(t *testing.T) {
 let first: string = s.charAt(0)`},
 		{"string substring", `let s: string = "hello"
 let sub: string = s.substring(1, 4)`},
+		{"string substr", `let s: string = "hello"
+let sub: string = s.substr(-2, 1)`},
 		{"string lastIndexOf", `let s: string = "hello hello"
 let last: number = s.lastIndexOf("lo")`},
 		{"string localeCompare", `let s: string = "apple"
@@ -912,6 +914,8 @@ let c: string = s.trimLeft("x")`, "trimLeft() takes no arguments"},
 let c: string = s.valueOf("x")`, "valueOf() takes no arguments"},
 		{"substring arity", `let s: string = "abc"
 let sub: string = s.substring()`, "substring() takes 1 or 2 arguments"},
+		{"substr arity", `let s: string = "abc"
+let sub: string = s.substr()`, "substr() takes 1 or 2 arguments"},
 		{"string lastIndexOf arity", `let s: string = "abc"
 let i: number = s.lastIndexOf()`, "lastIndexOf() takes 1 or 2 arguments"},
 		{"string localeCompare arity", `let s: string = "abc"

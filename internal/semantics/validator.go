@@ -920,7 +920,7 @@ func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
 		}
-	case "includes", "startsWith", "endsWith", "indexOf", "lastIndexOf", "slice", "substring", "padStart", "padEnd":
+	case "includes", "startsWith", "endsWith", "indexOf", "lastIndexOf", "slice", "substring", "substr", "padStart", "padEnd":
 		if len(e.Args) < 1 || len(e.Args) > 2 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 or 2 arguments"}
 		}
