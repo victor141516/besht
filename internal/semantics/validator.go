@@ -809,6 +809,10 @@ func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
 		}
+	case "fill":
+		if len(e.Args) < 1 || len(e.Args) > 3 {
+			return &SemanticError{Pos: e.Pos, Message: "fill() takes 1 to 3 arguments"}
+		}
 	case "pop", "shift", "reverse", "sort", "toString":
 		if len(e.Args) != 0 {
 			if e.Method == "toString" {
@@ -1106,7 +1110,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 					}
 				}
 				return &ast.Type{Kind: ast.TypeList, Elem: strType}
-			case "pop", "shift", "push", "unshift", "concat", "slice", "filter", "reverse", "sort":
+			case "pop", "shift", "push", "unshift", "concat", "slice", "filter", "reverse", "sort", "fill":
 				return recvType
 			case "reduce":
 				if len(e.Args) == 2 {

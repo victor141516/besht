@@ -635,6 +635,12 @@ func TestValidator_ListSort(t *testing.T) {
 let r: Array<string> = l.sort()`)
 }
 
+func TestValidator_ListFill(t *testing.T) {
+	mustCheck(t, `let l: Array<string> = ["a", "b", "c"]
+let all: Array<string> = l.fill("x")
+let middle: Array<string> = l.fill("x", 1, 2)`)
+}
+
 func TestValidator_ListSlice(t *testing.T) {
 	mustCheck(t, `let l: Array<string> = ["a", "b", "c", "d"]
 let s: Array<string> = l.slice(1, 3)`)
@@ -1037,6 +1043,8 @@ let ok: boolean = items.some(x => { return true })`, "some() predicate callback 
 let hit: string = items.findLast(x => { return true })`, "findLast() predicate callback must be expression-bodied"},
 		{"findLastIndex block body", `let items: string[] = ["a"]
 let hit: number = items.findLastIndex(x => { return true })`, "findLastIndex() predicate callback must be expression-bodied"},
+		{"fill wrong arity", `let items: string[] = ["a"]
+let filled: string[] = items.fill()`, "fill() takes 1 to 3 arguments"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

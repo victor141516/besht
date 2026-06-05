@@ -4358,6 +4358,44 @@ func (g *Generator) staticScalarListMethodValues(e *ast.MethodCallExpr) ([]strin
 		out := append([]string(nil), values...)
 		sort.Strings(out)
 		return out, true
+	case "fill":
+		if len(e.Args) < 1 || len(e.Args) > 3 {
+			return nil, false
+		}
+		value, ok := staticScalarValue(e.Args[0])
+		if !ok || strings.Contains(value, "\n") {
+			return nil, false
+		}
+		start := 0
+		if len(e.Args) >= 2 {
+			start, ok = staticIntValue(e.Args[1])
+			if !ok {
+				return nil, false
+			}
+		}
+		end := len(values)
+		if len(e.Args) >= 3 {
+			end, ok = staticIntValue(e.Args[2])
+			if !ok {
+				return nil, false
+			}
+		}
+		if start < 0 {
+			start = len(values) + start
+		}
+		if end < 0 {
+			end = len(values) + end
+		}
+		start = clampInt(start, 0, len(values))
+		end = clampInt(end, 0, len(values))
+		if end < start {
+			end = start
+		}
+		out := append([]string(nil), values...)
+		for i := start; i < end; i++ {
+			out[i] = value
+		}
+		return out, true
 	case "push":
 		if len(e.Args) != 1 {
 			return nil, false
@@ -4752,6 +4790,15 @@ func staticIntValue(expr ast.Expression) (int, bool) {
 			return 0, false
 		}
 		return int(f), true
+	case *ast.UnaryExpr:
+		if e.Op != "-" {
+			return 0, false
+		}
+		value, ok := staticIntValue(e.Expr)
+		if !ok {
+			return 0, false
+		}
+		return -value, true
 	case *ast.AsExpr:
 		return staticIntValue(e.Expr)
 	default:
@@ -5432,7 +5479,7 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 			switch e.Method {
 			case "forEach":
 				return g.genListForEachStmt(e)
-			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "sort":
+			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "sort", "fill":
 				if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 					recvVar := g.resolveVarName(ident.Name)
 					val, err := g.genExprValue(e)
@@ -9139,7 +9186,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		}
 		if recvType != nil && recvType.Kind == ast.TypeList {
 			switch e.Method {
-			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "sort", "filter":
+			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "sort", "filter", "fill":
 				return recvType
 			case "map":
 				if len(e.Args) == 1 {
@@ -9190,7 +9237,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return typeNumber
 		case "includes", "startsWith", "endsWith":
 			return &ast.Type{Kind: ast.TypeBoolean}
-		case "push", "pop", "shift", "unshift", "reverse", "sort":
+		case "push", "pop", "shift", "unshift", "reverse", "sort", "fill":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
 		}
 	case *ast.TernaryExpr:
@@ -9905,6 +9952,9 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 		}
 		return fmt.Sprintf("$(printf '%%s\\n' %s | awk %s %s '{a[NR]=$0}END{n=NR; s=int(_s); e=int(_e); if(s<0)s=n+s; if(e<0)e=%s; if(s<0)s=0; if(e<0)e=0; if(s>n)s=n; if(e>n)e=n; for(i=s+1;i<=e;i++) print a[i]}')", ensureArgSafe(recv), awkArg("_s", startStr), awkArg("_e", endStr), negativeEnd), nil
 
+	case "fill":
+		return g.genListFill(recv, e)
+
 	case "join":
 		a0, err := arg0()
 		if err != nil {
@@ -9991,6 +10041,48 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 	return "", fmt.Errorf("array has no method %q", e.Method)
 }
 
+func (g *Generator) genListFill(recv string, e *ast.MethodCallExpr) (string, error) {
+	if len(e.Args) < 1 || len(e.Args) > 3 {
+		return "", fmt.Errorf("fill() takes 1 to 3 arguments")
+	}
+	value, err := g.genExprValue(e.Args[0])
+	if err != nil {
+		return "", err
+	}
+	start := "0"
+	if len(e.Args) >= 2 {
+		start, err = g.genExprValue(e.Args[1])
+		if err != nil {
+			return "", err
+		}
+	}
+	end := "0"
+	hasEnd := "0"
+	if len(e.Args) >= 3 {
+		end, err = g.genExprValue(e.Args[2])
+		if err != nil {
+			return "", err
+		}
+		hasEnd = "1"
+	}
+	awkScript := `'BEGIN{fill=_fill; s=int(_start); hasEnd=int(_hasEnd); e=int(_end); hasLen=int(_hasLen); len=int(_len)}
+{a[NR]=$0}
+END{n=hasLen?len:NR; if(s<0)s=n+s; if(hasEnd){if(e<0)e=n+e}else e=n; if(s<0)s=0; if(s>n)s=n; if(e<0)e=0; if(e>n)e=n; if(e<s)e=s; for(i=1;i<=n;i++){if(i>1)printf "\n"; if(i-1>=s && i-1<e)printf "%s",fill; else if(i in a)printf "%s",a[i]}}'`
+	args := []string{
+		awkArg("_fill", value),
+		awkArg("_start", start),
+		awkArg("_end", end),
+		awkArg("_hasEnd", hasEnd),
+	}
+	if known := g.listLengthExpr(e.Receiver); known != "" {
+		args = append(args, awkArg("_hasLen", "1"), awkArg("_len", known))
+		return fmt.Sprintf("$(printf '%%s\\n' %s | awk %s %s)", ensureArgSafe(recv), strings.Join(args, " "), awkScript), nil
+	}
+	dataVar := fmt.Sprintf("_fill_%d_%d_data", e.Pos.Line, e.Pos.Column)
+	args = append(args, awkArg("_hasLen", "0"), awkArg("_len", "0"))
+	return fmt.Sprintf("$(%s=%s; if [ -n \"$%s\" ]; then printf '%%s\\n' \"$%s\" | awk %s %s; fi)", dataVar, recv, dataVar, dataVar, strings.Join(args, " "), awkScript), nil
+}
+
 func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool, error) {
 	values, ok := g.staticScalarListValuesWithoutNewlines(e.Receiver)
 	if !ok {
@@ -10033,7 +10125,7 @@ func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool
 
 func (g *Generator) genStaticListValueMethod(e *ast.MethodCallExpr) (string, bool, error) {
 	switch e.Method {
-	case "concat", "slice", "reverse", "sort", "push", "unshift", "pop", "shift":
+	case "concat", "slice", "reverse", "sort", "fill", "push", "unshift", "pop", "shift":
 	default:
 		return "", false, nil
 	}

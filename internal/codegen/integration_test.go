@@ -2004,6 +2004,22 @@ console.log(trace)
 	}
 }
 
+func TestIntegration_ListFillRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(["a", "b", "c"].fill("x").join(","))
+console.log(["a", "b", "c", "d"].fill("x", 1, -1).join(","))
+let items = ["a", "b", "c"]
+items.fill("z", -2)
+console.log(items.join(","))
+let empty: string[] = []
+console.log(empty.fill("x").length)
+let oneBlank = [""]
+console.log(oneBlank.fill("x").join(","))`)
+	want := "x,x,x\na,x,x,d\na,z,z\n0\nx\n"
+	if out != want {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
 func TestIntegration_StaticListLiteralSearchRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(["a", "b"].includes("b"))
 console.log(["a", "b"].includes("z"))

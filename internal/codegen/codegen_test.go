@@ -2072,6 +2072,25 @@ let joined = l.join(",")`)
 	assertContains(t, out, `awk -v s=','`)
 }
 
+func TestCodegen_ListFill(t *testing.T) {
+	out := compile(t, `let l: Array<string> = ["a", "b", "c", "d"]
+let filled: Array<string> = l.fill("x", 1, -1)`)
+	assertContains(t, out, "filled='a\nx\nx\nd'")
+	assertNotContains(t, out, `awk -v _fill`)
+}
+
+func TestCodegen_ListFillFallsBackForDynamicValueAndStatementReceiver(t *testing.T) {
+	out := compile(t, `function mutate(marker: string): string {
+    let l: Array<string> = ["a", "b", "c"]
+    l.fill(marker, 1)
+    return l.join(",")
+}`)
+	assertContains(t, out, `_mutate_l=$(printf '%s\n' "$_mutate_l" | awk`)
+	assertContains(t, out, `awk -v _fill="$_mutate_marker"`)
+	assertContains(t, out, `-v _hasLen=1 -v _len=3`)
+	assertContains(t, out, `awk -v s=','`)
+}
+
 func TestCodegen_ListConcat(t *testing.T) {
 	out := compile(t, `let a: Array<string> = ["x"]
 let b: Array<string> = ["y"]
