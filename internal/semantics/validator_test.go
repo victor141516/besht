@@ -1044,6 +1044,10 @@ let ok: boolean = items.every((a, b, c) => true)`, "arrow callbacks take 1 or 2 
 let hit: string = items.find()`, "find() takes 1 arrow callback"},
 		{"flatMap wrong arity", `let items: string[] = ["a"]
 let hit: string[] = items.flatMap()`, "flatMap() takes 1 arrow callback"},
+		{"reduceRight wrong arity", `let items: string[] = ["a"]
+let hit: string = items.reduceRight()`, "reduceRight() takes 2 arguments: callback and initial value"},
+		{"reduceRight callback arity", `let items: string[] = ["a"]
+let hit: string = items.reduceRight((acc) => acc, "")`, "reduceRight() callback must take 2 parameters"},
 		{"findLast wrong arity", `let items: string[] = ["a"]
 let hit: string = items.findLast()`, "findLast() takes 1 arrow callback"},
 		{"some block body", `let items: string[] = ["a"]
@@ -1065,6 +1069,8 @@ let filled: string[] = items.fill()`, "fill() takes 1 to 3 arguments"},
 func TestValidator_ListReduceAsListThenJoin(t *testing.T) {
 	mustCheck(t, `let nums: number[] = [1, 2]
 let lines: string = nums.reduce((acc, n) => [...acc, "x"], [] as string[]).join("\n")`)
+	mustCheck(t, `let nums: number[] = [1, 2]
+let lines: string = nums.reduceRight((acc, n) => [...acc, "x"], [] as string[]).join("\n")`)
 }
 
 func TestValidator_ListReduceBlockReturn(t *testing.T) {
@@ -1072,11 +1078,20 @@ func TestValidator_ListReduceBlockReturn(t *testing.T) {
 let product: number = nums.reduce((acc, n) => {
     return acc * n
 }, 1)`)
+	mustCheck(t, `let nums: number[] = [1, 2]
+let product: number = nums.reduceRight((acc, n) => {
+    return acc * n
+}, 1)`)
 }
 
 func TestValidator_ListReduceObjectBlockReturn(t *testing.T) {
 	mustCheck(t, `let words: string[] = ["apple"]
 let counts = words.reduce((acc, word) => {
+    acc[word] = (acc[word] || 0) + 1
+    return acc
+}, {})`)
+	mustCheck(t, `let words: string[] = ["apple"]
+let counts = words.reduceRight((acc, word) => {
     acc[word] = (acc[word] || 0) + 1
     return acc
 }, {})`)

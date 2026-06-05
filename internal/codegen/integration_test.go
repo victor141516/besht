@@ -1890,6 +1890,7 @@ function add(acc: string, item: string): string {
 let mapped = items.map(mark)
 let picked = items.filter(startsWithA)
 let reduced = items.reduce(add, "")
+let reducedRight = items.reduceRight(add, "")
 console.log(mapped.join("|"))
 console.log(picked.join(","))
 console.log(items.some(startsWithA))
@@ -1897,10 +1898,31 @@ console.log(items.every(startsWithA))
 console.log(items.find(startsWithA) ?? "missing")
 console.log(items.findIndex(startsWithA))
 console.log(reduced)
+console.log(reducedRight)
 `)
-	want := "0:APPLE|1:BANANA|2:APRICOT\napple,apricot\ntrue\nfalse\napple\n0\naba\n"
+	want := "0:APPLE|1:BANANA|2:APRICOT\napple,apricot\ntrue\nfalse\napple\n0\naba\naba\n"
 	if out != want {
 		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestIntegration_ListReduceRightRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let nums = [1, 2, 3]
+let order = nums.reduceRight((acc, n) => acc + n.toString(), "")
+let lines = nums.reduceRight((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("|")
+let product = nums.reduceRight((acc, n) => {
+    return acc * 10 + n
+}, 0)
+let empty: string[] = []
+let emptyResult = empty.reduceRight((acc, n) => acc + n, "seed")
+console.log(order)
+console.log(lines)
+console.log(product)
+console.log(emptyResult)
+`)
+	want := "321\n###|##|#\n321\nseed\n"
+	if out != want {
+		t.Fatalf("unexpected output: got %q, want %q", out, want)
 	}
 }
 
@@ -1997,6 +2019,28 @@ let add = (acc: object, word: string): object => {
     return acc
 }
 let counts = words.reduce(add, {})
+console.log(Object.keys(counts).join(","))
+console.log(Object.values(counts).join(","))
+console.log(Object.hasOwn(counts, "a"))
+console.log(Object.hasOwn(counts, "c"))
+`)
+	want := "a,b\n2,1\ntrue\nfalse\n"
+	if out != want {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestIntegration_ReduceRightStoredObjectCallbackRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let words = ["a", "b", "a"]
+let add = (acc: object, word: string): object => {
+    if (Object.hasOwn(acc, word)) {
+        acc[word] = (Number.parseInt(acc[word], 10) + 1).toString()
+    } else {
+        acc[word] = "1"
+    }
+    return acc
+}
+let counts = words.reduceRight(add, {})
 console.log(Object.keys(counts).join(","))
 console.log(Object.values(counts).join(","))
 console.log(Object.hasOwn(counts, "a"))

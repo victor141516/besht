@@ -75,6 +75,7 @@ type reduceReturnContext struct {
 	accVar      string
 	accParam    string
 	accIsObject bool
+	method      string
 }
 
 type mapReturnContext struct {
@@ -2848,12 +2849,16 @@ func (g *Generator) isReduceCall(expr ast.Expression) bool {
 		return g.isReduceCall(asExpr.Expr)
 	}
 	if me, ok := expr.(*ast.MethodCallExpr); ok {
-		if me.Method == "reduce" {
+		if isReduceMethod(me.Method) {
 			recvType := g.inferReceiverType(me.Receiver)
 			return recvType != nil && recvType.Kind == ast.TypeList
 		}
 	}
 	return false
+}
+
+func isReduceMethod(method string) bool {
+	return method == "reduce" || method == "reduceRight"
 }
 
 func (g *Generator) withCallbackParams(arrow *ast.ArrowExpr, overrides map[string]string, body func(callbackLoopCtx) error) error {
@@ -3125,7 +3130,7 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 		return g.genReduceFunctionLetDecl(varName, sourceName, me)
 	}
 	if len(arrow.Params) != 2 {
-		return fmt.Errorf("reduce() callback must take 2 parameters")
+		return fmt.Errorf("%s() callback must take 2 parameters", me.Method)
 	}
 
 	initVal := me.Args[1]
@@ -3169,19 +3174,51 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 		return err
 	}
 	recvArg := ensureArgSafe(recv)
-
+	reverse := me.Method == "reduceRight"
 	heredocTag := fmt.Sprintf("_EOF_RED_%d_%d", arrow.Pos.Line, arrow.Pos.Column)
+	dataVar := fmt.Sprintf("_reduce_%d_%d_data", me.Pos.Line, me.Pos.Column)
+	stageVar := fmt.Sprintf("_reduce_%d_%d_stage", me.Pos.Line, me.Pos.Column)
+	idxVar := fmt.Sprintf("_reduce_%d_%d_index", me.Pos.Line, me.Pos.Column)
+	countVar := fmt.Sprintf("_reduce_%d_%d_count", me.Pos.Line, me.Pos.Column)
+	slotVar := fmt.Sprintf("_reduce_%d_%d_slot", me.Pos.Line, me.Pos.Column)
+	valuePrefix := fmt.Sprintf("_reduce_%d_%d_value", me.Pos.Line, me.Pos.Column)
 
 	accType := g.inferReceiverType(initVal)
 	if accType != nil {
 		g.varTypeMap[varName] = accType
 	}
-	reduceCtx := reduceReturnContext{accVar: varName, accParam: arrow.Params[0].Name, accIsObject: accType != nil && accType.Kind == ast.TypeObject}
+	if accType != nil && accType.Kind == ast.TypeObject {
+		g.objAliasMap[sourceName] = objectRef{StaticName: varName, RootName: varName}
+	}
+	reduceCtx := reduceReturnContext{accVar: varName, accParam: arrow.Params[0].Name, accIsObject: accType != nil && accType.Kind == ast.TypeObject, method: me.Method}
 	return g.withReduceReturn(reduceCtx, func() error {
+		if reverse {
+			g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+			g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+			g.push()
+			g.line(fmt.Sprintf("%s=0", countVar))
+			g.line(fmt.Sprintf("while IFS= read -r %s; do", stageVar))
+			g.push()
+			g.line(fmt.Sprintf("%s=$(( %s + 1 ))", countVar, countVar))
+			g.line(fmt.Sprintf("eval \"%s_${%s}=\\$%s\"", valuePrefix, countVar, stageVar))
+			g.pop()
+			g.line("done <<" + heredocTag)
+			g.raw(fmt.Sprintf("$%s\n", dataVar))
+			g.raw(heredocTag + "\n")
+			g.line(fmt.Sprintf("%s=$(( %s - 1 ))", idxVar, countVar))
+		}
 		return g.withCallbackParams(arrow, map[string]string{arrow.Params[0].Name: varName}, func(ctx callbackLoopCtx) error {
 			curMangled := ctx.ParamVars[1]
-			g.line(fmt.Sprintf("while IFS= read -r %s; do", curMangled))
+			if reverse {
+				g.line(fmt.Sprintf("while [ \"$%s\" -ge 0 ]; do", idxVar))
+			} else {
+				g.line(fmt.Sprintf("while IFS= read -r %s; do", curMangled))
+			}
 			g.push()
+			if reverse {
+				g.line(fmt.Sprintf("%s=$(( %s + 1 ))", slotVar, idxVar))
+				g.line(fmt.Sprintf("eval \"%s=\\$%s_${%s}\"", curMangled, valuePrefix, slotVar))
+			}
 
 			if arrow.BlockBody != nil {
 				for _, stmt := range arrow.BlockBody.Statements {
@@ -3198,11 +3235,20 @@ func (g *Generator) genReduceLetDecl(varName, sourceName string, expr ast.Expres
 				}
 				g.line(varName + "=" + val)
 			}
+			if reverse {
+				g.line(fmt.Sprintf("%s=$(( %s - 1 ))", idxVar, idxVar))
+			}
 
 			g.pop()
-			g.line("done << " + heredocTag)
-			g.line("$(printf '" + "%s" + "\\n' " + recvArg + ")")
-			g.line(heredocTag)
+			if reverse {
+				g.line("done")
+				g.pop()
+				g.line("fi")
+			} else {
+				g.line("done << " + heredocTag)
+				g.line("$(printf '" + "%s" + "\\n' " + recvArg + ")")
+				g.line(heredocTag)
+			}
 			return nil
 		})
 	})
@@ -3239,6 +3285,7 @@ func (g *Generator) genReduceFunctionLetDecl(varName, sourceName string, me *ast
 			g.emitObjectKeysInit(varName, fields)
 		}
 		accIsObject = true
+		g.objAliasMap[sourceName] = objectRef{StaticName: varName, RootName: varName}
 	} else {
 		val, err := g.genExprRHS(initVal, nil)
 		if err != nil {
@@ -3260,8 +3307,36 @@ func (g *Generator) genReduceFunctionLetDecl(varName, sourceName string, me *ast
 	curVar := fmt.Sprintf("_reduce_%d_%d_current", me.Pos.Line, me.Pos.Column)
 	retVar := fmt.Sprintf("_reduce_%d_%d_return", me.Pos.Line, me.Pos.Column)
 	heredocTag := fmt.Sprintf("_EOF_REDF_%d_%d", me.Pos.Line, me.Pos.Column)
-	g.line(fmt.Sprintf("while IFS= read -r %s; do", curVar))
+	reverse := me.Method == "reduceRight"
+	dataVar := fmt.Sprintf("_reduce_%d_%d_data", me.Pos.Line, me.Pos.Column)
+	stageVar := fmt.Sprintf("_reduce_%d_%d_stage", me.Pos.Line, me.Pos.Column)
+	idxVar := fmt.Sprintf("_reduce_%d_%d_index", me.Pos.Line, me.Pos.Column)
+	countVar := fmt.Sprintf("_reduce_%d_%d_count", me.Pos.Line, me.Pos.Column)
+	slotVar := fmt.Sprintf("_reduce_%d_%d_slot", me.Pos.Line, me.Pos.Column)
+	valuePrefix := fmt.Sprintf("_reduce_%d_%d_value", me.Pos.Line, me.Pos.Column)
+	if reverse {
+		g.line(fmt.Sprintf("%s=%s", dataVar, recv))
+		g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", dataVar))
+		g.push()
+		g.line(fmt.Sprintf("%s=0", countVar))
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", stageVar))
+		g.push()
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", countVar, countVar))
+		g.line(fmt.Sprintf("eval \"%s_${%s}=\\$%s\"", valuePrefix, countVar, stageVar))
+		g.pop()
+		g.line("done <<" + heredocTag)
+		g.raw(fmt.Sprintf("$%s\n", dataVar))
+		g.raw(heredocTag + "\n")
+		g.line(fmt.Sprintf("%s=$(( %s - 1 ))", idxVar, countVar))
+		g.line(fmt.Sprintf("while [ \"$%s\" -ge 0 ]; do", idxVar))
+	} else {
+		g.line(fmt.Sprintf("while IFS= read -r %s; do", curVar))
+	}
 	g.push()
+	if reverse {
+		g.line(fmt.Sprintf("%s=$(( %s + 1 ))", slotVar, idxVar))
+		g.line(fmt.Sprintf("eval \"%s=\\$%s_${%s}\"", curVar, valuePrefix, slotVar))
+	}
 	args := []string{fmt.Sprintf("\"$%s\"", varName), fmt.Sprintf("\"$%s\"", curVar)}
 	if g.callbackSupportsReturnSlot(me.Args[0]) {
 		g.emitCommandIntoVar(retVar, me.Pos, fn, args)
@@ -3270,14 +3345,23 @@ func (g *Generator) genReduceFunctionLetDecl(varName, sourceName string, me *ast
 		}
 	} else {
 		if accIsObject {
-			return fmt.Errorf("reduce() object accumulator stored callbacks must be Besht function values")
+			return fmt.Errorf("%s() object accumulator stored callbacks must be Besht function values", me.Method)
 		}
 		g.line(fmt.Sprintf("%s=$(%s=; %s %s)", varName, returnSlotVar, fn, strings.Join(args, " ")))
 	}
+	if reverse {
+		g.line(fmt.Sprintf("%s=$(( %s - 1 ))", idxVar, idxVar))
+	}
 	g.pop()
-	g.line("done << " + heredocTag)
-	g.line("$(printf '" + "%s" + "\\n' " + recvArg + ")")
-	g.line(heredocTag)
+	if reverse {
+		g.line("done")
+		g.pop()
+		g.line("fi")
+	} else {
+		g.line("done << " + heredocTag)
+		g.line("$(printf '" + "%s" + "\\n' " + recvArg + ")")
+		g.line(heredocTag)
+	}
 	return nil
 }
 
@@ -5343,7 +5427,7 @@ func (g *Generator) genReturn(s *ast.ReturnStmt) error {
 			if ident, ok := s.Value.(*ast.IdentExpr); ok && ident.Name == reduceCtx.accParam {
 				return nil
 			}
-			return fmt.Errorf("reduce() object accumulator callbacks must return the accumulator")
+			return fmt.Errorf("%s() object accumulator callbacks must return the accumulator", reduceCtx.method)
 		}
 		val, err := g.genExprRHS(s.Value, nil)
 		if err != nil {
@@ -9214,7 +9298,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 					}
 				}
 				return &ast.Type{Kind: ast.TypeList, Elem: typeString}
-			case "reduce":
+			case "reduce", "reduceRight":
 				if len(e.Args) == 2 {
 					return g.inferReceiverType(e.Args[1])
 				}
@@ -10035,8 +10119,8 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 	case "filter":
 		return g.genListFilter(recv, e)
 
-	case "reduce":
-		return "", fmt.Errorf("reduce() must be used in a let/const declaration")
+	case "reduce", "reduceRight":
+		return "", fmt.Errorf("%s() must be used in a let/const declaration", e.Method)
 
 	case "forEach":
 		return "", fmt.Errorf("forEach() must be used as a statement")

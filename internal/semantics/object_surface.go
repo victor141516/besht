@@ -276,7 +276,7 @@ func (v *objectSurfaceValidator) expr(expr ast.Expression) error {
 		if err := v.expr(e.Receiver); err != nil {
 			return err
 		}
-		if e.Method == "reduce" && len(e.Args) >= 2 {
+		if isObjectSurfaceReduceMethod(e.Method) && len(e.Args) >= 2 {
 			if arrow, ok := e.Args[0].(*ast.ArrowExpr); ok {
 				if err := v.expr(e.Args[1]); err != nil {
 					return err
@@ -421,9 +421,13 @@ func (v *objectSurfaceValidator) isObjectValue(expr ast.Expression) bool {
 			return v.classStaticObjects[ident.Name+"."+e.Property]
 		}
 	case *ast.MethodCallExpr:
-		return e.Method == "reduce" && len(e.Args) >= 2 && v.isObjectValue(e.Args[1])
+		return isObjectSurfaceReduceMethod(e.Method) && len(e.Args) >= 2 && v.isObjectValue(e.Args[1])
 	}
 	return false
+}
+
+func isObjectSurfaceReduceMethod(method string) bool {
+	return method == "reduce" || method == "reduceRight"
 }
 
 func collectObjectSurfaceFunctionReturns(stmts []ast.Statement) map[string]bool {
@@ -523,7 +527,7 @@ func (v *objectSurfaceValidator) hasUnsupportedObjectValue(expr ast.Expression) 
 			return v.classStaticUnsupportedObjects[ident.Name+"."+e.Property]
 		}
 	case *ast.MethodCallExpr:
-		return e.Method == "reduce" && len(e.Args) >= 2 && v.hasUnsupportedObjectValue(e.Args[1])
+		return isObjectSurfaceReduceMethod(e.Method) && len(e.Args) >= 2 && v.hasUnsupportedObjectValue(e.Args[1])
 	}
 	return false
 }

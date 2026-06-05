@@ -1,0 +1,21 @@
+const nums = [1, 2, 3]
+const order = nums.reduceRight((acc, n) => acc + n.toString(), "")
+const lines = nums.reduceRight((acc, n) => [...acc, "#".repeat(n)], [] as string[]).join("|")
+const product = nums.reduceRight((acc, n) => {
+  return acc * 10 + n
+}, 0)
+
+function add(acc: string, item: string): string {
+  return acc + item
+}
+
+const letters = ["a", "b", "c"]
+const stored = letters.reduceRight(add, "")
+const empty: string[] = []
+const emptyResult = empty.reduceRight((acc, n) => acc + n, "seed")
+
+console.log(order)
+console.log(lines)
+console.log(product)
+console.log(stored)
+console.log(emptyResult)

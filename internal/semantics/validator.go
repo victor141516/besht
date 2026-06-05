@@ -857,17 +857,17 @@ func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 				return &SemanticError{Pos: arrow.Pos, Message: "arrow callbacks take 1 or 2 parameters"}
 			}
 		}
-	case "reduce":
+	case "reduce", "reduceRight":
 		if len(e.Args) != 2 {
-			return &SemanticError{Pos: e.Pos, Message: "reduce() takes 2 arguments: callback and initial value"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 2 arguments: callback and initial value"}
 		}
 		arrow, ok := callbackArrowExpr(e.Args[0])
 		if !ok && !c.isCallbackValue(e.Args[0]) {
-			return &SemanticError{Pos: e.Pos, Message: "reduce() callback must be an arrow expression"}
+			return &SemanticError{Pos: e.Pos, Message: e.Method + "() callback must be an arrow expression"}
 		}
 		if ok {
 			if len(arrow.Params) != 2 {
-				return &SemanticError{Pos: arrow.Pos, Message: "reduce() callback must take 2 parameters (accumulator, current)"}
+				return &SemanticError{Pos: arrow.Pos, Message: e.Method + "() callback must take 2 parameters (accumulator, current)"}
 			}
 		}
 	default:
@@ -1122,7 +1122,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 				return &ast.Type{Kind: ast.TypeList, Elem: strType}
 			case "pop", "shift", "push", "unshift", "concat", "slice", "filter", "reverse", "sort", "fill":
 				return recvType
-			case "reduce":
+			case "reduce", "reduceRight":
 				if len(e.Args) == 2 {
 					return c.semanticExprType(e.Args[1])
 				}

@@ -2242,6 +2242,18 @@ let lines = nums.reduce((acc, n) => ([...acc, "#".repeat(n)]), [] as string[]).j
 	assertContains(t, out, `NR>1{printf "\n"}`)
 }
 
+func TestCodegen_ListReduceRightStagesReverseLoop(t *testing.T) {
+	out := compile(t, `let nums = [1, 2, 3]
+let order = nums.reduceRight((acc, n) => acc + n.toString(), "")`)
+	assertContains(t, out, `_count=0`)
+	assertContains(t, out, `while [ "$_reduce_`)
+	assertContains(t, out, ` -ge 0 ]; do`)
+	assertContains(t, out, `eval "_cb_`)
+	assertContains(t, out, `_value_${_reduce_`)
+	assertContains(t, out, `order="${order}`)
+	assertNotContains(t, out, `printf '%s\n' "$nums" | while IFS= read -r`)
+}
+
 func TestCodegen_CallbackReceiversAreQuoted(t *testing.T) {
 	out := compile(t, `let items = ["red apple", "green pear"]
 let mapped = items.map(x => x + "!")
