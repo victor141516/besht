@@ -79,6 +79,7 @@ declare namespace Object {
     function keys(value: object): string[]
     function values(value: object): string[]
     function entries(value: object): string[][]
+    function fromEntries(entries: string[][]): object
     function hasOwn(value: object, key: string): boolean
     function assign(target: object): object
     function assign(target: object, source: object): object

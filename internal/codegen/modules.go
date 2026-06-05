@@ -807,7 +807,7 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}}
-		case "Object.assign":
+		case "Object.assign", "Object.fromEntries":
 			return &ast.Type{Kind: ast.TypeObject}
 		case "Object.hasOwn", "Boolean", "Array.isArray", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
 			return &ast.Type{Kind: ast.TypeBoolean}
@@ -1397,6 +1397,8 @@ func newModuleGenerator(modName string, importMap, importVarMap map[string]strin
 	g.objAliasMap = make(map[string]objectRef)
 	g.objFieldsMap = make(map[string][]string)
 	g.objPropTypeMap = make(map[string]*ast.Type)
+	g.objectConstMap = make(map[string]string)
+	g.objectConstUnsafe = make(map[string]bool)
 	g.staticObjectMap = make(map[string][]string)
 	g.staticNullishMap = make(map[string]bool)
 	g.staticObjectEntryMap = make(map[string][]string)

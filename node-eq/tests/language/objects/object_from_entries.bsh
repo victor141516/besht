@@ -1,0 +1,22 @@
+let user = Object.fromEntries([["name", "Ada"], ["active", "true"], ["name", "Grace"]])
+console.log(Object.keys(user).join(","))
+console.log(user.name)
+console.log(Object.values(user).join(","))
+
+let base = { id: "1", name: "Ada" }
+let clone = Object.fromEntries(Object.entries(base))
+console.log(Object.keys(clone).join(","))
+console.log(clone.name)
+
+let entries = Object.entries({ city: "Paris", role: "admin" })
+let copied = Object.fromEntries(entries)
+console.log(Object.entries(copied)[1][0] + "=" + Object.entries(copied)[1][1])
+
+let dynamicKey = "ci"
+for (let i = 0; i < 1; i++) {
+    dynamicKey = dynamicKey + "ty"
+}
+let dynamicEntries = [[dynamicKey, "Lyon"], ["role", "guest"]]
+let dynamicCopy = Object.fromEntries(dynamicEntries)
+console.log(Object.keys(dynamicCopy).join(","))
+console.log(dynamicCopy[dynamicKey] + ":" + dynamicCopy.role)

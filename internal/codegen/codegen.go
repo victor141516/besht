@@ -1771,6 +1771,15 @@ func (g *Generator) genLetDecl(s *ast.LetDecl) error {
 		return nil
 	}
 
+	if call, ok := objectFromEntriesCall(s.Value); ok {
+		ref, err := g.genObjectFromEntriesValue(call, varName)
+		if err != nil {
+			return err
+		}
+		g.bindObjectResult(varName, s.Name, ref)
+		return nil
+	}
+
 	if ok, err := g.genFetchResponseBinding(varName, s.Value); ok || err != nil {
 		return err
 	}
@@ -2004,6 +2013,15 @@ func objectAssignCall(expr ast.Expression) (*ast.BuiltinCallExpr, bool) {
 	return call, ok && call.Name == "Object.assign"
 }
 
+func objectFromEntriesCall(expr ast.Expression) (*ast.BuiltinCallExpr, bool) {
+	as, ok := expr.(*ast.AsExpr)
+	if ok {
+		return objectFromEntriesCall(as.Expr)
+	}
+	call, ok := expr.(*ast.BuiltinCallExpr)
+	return call, ok && call.Name == "Object.fromEntries"
+}
+
 func objectLiteralHasSpread(obj *ast.ObjectLit) bool {
 	for _, field := range obj.Fields {
 		if field.Spread != nil {
@@ -2095,6 +2113,10 @@ func (g *Generator) genObjectLiteralBinding(varName string, obj *ast.ObjectLit) 
 func (g *Generator) genObjectExprRef(expr ast.Expression) (objectRef, bool, error) {
 	if call, ok := objectAssignCall(expr); ok {
 		ref, err := g.genObjectAssignValue(call, "")
+		return ref, err == nil, err
+	}
+	if call, ok := objectFromEntriesCall(expr); ok {
+		ref, err := g.genObjectFromEntriesValue(call, "")
 		return ref, err == nil, err
 	}
 	if obj, ok := unwrapAsExpr(expr).(*ast.ObjectLit); ok && objectLiteralHasSpread(obj) {
@@ -2268,6 +2290,112 @@ func (g *Generator) genObjectAssignSources(targetRef objectRef, sources []ast.Ex
 
 	targetRef.UnsupportedScalarValues = g.objectRefHasUnsupportedScalarValues(targetRef)
 	return targetRef, nil
+}
+
+func (g *Generator) initEmptyObjectBinding(varName string) {
+	if g.objFieldsMap == nil {
+		g.objFieldsMap = make(map[string][]string)
+	}
+	if g.objPropTypeMap == nil {
+		g.objPropTypeMap = make(map[string]*ast.Type)
+	}
+	if g.objectConstMap == nil {
+		g.objectConstMap = make(map[string]string)
+	}
+	if g.staticObjectMap == nil {
+		g.staticObjectMap = make(map[string][]string)
+	}
+	if g.staticObjectEntryMap == nil {
+		g.staticObjectEntryMap = make(map[string][]string)
+	}
+	if g.staticObjectValueMap == nil {
+		g.staticObjectValueMap = make(map[string][]string)
+	}
+	if g.staticNullishMap == nil {
+		g.staticNullishMap = make(map[string]bool)
+	}
+	if g.varTypeMap == nil {
+		g.varTypeMap = make(map[string]*ast.Type)
+	}
+	g.deleteObjectStaticValues(varName)
+	g.objFieldsMap[varName] = nil
+	g.staticObjectMap[varName] = nil
+	delete(g.staticObjectEntryMap, varName)
+	delete(g.staticObjectValueMap, varName)
+	g.staticNullishMap[varName] = false
+	g.varTypeMap[varName] = &ast.Type{Kind: ast.TypeObject}
+	g.line(fmt.Sprintf("%s=%s", varName, shellQuote(varName)))
+	g.emitObjectKeysInit(varName, nil)
+}
+
+func (g *Generator) genObjectFromEntriesValue(call *ast.BuiltinCallExpr, preferred string) (objectRef, error) {
+	if len(call.Args) != 1 {
+		return objectRef{}, fmt.Errorf("Object.fromEntries() takes 1 argument")
+	}
+	name := preferred
+	if name == "" {
+		name = g.nextObjectTemp(call.Pos)
+	}
+	g.initEmptyObjectBinding(name)
+	ref := objectRef{StaticName: name, RootName: name}
+
+	rows, rowsOK := g.staticObjectEntriesBuiltinValues(call.Args[0])
+	if !rowsOK {
+		rows, rowsOK = g.staticNestedListRows(call.Args[0])
+	}
+	if rowsOK {
+		fields := make([]string, 0, len(rows))
+		g.deleteObjectStaticValues(name)
+		for _, row := range rows {
+			key, value, ok := strings.Cut(row, "\037")
+			if !ok {
+				return objectRef{}, fmt.Errorf("Object.fromEntries() requires [key, value] entry rows")
+			}
+			if err := validateStaticObjectKey(key); err != nil {
+				return objectRef{}, err
+			}
+			fields = appendUniqueString(fields, key)
+			g.objPropTypeMap[name+"."+key] = typeString
+			g.objectConstMap[name+"."+key] = shellQuote(value)
+			g.line(fmt.Sprintf("%s=%s", objectPropVar(name, key), shellQuote(value)))
+		}
+		g.objFieldsMap[name] = fields
+		g.staticObjectMap[name] = fields
+		g.recomputeStaticObjectLists(name)
+		g.emitObjectKeysInit(name, fields)
+		return ref, nil
+	}
+
+	entries, err := g.genExprValue(call.Args[0])
+	if err != nil {
+		return objectRef{}, err
+	}
+	entriesVar := fmt.Sprintf("_objentries_%d_%d", call.Pos.Line, call.Pos.Column)
+	targetVar := fmt.Sprintf("_objt_%d_%d", call.Pos.Line, call.Pos.Column)
+	keyVar := fmt.Sprintf("_objk_%d_%d", call.Pos.Line, call.Pos.Column)
+	valueVar := fmt.Sprintf("_objv_%d_%d", call.Pos.Line, call.Pos.Column)
+	heredoc := fmt.Sprintf("__BESHT_FROM_ENTRIES_%d_%d", call.Pos.Line, call.Pos.Column)
+	g.line(fmt.Sprintf("%s=%s", entriesVar, entries))
+	g.line(fmt.Sprintf("if [ -n \"$%s\" ]; then", entriesVar))
+	g.push()
+	g.line(fmt.Sprintf("%s=%s", targetVar, shellQuote(name)))
+	g.line(computedKeyValidation(targetVar))
+	g.line(fmt.Sprintf("while IFS=\"$(printf '\\037')\" read -r %s %s; do", keyVar, valueVar))
+	g.push()
+	g.line(computedKeyValidation(keyVar))
+	g.line("eval \"_obj_${" + targetVar + "}_${" + keyVar + "}=\\\"\\$" + valueVar + "\\\"\"")
+	g.line("eval \"_bst_obj_keys=\\\"\\${_objkeys_${" + targetVar + "}}\\\"\"")
+	g.line("case \" $_bst_obj_keys \" in *\" ${" + keyVar + "} \"*) ;; *) _bst_obj_keys=\"${_bst_obj_keys} ${" + keyVar + "}\"; eval \"_objkeys_${" + targetVar + "}=\\\"\\$_bst_obj_keys\\\"\" ;; esac")
+	g.pop()
+	g.line("done <<" + heredoc)
+	g.raw(fmt.Sprintf("$%s\n", entriesVar))
+	g.raw(heredoc + "\n")
+	g.pop()
+	g.line("fi")
+	delete(g.staticObjectMap, name)
+	delete(g.staticObjectEntryMap, name)
+	delete(g.staticObjectValueMap, name)
+	return ref, nil
 }
 
 func (g *Generator) genObjectLiteralRefInit(target objectRef, obj *ast.ObjectLit) error {
@@ -3165,6 +3293,15 @@ func (g *Generator) genAssignment(s *ast.Assignment) error {
 
 	if call, ok := objectAssignCall(s.Value); ok {
 		ref, err := g.genObjectAssignValue(call, varName)
+		if err != nil {
+			return err
+		}
+		g.bindObjectResult(varName, s.Name, ref)
+		return nil
+	}
+
+	if call, ok := objectFromEntriesCall(s.Value); ok {
+		ref, err := g.genObjectFromEntriesValue(call, varName)
 		if err != nil {
 			return err
 		}
@@ -5459,8 +5596,13 @@ func (g *Generator) genDiscardExprStmt(expr ast.Expression) error {
 
 func (g *Generator) genBuiltinStmt(e *ast.BuiltinCallExpr) (string, error) {
 	switch e.Name {
-	case "Object.assign":
-		_, err := g.genObjectAssignValue(e, "")
+	case "Object.assign", "Object.fromEntries":
+		var err error
+		if e.Name == "Object.assign" {
+			_, err = g.genObjectAssignValue(e, "")
+		} else {
+			_, err = g.genObjectFromEntriesValue(e, "")
+		}
 		return "", err
 	case "console.log":
 		if len(e.Args) == 1 && g.isObjectArg(e.Args[0]) {
@@ -8287,6 +8429,13 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 		}
 		return objectRefRuntimeValue(ref), nil
 
+	case "Object.fromEntries":
+		ref, err := g.genObjectFromEntriesValue(e, "")
+		if err != nil {
+			return "", err
+		}
+		return objectRefRuntimeValue(ref), nil
+
 	case "JSON.parse":
 		return g.genJSONParse(e.Args[0])
 
@@ -8724,7 +8873,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: typeString}}
-		case "Object.assign":
+		case "Object.assign", "Object.fromEntries":
 			return &ast.Type{Kind: ast.TypeObject}
 		case "Number.parseInt", "Number.parseFloat":
 			return typeNumber

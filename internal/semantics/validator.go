@@ -640,7 +640,7 @@ func (c *Validator) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: "Array.from() takes 1 argument"}
 		}
-	case "Object.keys", "Object.values", "Object.entries":
+	case "Object.keys", "Object.values", "Object.entries", "Object.fromEntries":
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
 		}
@@ -1021,7 +1021,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 			return listStrType
 		case "Object.entries":
 			return &ast.Type{Kind: ast.TypeList, Elem: listStrType}
-		case "Object.assign":
+		case "Object.assign", "Object.fromEntries":
 			return &ast.Type{Kind: ast.TypeObject}
 		case "JSON.parse":
 			return &ast.Type{Kind: ast.TypeJSON}

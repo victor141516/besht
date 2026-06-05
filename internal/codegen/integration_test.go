@@ -343,6 +343,9 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "function entries(value: object): string[][]") {
 		t.Fatalf("generated stdlib should declare Object.entries(value)")
 	}
+	if !strings.Contains(stdlib.Declarations, "function fromEntries(entries: string[][]): object") {
+		t.Fatalf("generated stdlib should declare Object.fromEntries(entries)")
+	}
 	if !strings.Contains(stdlib.Declarations, "function assign(target: object): object") {
 		t.Fatalf("generated stdlib should declare Object.assign(target)")
 	}
@@ -3384,6 +3387,53 @@ for (value in Object.values(user)) {
 	want := "3\n1,Ada,true\n1\nAda\ntrue\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectFromEntriesRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let user = Object.fromEntries([["name", "Ada"], ["active", "true"], ["name", "Grace"]])
+console.log(Object.keys(user).join(","))
+console.log(user.name)
+console.log(Object.values(user).join(","))
+let base = { id: 1, name: "Ada" }
+let clone = Object.fromEntries(Object.entries(base))
+console.log(Object.keys(clone).join(","))
+console.log(clone.name)
+let entries = Object.entries({ city: "Paris", role: "admin" })
+let copied = Object.fromEntries(entries)
+console.log(Object.entries(copied)[1][0] + "=" + Object.entries(copied)[1][1])
+let dynamicKey = "ci"
+for (let i = 0; i < 1; i++) {
+    dynamicKey = dynamicKey + "ty"
+}
+let dynamicEntries = [[dynamicKey, "Lyon"], ["role", "guest"]]
+let dynamicCopy = Object.fromEntries(dynamicEntries)
+console.log(Object.keys(dynamicCopy).join(","))
+console.log(dynamicCopy[dynamicKey] + ":" + dynamicCopy.role)
+console.log(Object.fromEntries([["direct", "ok"]]).direct)`)
+	want := "name,active\nGrace\nGrace,true\nid,name\nAda\nrole=admin\ncity,role\nLyon:guest\nok\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectFromEntriesValidatesDynamicKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "main.bsh", `let key = "bad-key"
+let entries = [[key, "value"]]
+let obj = Object.fromEntries(entries)
+console.log(Object.keys(obj).join(","))`)
+	outShell, err := codegen.CompileFile(path, codegen.Options{})
+	if err != nil {
+		t.Fatalf("compile object fromEntries key fixture: %v", err)
+	}
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(outShell), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	out, _ := exec.Command("sh", shPath).CombinedOutput()
+	if !strings.Contains(string(out), "[besht] invalid object key: bad-key") {
+		t.Fatalf("output: got %q, want invalid object key error", out)
 	}
 }
 

@@ -215,7 +215,7 @@ func (v *objectSurfaceValidator) expr(expr ast.Expression) error {
 			}
 		}
 	case *ast.BuiltinCallExpr:
-		if e.Name == "Object.keys" || e.Name == "Object.values" || e.Name == "Object.entries" || e.Name == "Object.hasOwn" || e.Name == "Object.assign" {
+		if e.Name == "Object.keys" || e.Name == "Object.values" || e.Name == "Object.entries" || e.Name == "Object.fromEntries" || e.Name == "Object.hasOwn" || e.Name == "Object.assign" {
 			wantArgs := 1
 			if e.Name == "Object.hasOwn" {
 				wantArgs = 2
@@ -228,6 +228,14 @@ func (v *objectSurfaceValidator) expr(expr ast.Expression) error {
 			}
 			if wantArgs > 0 && len(e.Args) != wantArgs {
 				return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes " + objectSurfaceArgCount(wantArgs)}
+			}
+			if e.Name == "Object.fromEntries" {
+				for _, arg := range e.Args {
+					if err := v.expr(arg); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			if v.isProcessEnvValue(e.Args[0]) || !v.isObjectValue(e.Args[0]) {
 				return &SemanticError{Pos: e.Pos, Message: e.Name + "() requires an object literal or named object"}
@@ -407,7 +415,7 @@ func (v *objectSurfaceValidator) isObjectValue(expr ast.Expression) bool {
 	case *ast.FnCallExpr:
 		return v.fnReturnObjects[e.Name]
 	case *ast.BuiltinCallExpr:
-		return e.Name == "Object.assign" && len(e.Args) >= 1
+		return (e.Name == "Object.assign" && len(e.Args) >= 1) || (e.Name == "Object.fromEntries" && len(e.Args) == 1)
 	case *ast.PropertyExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
 			return v.classStaticObjects[ident.Name+"."+e.Property]
@@ -450,6 +458,9 @@ func (v *objectSurfaceValidator) objectRootForExpr(expr ast.Expression) string {
 	case *ast.BuiltinCallExpr:
 		if e.Name == "Object.assign" && len(e.Args) >= 1 {
 			return v.objectRootForExpr(e.Args[0])
+		}
+		if e.Name == "Object.fromEntries" && len(e.Args) == 1 {
+			return ""
 		}
 	case *ast.PropertyExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok && v.classStaticObjects[ident.Name+"."+e.Property] {
@@ -503,6 +514,9 @@ func (v *objectSurfaceValidator) hasUnsupportedObjectValue(expr ast.Expression) 
 					return true
 				}
 			}
+		}
+		if e.Name == "Object.fromEntries" {
+			return false
 		}
 	case *ast.PropertyExpr:
 		if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
@@ -619,7 +633,7 @@ func objectSurfaceValueUnsupported(expr ast.Expression) bool {
 	case *ast.ListLit, *ast.ObjectLit, *ast.NewExpr, *ast.CmdExpr:
 		return true
 	case *ast.BuiltinCallExpr:
-		return value.Name == "Object.keys" || value.Name == "Object.values" || value.Name == "Object.entries" || value.Name == "Object.assign" || value.Name == "Array.from" || value.Name == "Array.of" || value.Name == "fetch"
+		return value.Name == "Object.keys" || value.Name == "Object.values" || value.Name == "Object.entries" || value.Name == "Object.assign" || value.Name == "Object.fromEntries" || value.Name == "Array.from" || value.Name == "Array.of" || value.Name == "fetch"
 	case *ast.MethodCallExpr:
 		switch value.Method {
 		case "map", "filter", "slice", "concat", "reverse", "push", "pop", "shift", "unshift", "readStdoutLines":
