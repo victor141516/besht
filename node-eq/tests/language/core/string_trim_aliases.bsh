@@ -1,0 +1,14 @@
+const text = "  hello  "
+
+console.log(text.trimLeft())
+console.log(text.trimRight())
+console.log(text.trimLeft().trimRight())
+
+let dynamic = "  bye  "
+while (true) {
+    dynamic = "  hello  "
+    break
+}
+
+console.log(dynamic.trimLeft())
+console.log(dynamic.trimRight())

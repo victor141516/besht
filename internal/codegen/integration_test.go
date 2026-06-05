@@ -3013,6 +3013,8 @@ console.log("hello".charAt(99))`)
 
 func TestIntegration_StaticStringTransformsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log("  hi  ".trim())
+console.log("  hi  ".trimLeft())
+console.log("  hi  ".trimRight())
 console.log("hello".toUpperCase())
 console.log("HELLO".toLowerCase())
 console.log("hello".slice(1, 4))
@@ -3024,7 +3026,7 @@ console.log("hello world".replace("world", "besht"))
 console.log("hello world".replaceAll("l", "L"))
 console.log("a.b.c".replaceAll(".", "!"))
 console.log("hello".concat(" ", "besht"))`)
-	want := "hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
+	want := "hi\nhi  \n  hi\nHELLO\nhello\nell\nell\nhahaha\n000hi\nhi...\nhello besht\nheLLo worLd\na!b!c\nhello besht\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -3047,6 +3049,8 @@ let spaced = "  hi  "
 let needle = "ell"
 console.log(greeting.toUpperCase())
 console.log(spaced.trim())
+console.log(spaced.trimLeft())
+console.log(spaced.trimRight())
 console.log(greeting.includes(needle))
 console.log(greeting.startsWith("he"))
 console.log(greeting.endsWith("lo"))
@@ -3057,7 +3061,7 @@ console.log(greeting.replace("ell", "ipp"))
 console.log(greeting.replaceAll("l", "L"))
 console.log(greeting.concat("!", needle))
 if (greeting.includes(needle)) console.log("yes")`)
-	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\n-1\nhippo\nheLLo\nhello!ell\nyes\n"
+	want := "HELLO\nhi\nhi  \n  hi\ntrue\ntrue\ntrue\n2\n3\n-1\nhippo\nheLLo\nhello!ell\nyes\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

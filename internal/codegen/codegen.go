@@ -9360,7 +9360,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		switch e.Method {
 		case "split":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
-		case "trim", "trimStart", "trimEnd", "toUpperCase", "toLowerCase",
+		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
 			"replace", "replaceAll", "slice", "substring", "at", "charAt", "concat", "padStart", "padEnd", "toString", "toFixed", "join":
 			return typeString
 		case "indexOf", "lastIndexOf", "localeCompare", "length":
@@ -9683,7 +9683,7 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	}
 	if !isStringMethod && !isListMethod && recvType == nil {
 		switch e.Method {
-		case "trim", "trimStart", "trimEnd", "toUpperCase", "toLowerCase",
+		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase",
 			"replace", "replaceAll", "split", "includes", "startsWith",
 			"endsWith", "indexOf", "lastIndexOf", "localeCompare", "slice", "substring", "at", "charAt", "padStart", "padEnd",
 			"repeat", "concat":
@@ -12298,6 +12298,12 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 	case "trimEnd":
 		return fmt.Sprintf("$(printf '%%s' %s | sed 's/[[:space:]]*$//')", ensureArgSafe(recv)), nil
 
+	case "trimLeft":
+		return fmt.Sprintf("$(printf '%%s' %s | sed 's/^[[:space:]]*//')", ensureArgSafe(recv)), nil
+
+	case "trimRight":
+		return fmt.Sprintf("$(printf '%%s' %s | sed 's/[[:space:]]*$//')", ensureArgSafe(recv)), nil
+
 	case "toUpperCase":
 		return fmt.Sprintf("$(printf '%%s' %s | tr '[:lower:]' '[:upper:]')", ensureArgSafe(recv)), nil
 
@@ -12676,6 +12682,16 @@ func (g *Generator) staticASCIIStringTransformValue(e *ast.MethodCallExpr) (stri
 	case "trimEnd":
 		if len(e.Args) != 0 {
 			return "", true, fmt.Errorf("trimEnd() takes no arguments")
+		}
+		return strings.TrimRightFunc(recv, isASCIIWhitespace), true, nil
+	case "trimLeft":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trimLeft() takes no arguments")
+		}
+		return strings.TrimLeftFunc(recv, isASCIIWhitespace), true, nil
+	case "trimRight":
+		if len(e.Args) != 0 {
+			return "", true, fmt.Errorf("trimRight() takes no arguments")
 		}
 		return strings.TrimRightFunc(recv, isASCIIWhitespace), true, nil
 	case "toUpperCase":

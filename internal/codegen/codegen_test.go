@@ -1727,6 +1727,8 @@ func TestCodegen_StaticStringTransforms(t *testing.T) {
 	out := compile(t, `let trimmed: string = "  hi  ".trim()
 let upper: string = "hello".toUpperCase()
 let lower: string = "HELLO".toLowerCase()
+let left: string = "  hi  ".trimLeft()
+let right: string = "  hi  ".trimRight()
 let sliced: string = "hello".slice(1, 4)
 let sub: string = "hello".substring(4, 1)
 let repeated: string = "ha".repeat(3)
@@ -1739,6 +1741,8 @@ let joined: string = "hello".concat(" ", "besht")`)
 	assertContains(t, out, `trimmed='hi'`)
 	assertContains(t, out, `upper='HELLO'`)
 	assertContains(t, out, `lower='hello'`)
+	assertContains(t, out, `left='hi  '`)
+	assertContains(t, out, `right='  hi'`)
 	assertContains(t, out, `sliced='ell'`)
 	assertContains(t, out, `sub='ell'`)
 	assertContains(t, out, `repeated='hahaha'`)
@@ -1761,12 +1765,16 @@ let spaced = "  hi  "
 let fill = "."
 let upper = greeting.toUpperCase()
 let trimmed = spaced.trim()
+let left = spaced.trimLeft()
+let right = spaced.trimRight()
 let padded = greeting.padStart(8, fill)
 let replaced = greeting.replace("ell", "ipp")
 let replacedAll = greeting.replaceAll("l", "L")
 let joined = greeting.concat(fill, "txt")`)
 	assertContains(t, out, `upper='HELLO'`)
 	assertContains(t, out, `trimmed='hi'`)
+	assertContains(t, out, `left='hi  '`)
+	assertContains(t, out, `right='  hi'`)
 	assertContains(t, out, `padded='...hello'`)
 	assertContains(t, out, `replaced='hippo'`)
 	assertContains(t, out, `replacedAll='heLLo'`)
@@ -1775,6 +1783,15 @@ let joined = greeting.concat(fill, "txt")`)
 	assertNotContains(t, out, `sed 's/^[[:space:]]`)
 	assertNotContains(t, out, `sed "s/`)
 	assertNotContains(t, out, `printf '%8s'`)
+}
+
+func TestCodegen_StringTrimAliasesFallback(t *testing.T) {
+	out := compile(t, `function clean(s: string) {
+    let left: string = s.trimLeft()
+    let right: string = s.trimRight()
+}`)
+	assertContains(t, out, `sed 's/^[[:space:]]*//'`)
+	assertContains(t, out, `sed 's/[[:space:]]*$//'`)
 }
 
 func TestCodegen_StaticStringTransformChains(t *testing.T) {
