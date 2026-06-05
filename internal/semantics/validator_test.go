@@ -363,29 +363,47 @@ let s: string = n.toString()`)
 }
 
 func TestValidator_PrimitiveToStringMethods(t *testing.T) {
+	mustCheck(t, `let out: string = "hello".toLocaleString()`)
 	mustCheck(t, `let s: string = "x"
 let out: string = s.toString()`)
+	mustCheck(t, `let s: string = "x"
+let out: string = s.toLocaleString()`)
+	mustCheck(t, `let n: number = 42
+let out: string = n.toLocaleString()`)
 	mustCheck(t, `let b: boolean = true
 let out: string = b.toString()`)
+	mustCheck(t, `let b: boolean = true
+let out: string = b.toLocaleString()`)
 	mustCheck(t, `try {
     $("false").run()
 } catch (code: status) {
-    let out: string = code.toString()
+    let out: string = code.toLocaleString()
 }`)
 }
 
 func TestValidator_PrimitiveToStringRejectsArguments(t *testing.T) {
 	expectError(t, `let s: string = "x"
 let out: string = s.toString("bad")`, "toString() takes no arguments")
+	expectError(t, `let s: string = "x"
+let out: string = s.toLocaleString("bad")`, "toLocaleString() takes no arguments")
 	expectError(t, `let n: number = 42
 let out: string = n.toString("bad")`, "toString() takes no arguments")
+	expectError(t, `let n: number = 42
+let out: string = n.toLocaleString("bad")`, "toLocaleString() takes no arguments")
 	expectError(t, `let b: boolean = true
 let out: string = b.toString("bad")`, "toString() takes no arguments")
+	expectError(t, `let b: boolean = true
+let out: string = b.toLocaleString("bad")`, "toLocaleString() takes no arguments")
 	expectError(t, `try {
     $("false").run()
 } catch (code: status) {
     let out: string = code.toString("bad")
 }`, "toString() takes no arguments")
+	expectError(t, `try {
+    $("false").run()
+} catch (code: status) {
+    let out: string = code.toLocaleString("bad")
+}`, "toLocaleString() takes no arguments")
 }
 
 func TestValidator_NumberParseIntOneAndTwoArgs(t *testing.T) {
@@ -611,11 +629,15 @@ let s: string = l.join(", ")`)
 func TestValidator_ListToString(t *testing.T) {
 	mustCheck(t, `let list: Array<string> = ["a", "b", "c"]
 let s: string = list.toString()`)
+	mustCheck(t, `let list: Array<string> = ["a", "b", "c"]
+let s: string = list.toLocaleString()`)
 }
 
 func TestValidator_ListToStringRejectsArguments(t *testing.T) {
 	expectError(t, `let list: Array<string> = ["a", "b"]
 let s: string = list.toString(",")`, "toString() takes no arguments")
+	expectError(t, `let list: Array<string> = ["a", "b"]
+let s: string = list.toLocaleString(",")`, "toLocaleString() takes no arguments")
 }
 
 func TestValidator_ListAt(t *testing.T) {

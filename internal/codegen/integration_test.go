@@ -1570,6 +1570,7 @@ func TestIntegration_NumberMethods(t *testing.T) {
 
 func TestIntegration_StaticNumberMethodsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log((42).toString())
+console.log((42).toLocaleString())
 console.log((3.14159).toFixed(2))
 console.log(Math.min(4, 2))
 console.log(Math.max(4, 2))
@@ -1581,7 +1582,7 @@ console.log(Math.sign(-3))
 console.log(Math.abs(-3))
 console.log(Math.pow(2, 3))
 console.log(Math.sqrt(9))`)
-	want := "42\n3.14\n2\n4\n3\n2\n3\n-3\n-1\n3\n8\n3\n"
+	want := "42\n42\n3.14\n2\n4\n3\n2\n3\n-3\n-1\n3\n8\n3\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -1811,10 +1812,11 @@ console.log(empty.length)`)
 
 func TestIntegration_ListToStringRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(["a", "b"].toString())
+console.log(["a", "b"].toLocaleString())
 let empty: string[] = []
 console.log(empty.toString())
 console.log(["alpha beta", "gamma delta"].toString())`)
-	want := "a,b\n\nalpha beta,gamma delta\n"
+	want := "a,b\na,b\n\nalpha beta,gamma delta\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

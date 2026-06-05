@@ -349,13 +349,13 @@ Array `flatMap(callback)` is a one-level scalar-array callback slice built as `m
 
 Array `.at()` must return the nullish sentinel for out-of-range indexes so `items.at(99) ?? fallback` behaves like JavaScript `undefined ?? fallback`; do not collapse missing elements to an empty string.
 
-Static primitive `.toString()` and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep runtime formatting.
+Static primitive `.toString()`, `.toLocaleString()`, and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep runtime formatting. Primitive `toLocaleString()` is a compact alias for the existing string, number, boolean, and status formatting paths and does not add locale-specific number/date formatting.
 
 Static `String(value)` calls fold primitives, null/undefined, scalar arrays, object literals, and Set literals to JS-compatible display strings. Dynamic booleans render `true`/`false`, dynamic scalar arrays reuse comma-join lowering, object-producing expressions such as `Object.assign(...)` must still emit their side effects before the returned label becomes `"[object Object]"`, and direct `String(JSONValue)` remains unsupported in favor of scalar extraction or `JSON.stringify()`.
 
 Static `??` expressions compile to the selected side when the left operand is provably nullish or non-nullish. Preserve `""`, `0`, and `false` as non-nullish; control-flow assigned variables and optional/dynamic nullish sources must keep the sentinel path.
 
-Static numeric API receivers of `.toString()`, such as `Math.round(2.7).toString()`, `Number.parseInt("42").toString()`, and `parseInt("42").toString()`, compile to quoted constants; dynamic receivers keep runtime formatting.
+Static numeric API receivers of `.toString()` or `.toLocaleString()`, such as `Math.round(2.7).toString()`, `Number.parseInt("42").toLocaleString()`, and `parseInt("42").toString()`, compile to quoted constants; dynamic receivers keep runtime formatting.
 
 `Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, and `Math.SQRT2` parse as static numeric literals. Keep Math methods such as `Math.min(...)` on the existing method-call path.
 
@@ -372,7 +372,7 @@ Variables bound to static string literals may fold `.length` to a numeric consta
 
 Static scalar equality comparisons, including equality comparisons against variables bound to static string literals, and static numeric relational comparisons compile to constants, including comparisons whose operands are themselves static folded arithmetic, string methods/transforms, `Math.*`, parseable `Number.parseInt()`/`Number.parseFloat()` calls, or global `parseInt()`/`parseFloat()` aliases. Dynamic relational comparisons over compiler-known integer expressions compile to POSIX `[ "$n" -lt 3 ]` style tests; floats, function results, command output, annotations-only numbers, and unknown values keep the `awk` path. Dynamic equality must keep the `_bst_left`/`_bst_right` binding block because direct `[ $(fn) = value ]` breaks POSIX argument parsing for spaces and newlines.
 
-Variables bound to static numeric expressions may fold in arithmetic, numeric comparisons, unary numeric expressions, numeric `.toString()`/`.toFixed()`, and static `Math.*` calls. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
+Variables bound to static numeric expressions may fold in arithmetic, numeric comparisons, unary numeric expressions, numeric `.toString()`/`.toLocaleString()`/`.toFixed()`, and static `Math.*` calls. Do not fold variables assigned inside control flow because later loop iterations or branch-dependent assignments can make the initial value stale.
 
 ### Variable Name Mangling
 
@@ -545,7 +545,9 @@ let bodyAgain: string = response.text() // reuses stored response text
 
 // Type conversion
 let s: string = count.toString()
+let sl: string = count.toLocaleString()
 let b: string = flag.toString() // true or false
+let bl: string = flag.toLocaleString()
 let label: string = String(["a", "b"]) // "a,b"
 let n: number = Number.parseInt(s)
 let n10: number = Number.parseInt(s, 10)
@@ -850,8 +852,10 @@ let sg: number = Math.sign(-5)      // static literal → -1
 let pw: number = Math.pow(2, 8)     // static literals → 256
 let sq: number = Math.sqrt(16)      // static literal → 4
 let ns: string = count.toString()
+let nls: string = count.toLocaleString()
 let nv: number = count.valueOf()
 let bs: string = flag.toString()    // true or false
+let bls: string = flag.toLocaleString()
 let bv: boolean = flag.valueOf()
 let fixed: string = price.toFixed(2)
 
@@ -900,6 +904,7 @@ let prepended: string[] = files.unshift("first.txt")
 let popped: string[] = files.pop()
 let joined: string = files.join(", ")
 let arrayText: string = files.toString() // scalar arrays only; same as files.join(",")
+let arrayLocaleText: string = files.toLocaleString() // same scalar-array comma join
 let merged: string[] = files.concat(other)
 let rev: string[] = files.reverse()
 let revCopy: string[] = files.toReversed()
@@ -1124,7 +1129,7 @@ Module rewriting must stay lexical-scope aware: `rewriteFnCalls` qualifies real 
 
 **String runtime helpers are lazy.** `_bst_starts_with`, `_bst_ends_with`, and `_bst_includes` definitions belong in the preamble only when the generated body actually calls those helpers. Generate the body first (or otherwise track helper use before assembling the preamble) for single-file, bundled, and split output. In bundled module output, emit the union of helpers needed by all modules near the top-level preamble. In split output, emit helpers per generated file only when that module body needs them. Preserve the conditional entry-file POSIX self-check behavior. Array `.includes()` is separate: it uses `grep -qxF` and must not mark `_bst_includes` as needed.
 
-**Dynamic `items.join(sep)` and scalar `items.toString()` use awk, not `paste -sd`.** Multi-character separators for dynamic joins require awk since `paste -sd` only uses the first character of the delimiter. Static scalar array literals and variables bound to them fold to quoted constants when elements contain no newlines and the separator is static. Scalar array `toString()` reuses the same join lowering with `,` as the separator and does not implement JavaScript nested-array flattening for `string[][]` or packed rows. The dynamic generated join shape is: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
+**Dynamic `items.join(sep)` and scalar `items.toString()`/`items.toLocaleString()` use awk, not `paste -sd`.** Multi-character separators for dynamic joins require awk since `paste -sd` only uses the first character of the delimiter. Static scalar array literals and variables bound to them fold to quoted constants when elements contain no newlines and the separator is static. Scalar array `toString()` and `toLocaleString()` reuse the same join lowering with `,` as the separator and do not implement JavaScript nested-array flattening for `string[][]` or packed rows. The dynamic generated join shape is: `awk -v s=', ' 'NR>1{printf s}{printf "%s",$0}'`.
 
 **AWK `OFMT="%.17g"` is set in all arithmetic BEGIN blocks.** This matches JavaScript double-precision output for division results (e.g., `72.66666666666667` instead of `72.6667`).
 

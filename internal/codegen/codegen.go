@@ -8024,9 +8024,9 @@ func (g *Generator) staticStringFragment(expr ast.Expression) (string, bool, err
 			}
 			return "false", true, nil
 		}
-		if e.Method == "toString" {
+		if e.Method == "toString" || e.Method == "toLocaleString" {
 			if len(e.Args) != 0 {
-				return "", true, fmt.Errorf("toString() takes no arguments")
+				return "", true, fmt.Errorf("%s() takes no arguments", e.Method)
 			}
 			if value, ok, err := g.staticStringFragment(e.Receiver); ok || err != nil {
 				return value, ok, err
@@ -9533,7 +9533,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		case "split":
 			return &ast.Type{Kind: ast.TypeList, Elem: typeString}
 		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase", "toLocaleUpperCase", "toLocaleLowerCase",
-			"replace", "replaceAll", "slice", "substring", "substr", "at", "charAt", "concat", "padStart", "padEnd", "toString", "valueOf", "toFixed", "join":
+			"replace", "replaceAll", "slice", "substring", "substr", "at", "charAt", "concat", "padStart", "padEnd", "toString", "toLocaleString", "valueOf", "toFixed", "join":
 			return typeString
 		case "indexOf", "lastIndexOf", "localeCompare", "length":
 			return typeNumber
@@ -9838,15 +9838,15 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 	if e.Method == "valueOf" && (isStringMethod || isNumberMethod || isBooleanMethod || isStatusMethod) {
 		return recv, nil
 	}
-	if e.Method == "toString" && (isStringMethod || isBooleanMethod || isStatusMethod) {
+	if (e.Method == "toString" || e.Method == "toLocaleString") && (isStringMethod || isBooleanMethod || isStatusMethod) {
 		if isBooleanMethod {
 			return fmt.Sprintf("$(if [ %s = 1 ]; then printf true; else printf false; fi)", stripQuotes(recv)), nil
 		}
 		return fmt.Sprintf("$(printf '%%s' %s)", recv), nil
 	}
-	if isNumberMethod || (recvType == nil && (e.Method == "toString" || e.Method == "toFixed")) {
+	if isNumberMethod || (recvType == nil && (e.Method == "toString" || e.Method == "toLocaleString" || e.Method == "toFixed")) {
 		switch e.Method {
-		case "toString":
+		case "toString", "toLocaleString":
 			return fmt.Sprintf("$(printf '%%s' %s)", recv), nil
 		case "valueOf":
 			return recv, nil
@@ -9867,7 +9867,7 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 		case "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase", "toLocaleUpperCase", "toLocaleLowerCase",
 			"replace", "replaceAll", "split", "includes", "startsWith",
 			"endsWith", "indexOf", "lastIndexOf", "localeCompare", "slice", "substring", "substr", "at", "charAt", "padStart", "padEnd",
-			"repeat", "concat", "valueOf":
+			"repeat", "concat", "valueOf", "toLocaleString":
 			isStringMethod = true
 		}
 	}
@@ -9910,9 +9910,9 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 		return "", false, nil
 	}
 	switch e.Method {
-	case "toString":
+	case "toString", "toLocaleString":
 		if len(e.Args) != 0 {
-			return "", true, fmt.Errorf("toString() takes no arguments")
+			return "", true, fmt.Errorf("%s() takes no arguments", e.Method)
 		}
 		return shellQuote(formatStaticNumber(value)), true, nil
 	case "valueOf":
@@ -9939,7 +9939,7 @@ func (g *Generator) genStaticNumberMethod(e *ast.MethodCallExpr) (string, bool, 
 }
 
 func (g *Generator) genStaticToStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	if e.Method != "toString" {
+	if e.Method != "toString" && e.Method != "toLocaleString" {
 		return "", false, nil
 	}
 	value, ok, err := g.staticStringFragment(e)
@@ -9950,11 +9950,11 @@ func (g *Generator) genStaticToStringMethod(e *ast.MethodCallExpr) (string, bool
 }
 
 func (g *Generator) genStaticNumericToStringMethod(e *ast.MethodCallExpr) (string, bool, error) {
-	if e.Method != "toString" {
+	if e.Method != "toString" && e.Method != "toLocaleString" {
 		return "", false, nil
 	}
 	if len(e.Args) != 0 {
-		return "", true, fmt.Errorf("toString() takes no arguments")
+		return "", true, fmt.Errorf("%s() takes no arguments", e.Method)
 	}
 	value, ok, err := g.staticNumericStringValue(e.Receiver)
 	if err != nil || !ok {
@@ -10271,9 +10271,9 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 		}
 		return g.genListJoin(recv, e, stripQuotes(a0)), nil
 
-	case "toString":
+	case "toString", "toLocaleString":
 		if len(e.Args) != 0 {
-			return "", fmt.Errorf("toString() takes no arguments")
+			return "", fmt.Errorf("%s() takes no arguments", e.Method)
 		}
 		return g.genListJoin(recv, e, ","), nil
 
@@ -10474,9 +10474,9 @@ func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool
 			return "", false, nil
 		}
 		return shellQuote(strings.Join(values, sep)), true, nil
-	case "toString":
+	case "toString", "toLocaleString":
 		if len(e.Args) != 0 {
-			return "", true, fmt.Errorf("toString() takes no arguments")
+			return "", true, fmt.Errorf("%s() takes no arguments", e.Method)
 		}
 		return shellQuote(strings.Join(values, ",")), true, nil
 	default:

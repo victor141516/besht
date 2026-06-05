@@ -1,0 +1,13 @@
+console.log("hello".toLocaleString())
+console.log((42).toLocaleString())
+console.log(true.toLocaleString())
+console.log(false.toLocaleString())
+console.log(["a", "b", "c"].toLocaleString())
+
+let dynamic = "bye"
+while (true) {
+    dynamic = "hello"
+    break
+}
+
+console.log(dynamic.toLocaleString())

@@ -552,17 +552,23 @@ let s: string = n.toString()
 func TestCodegen_PrimitiveToString(t *testing.T) {
 	out := compile(t, `let s: string = "x"
 let ss: string = s.toString()
+let localeS: string = s.toLocaleString()
+let localeN: string = (40 + 2).toLocaleString()
 let t: boolean = true
 let ts: string = t.toString()
+let localeT: string = t.toLocaleString()
 let f: boolean = false
 let fs: string = f.toString()
 try {
     $("false").run()
 } catch (code: status) {
-    let cs: string = code.toString()
+    let cs: string = code.toLocaleString()
 }`)
 	assertContains(t, out, `ss='x'`)
+	assertContains(t, out, `localeS='x'`)
+	assertContains(t, out, `localeN='42'`)
 	assertContains(t, out, `ts=$(if [ $t = 1 ]; then printf true; else printf false; fi)`)
+	assertContains(t, out, `localeT=$(if [ $t = 1 ]; then printf true; else printf false; fi)`)
 	assertContains(t, out, `fs=$(if [ $f = 1 ]; then printf true; else printf false; fi)`)
 	assertContains(t, out, `cs=$(printf '%s' "$code")`)
 }
@@ -2000,8 +2006,10 @@ func TestCodegen_StaticListLiteralJoin(t *testing.T) {
 }
 
 func TestCodegen_StaticListLiteralToString(t *testing.T) {
-	out := compile(t, `let s: string = ["a", "b", "c"].toString()`)
+	out := compile(t, `let s: string = ["a", "b", "c"].toString()
+let locale: string = ["a", "b", "c"].toLocaleString()`)
 	assertContains(t, out, `s='a,b,c'`)
+	assertContains(t, out, `locale='a,b,c'`)
 	assertNotContains(t, out, `awk -v s=','`)
 }
 

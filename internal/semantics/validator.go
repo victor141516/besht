@@ -739,7 +739,7 @@ func (c *Validator) checkMethodArity(e *ast.MethodCallExpr) error {
 	case ast.TypeNumber:
 		return c.checkNumberMethodArity(e)
 	case ast.TypeBoolean, ast.TypeStatus:
-		if e.Method != "toString" && e.Method != "valueOf" {
+		if e.Method != "toString" && e.Method != "toLocaleString" && e.Method != "valueOf" {
 			return &SemanticError{Pos: e.Pos, Message: fmt.Sprintf("type %s has no methods", recvType)}
 		}
 		if len(e.Args) != 0 {
@@ -817,10 +817,10 @@ func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 		if len(e.Args) < 1 {
 			return &SemanticError{Pos: e.Pos, Message: "toSpliced() takes at least 1 argument"}
 		}
-	case "pop", "shift", "reverse", "toReversed", "sort", "toSorted", "toString":
+	case "pop", "shift", "reverse", "toReversed", "sort", "toSorted", "toString", "toLocaleString":
 		if len(e.Args) != 0 {
-			if e.Method == "toString" {
-				return &SemanticError{Pos: e.Pos, Message: "toString() takes no arguments"}
+			if e.Method == "toString" || e.Method == "toLocaleString" {
+				return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 			}
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
@@ -909,9 +909,9 @@ func (c *Validator) isCallbackValue(expr ast.Expression) bool {
 
 func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
-	case "toString", "valueOf", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase", "toLocaleUpperCase", "toLocaleLowerCase":
+	case "toString", "toLocaleString", "valueOf", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight", "toUpperCase", "toLowerCase", "toLocaleUpperCase", "toLocaleLowerCase":
 		if len(e.Args) != 0 {
-			if e.Method == "toString" || e.Method == "valueOf" {
+			if e.Method == "toString" || e.Method == "toLocaleString" || e.Method == "valueOf" {
 				return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 			}
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
@@ -940,7 +940,7 @@ func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 
 func (c *Validator) checkNumberMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
-	case "toString", "valueOf":
+	case "toString", "toLocaleString", "valueOf":
 		if len(e.Args) != 0 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
@@ -1097,7 +1097,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 			switch e.Method {
 			case "length":
 				return numType
-			case "join", "toString":
+			case "join", "toString", "toLocaleString":
 				return strType
 			case "includes":
 				return boolType
@@ -1143,12 +1143,12 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 				return strType
 			}
 		case ast.TypeNumber:
-			if e.Method == "toString" || e.Method == "toFixed" {
+			if e.Method == "toString" || e.Method == "toLocaleString" || e.Method == "toFixed" {
 				return strType
 			}
 			return numType
 		case ast.TypeBoolean, ast.TypeStatus:
-			if e.Method == "toString" {
+			if e.Method == "toString" || e.Method == "toLocaleString" {
 				return strType
 			}
 			if e.Method == "valueOf" {

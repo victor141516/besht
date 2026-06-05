@@ -8,7 +8,7 @@ description: >
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
   array/string/number methods, Math constants/methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.values(), Object.entries(), Object.hasOwn(), Object.is(), Object.assign(), Object.fromEntries(), JSON.parse(), JSON.stringify(), Set<T>, nested arrays, object literals, object spread, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
-  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), String(value), Boolean(value), Number.parseInt(), parseInt(), parseFloat(), isFinite(), isNaN(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
+  concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), value.toLocaleString(), String(value), Boolean(value), Number.parseInt(), parseInt(), parseFloat(), isFinite(), isNaN(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
   fetch(url).text().
 ---
 
@@ -484,10 +484,11 @@ Global `isFinite(value)` and `isNaN(value)` use JavaScript-style scalar numeric 
 
 ## Type Conversion
 
-Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `value.valueOf()` returns the primitive string, number, boolean, or status value without creating wrapper objects. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` and global `parseInt(value)` accept one argument or an optional radix argument, including non-decimal radix values such as 16. Global `parseFloat(value)` is available as an alias for `Number.parseFloat(value)`, and global `isFinite(value)` / `isNaN(value)` use numeric coercion predicates.
+Use JS-style conversion APIs for new code. `value.toString()` works on `string`, `number`, `boolean`, and `status`; booleans render as `true` or `false`. `value.toLocaleString()` is a compact alias for current primitive formatting and scalar-array comma joins; it does not perform locale-specific number/date formatting. `value.valueOf()` returns the primitive string, number, boolean, or status value without creating wrapper objects. `String(value)` converts primitives, null/undefined, scalar arrays, objects, and Sets to strings without creating wrapper objects. `Number.parseInt(value)` and global `parseInt(value)` accept one argument or an optional radix argument, including non-decimal radix values such as 16. Global `parseFloat(value)` is available as an alias for `Number.parseFloat(value)`, and global `isFinite(value)` / `isNaN(value)` use numeric coercion predicates.
 
 ```ts
 let countText = count.toString()
+let localeCountText = count.toLocaleString()
 let flagText = flag.toString()
 let label = String(["a", "b"]) // "a,b"
 let lines = Number.parseInt(raw)
@@ -500,7 +501,7 @@ let red = Number.parseInt(hexByte, 16)
 
 Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants. Dynamic arithmetic and variables assigned inside control flow keep shell arithmetic or POSIX `awk`.
 
-Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()` and `.toFixed()` calls also compile to constants. Static primitive `.toString()` and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants, such as `parseInt("2a", 10)` to `2`. Static numeric literal, static numeric expression, static numeric variable, and static numeric API receiver `.toString()`, `.toLocaleString()`, and `.toFixed()` calls also compile to constants. Static primitive `.toString()`, `.toLocaleString()`, and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 
 ## Command Execution
 
@@ -844,6 +845,7 @@ let rest: string[] = files.slice(1)
 let withNew = files.push("new.txt")
 let alsoWithNew = [...files, "new.txt"]
 let text: string = files.toString() // scalar arrays: same as files.join(",")
+let localeText: string = files.toLocaleString() // same scalar-array comma join
 let literalText: string = ["a", "b", "c"].join(",") // compiles to 'a,b,c'
 let compactText: string = ["a", "b"].concat(["c"]).join(",") // compiles to 'a,b,c'
 let last: string = files.at(-1)
@@ -854,7 +856,7 @@ let sortedCopy = files.toSorted()
 let replacedCopy = files.toSpliced(1, 1, "new-name")
 ```
 
-Scalar array `.toString()` is supported as comma-join output; general `Array.prototype.flat()` and nested-array `.toString()` flattening are not part of this slice. Use `.flatMap()` for one-level flattening of callback-returned scalar arrays. Static scalar array literals and variables bound to static scalar arrays fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static.
+Scalar array `.toString()` and `.toLocaleString()` are supported as comma-join output; general `Array.prototype.flat()` and nested-array `.toString()`/`.toLocaleString()` flattening are not part of this slice. Use `.flatMap()` for one-level flattening of callback-returned scalar arrays. Static scalar array literals and variables bound to static scalar arrays fold `.join()`, `.toString()`, and `.toLocaleString()` calls to one quoted string when elements contain no newlines and the separator is static.
 
 Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `toReversed`, `sort`, `toSorted`, `toSpliced`, `fill`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the generated `printf` builder.
 
@@ -939,8 +941,10 @@ Math.sqrt(16); // 4
 
 let n = 42;
 n.toString(); // "42"
+n.toLocaleString(); // "42"
 let ok = true;
 ok.toString(); // "true"
+ok.toLocaleString(); // "true"
 
 let pi = 3.14159;
 pi.toFixed(2); // "3.14"
@@ -962,6 +966,7 @@ files.lastIndexOf("a"); // 2
 files.at(-1); // "a"
 files.at(99) ?? "missing"; // out-of-range at() is nullish
 files.toString(); // "z,a,b,a" for scalar arrays
+files.toLocaleString(); // "z,a,b,a" for scalar arrays
 files.sort(); // ["a", "a", "b", "z"]
 files.toReversed(); // reversed copy; files is unchanged
 files.toSorted(); // sorted copy; files is unchanged
@@ -1048,10 +1053,10 @@ let lines: number = parseInt(raw); // string -> number
 - `boolean` values work directly in `if`/`while` conditions and render as `true`/`false` in string contexts
 - Array values (`T[]` / `Array<T>`) can be indexed, joined, and iterated with `for`
 - `status` type holds exit codes; only usable in `catch` clauses
-- String, number, boolean, and status values can be converted with `.toString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()` or global `parseInt()`; global `isFinite()` and `isNaN()` coerce scalar values like JavaScript
+- String, number, boolean, and status values can be converted with `.toString()` or compact `.toLocaleString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()` or global `parseInt()`; global `isFinite()` and `isNaN()` coerce scalar values like JavaScript
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
 - `===`/`!==` are aliases for `==`/`!=`
 - Objects and classes support the operations described above; unsupported TypeScript features are listed in their sections
 - `items.join(sep)` supports multi-character separators
-- Scalar array `.toString()` is supported as `items.join(",")`; nested-array JS flattening is not implemented
+- Scalar array `.toString()` and `.toLocaleString()` are supported as `items.join(",")`; nested-array JS flattening is not implemented

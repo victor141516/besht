@@ -107,8 +107,8 @@ Files use the `.bsh` extension.
 - Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to quoted newline-backed arrays and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` and global `parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
 - Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants; dynamic and control-flow-assigned arithmetic keeps shell arithmetic or POSIX `awk`.
-- Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, `Math.*` constants, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
-- Static primitive `.toString()` and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
+- Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toLocaleString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`/`.toLocaleString()`, `Math.*` constants, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
+- Static primitive `.toString()`, `.toLocaleString()`, and `.valueOf()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 - Static `String(value)` calls over primitives, null/undefined, scalar arrays, object literals, and Set literals compile to constants; dynamic booleans render `true`/`false`, dynamic scalar arrays reuse the comma-join path, and object-producing calls preserve side effects before returning `[object Object]`.
 - Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold transforms such as `.trim()`, `.trimStart()`/`.trimLeft()`, `.trimEnd()`/`.trimRight()`, `.toUpperCase()`/`.toLocaleUpperCase()`, `.toLowerCase()`/`.toLocaleLowerCase()`, `.slice()`, `.substring()`, `.substr()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `substr()`, `at()`, and indexing use AWK substring extraction.
 - Simple prefix-strip ternaries such as `s.startsWith("#") ? s.slice(1) : s` compile to compact POSIX parameter expansion.
@@ -119,7 +119,7 @@ Files use the `.bsh` extension.
 - Static string literals, variables bound to static string literals, static scalar array expressions, and variables bound to static scalar arrays compile `.length` properties to numeric constants; dynamic lengths keep the POSIX `wc` path.
 - `for (... in [...])` and loops over static scalar array expressions or variables bound to them compile to compact shell `for` loops when values do not contain newlines; dynamic arrays keep the newline-safe read loop.
 - Static scalar array indexes and `.at()` calls with known in-range integer indexes, including negative `.at()` indexes, and static nested-array indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/`awk`/packed-row path.
-- Static scalar array literals and variables bound to static scalar arrays fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
+- Static scalar array literals and variables bound to static scalar arrays fold `.join()`, `.toString()`, and `.toLocaleString()` calls to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
 - Static scalar array literals and variables bound to static scalar arrays fold `.includes()`, `.indexOf()`, `.lastIndexOf()`, and `.at()` calls with static scalar needles or indexes to constants; dynamic searches and `.at()` calls keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; static scalar primitive `Object.is()` calls also fold to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, static-key `Object.hasOwn()`, literal-only `Object.assign({}, ...)`, literal-only `Object.fromEntries(...)`, and literal-only object spread results also fold from compiler-managed metadata.
 - Direct reads of scalar properties from static object literal bindings compile to constants when the object is not assigned, computed-assigned, aliased, or passed to a function.
@@ -517,15 +517,19 @@ Primitive values have basic formatting helpers:
 ```ts
 let s = "x";
 s.toString(); // "x"
+s.toLocaleString(); // "x", compact alias
 
 let b = true;
 b.toString(); // "true"
+b.toLocaleString(); // "true"
 
 let code: status = /* catch variable */;
 code.toString(); // numeric status
+code.toLocaleString(); // numeric status
 
 let n = 42;
 n.toString(); // "42"
+n.toLocaleString(); // "42"
 
 let pi = 3.14159;
 pi.toFixed(2); // "3.14"
@@ -685,6 +689,7 @@ l.join(", "); // "alpha, beta, gamma"
 ["a", "b", "c"].join(","); // static scalar literal compiles to 'a,b,c'
 ["a", "b"].concat(["c"]).join(","); // static scalar chains compile to 'a,b,c'
 l.toString(); // "alpha,beta,gamma" for scalar arrays; same as l.join(",")
+l.toLocaleString(); // same compact scalar-array comma join
 l.includes("beta"); // boolean, uses `grep -qxF` membership and does not emit the string `_bst_includes` helper
 l.indexOf("gamma"); // int (0-based, -1 if not found)
 l.lastIndexOf("beta"); // int (last zero-based match, -1 if not found)
@@ -717,7 +722,7 @@ let maybe = matrix?.[row]?.[col] ?? "missing"
 
 `Array.from("text")` creates a character array. `Array.from({ length })` is a Besht-specific numeric range factory. Unlike JavaScript, it does not create an array of `undefined` values and does not accept arbitrary iterables or mapper callbacks.
 
-Array `.toString()` is currently a scalar-array API slice. JavaScript `Array.prototype.flat()` and nested-array `.toString()` flattening for `string[][]` and packed row arrays are not implemented; use `flatMap()` for one-level flattening of callback-returned scalar arrays.
+Array `.toString()` and `.toLocaleString()` are currently scalar-array API slices. JavaScript `Array.prototype.flat()` and nested-array `.toString()`/`.toLocaleString()` flattening for `string[][]` and packed row arrays are not implemented; use `flatMap()` for one-level flattening of callback-returned scalar arrays.
 
 ### Sets
 
@@ -1032,8 +1037,10 @@ Use JS-style conversion APIs for new code:
 | API                      | Description                                      |
 | ------------------------ | ------------------------------------------------ |
 | `value.toString()`       | Convert `string`, `number`, `boolean`, or `status` to `string` |
+| `value.toLocaleString()` | Compact alias for current primitive formatting; no locale-specific number/date formatting |
 | `value.valueOf()`        | Return the primitive string, number, boolean, or status value |
 | `items.toString()`       | Convert a scalar array to a comma-joined string, like `items.join(",")` |
+| `items.toLocaleString()` | Compact alias for scalar-array comma join |
 | `String(value)`          | Convert primitives, null/undefined, scalar arrays, objects, and Sets to a string |
 | `Number.parseInt(value)` | Parse `string` to `number`                       |
 | `Number.parseInt(value, 10)` | Parse with an optional radix argument        |
@@ -1046,6 +1053,7 @@ Use JS-style conversion APIs for new code:
 ```ts
 let n: number = 42
 let msg: string = "Count is " + n.toString()
+let localMsg: string = n.toLocaleString()
 
 let raw: string = $("wc", "-l", "file").run().readStdout()
 let lines: number = parseInt(raw)
@@ -1055,7 +1063,7 @@ let sameFlag: boolean = flag.valueOf()
 let label: string = String(["a", "b"]) // "a,b"
 ```
 
-`valueOf()` is a primitive identity method for Besht strings, numbers, booleans, and status values; it does not create wrapper objects. `Boolean(value)` returns a primitive Besht boolean, not a Boolean object wrapper. It treats `false`, `0`, `0.0`, `""`, `null`, and `undefined` as false; non-empty strings such as `"0"` and `"false"`, non-zero numbers, arrays, and objects are true.
+`toLocaleString()` is a compact alias for the current primitive and scalar-array `toString()` formatting; it does not perform locale-specific number, date, or collation formatting. `valueOf()` is a primitive identity method for Besht strings, numbers, booleans, and status values; it does not create wrapper objects. `Boolean(value)` returns a primitive Besht boolean, not a Boolean object wrapper. It treats `false`, `0`, `0.0`, `""`, `null`, and `undefined` as false; non-empty strings such as `"0"` and `"false"`, non-zero numbers, arrays, and objects are true.
 
 `String(value)` is a primitive conversion builtin, not a `new String(...)` wrapper. It follows the current Besht scalar representations: null becomes `"null"`, undefined becomes `"undefined"`, booleans become `"true"`/`"false"`, scalar arrays join with commas, compiler-managed objects become `"[object Object]"`, and Sets become `"[object Set]"`. Static `String.*` APIs such as `String.raw` and `String(JSONValue)` are not supported; extract a scalar from JSON or use `JSON.stringify()` for JSON text.
 
