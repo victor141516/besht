@@ -2034,7 +2034,7 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 			return &ast.BuiltinCallExpr{Pos: pos, Name: "JSON." + methodTok.Literal, Args: args}, nil
 		}
 
-		if name == "Object" && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "keys" || p.peekN(1).Literal == "values" || p.peekN(1).Literal == "entries" || p.peekN(1).Literal == "fromEntries" || p.peekN(1).Literal == "hasOwn" || p.peekN(1).Literal == "assign") {
+		if name == "Object" && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "keys" || p.peekN(1).Literal == "values" || p.peekN(1).Literal == "entries" || p.peekN(1).Literal == "fromEntries" || p.peekN(1).Literal == "hasOwn" || p.peekN(1).Literal == "is" || p.peekN(1).Literal == "assign") {
 			methodTok := p.peekN(1)
 			p.advance()
 			p.advance()

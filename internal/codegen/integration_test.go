@@ -352,6 +352,9 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "function hasOwn(value: object, key: string): boolean") {
 		t.Fatalf("generated stdlib should declare Object.hasOwn(value, key)")
 	}
+	if !strings.Contains(stdlib.Declarations, "function is(value: string | number | boolean | null | undefined, other: string | number | boolean | null | undefined): boolean") {
+		t.Fatalf("generated stdlib should declare Object.is(value, other)")
+	}
 	if !strings.Contains(stdlib.Declarations, "function values(value: object): string[]") {
 		t.Fatalf("generated stdlib should declare Object.values(value)")
 	}
@@ -3596,6 +3599,29 @@ for (key in Object.keys({ name: "Ada", active: true })) {
     console.log(key)
 }`)
 	want := "name,active\nAda,true\nactive=true\ntrue\nfalse\nname\nactive\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ObjectIsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(Object.is("Ada", "Ada"))
+console.log(Object.is("Ada", "Grace"))
+console.log(Object.is(true, 1))
+console.log(Object.is(false, false))
+console.log(Object.is(null, null))
+console.log(Object.is(null, undefined))
+console.log(Object.is(1, 1.0))
+let dynamic = "Ada"
+while (true) {
+    dynamic = "Grace"
+    break
+}
+console.log(Object.is(dynamic, "Grace"))
+if (Object.is(dynamic, "Grace")) {
+    console.log("matched")
+}`)
+	want := "true\nfalse\nfalse\ntrue\ntrue\nfalse\ntrue\ntrue\nmatched\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

@@ -1,0 +1,23 @@
+console.log(Object.is("besht", "besht"))
+console.log(Object.is("besht", "shell"))
+console.log(Object.is(1, 1))
+console.log(Object.is(1, 1.0))
+console.log(Object.is("1", 1))
+console.log(Object.is(true, true))
+console.log(Object.is(false, true))
+console.log(Object.is(true, 1))
+console.log(Object.is(null, null))
+console.log(Object.is(undefined, undefined))
+console.log(Object.is(null, undefined))
+
+let dynamic = "bye"
+while (true) {
+    dynamic = "hello"
+    break
+}
+
+console.log(Object.is(dynamic, "hello"))
+
+if (Object.is(dynamic, "hello")) {
+    console.log("matched")
+}

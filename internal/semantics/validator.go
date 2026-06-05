@@ -644,9 +644,9 @@ func (c *Validator) checkBuiltinArity(e *ast.BuiltinCallExpr) error {
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 1 argument"}
 		}
-	case "Object.hasOwn":
+	case "Object.hasOwn", "Object.is":
 		if len(e.Args) != 2 {
-			return &SemanticError{Pos: e.Pos, Message: "Object.hasOwn() takes 2 arguments"}
+			return &SemanticError{Pos: e.Pos, Message: e.Name + "() takes 2 arguments"}
 		}
 	case "Object.assign":
 		if len(e.Args) < 1 {
@@ -1021,7 +1021,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 		switch e.Name {
 		case "fetch":
 			return &ast.Type{Kind: ast.TypeFetchResponse}
-		case "Boolean", "Array.isArray", "Object.hasOwn", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+		case "Boolean", "Array.isArray", "Object.hasOwn", "Object.is", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
 			return boolType
 		case "String":
 			return strType

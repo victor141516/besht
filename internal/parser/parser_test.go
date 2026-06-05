@@ -1308,6 +1308,7 @@ func TestParser_ObjectStaticMethodsParseAsBuiltinCalls(t *testing.T) {
 		{"values", `let values = Object.values(user)`, "Object.values", 1},
 		{"entries", `let entries = Object.entries(user)`, "Object.entries", 1},
 		{"hasOwn", `let ok = Object.hasOwn(user, "name")`, "Object.hasOwn", 2},
+		{"is", `let ok = Object.is(value, other)`, "Object.is", 2},
 		{"assign", `let merged = Object.assign(user, defaults, overrides)`, "Object.assign", 3},
 	}
 	for _, tt := range tests {

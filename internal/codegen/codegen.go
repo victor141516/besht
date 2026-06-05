@@ -1185,7 +1185,7 @@ func (g *Generator) inferExprType(expr ast.Expression) *ast.Type {
 			return typeString
 		case "String":
 			return typeString
-		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
+		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 			return typeBoolean
 		}
 	case *ast.PropertyExpr:
@@ -6448,6 +6448,142 @@ func objectHasOwnRefExpr(ref objectRef, keyExpr string) string {
 	return objectHasOwnSlotExpr(ref.SlotExpr, keyExpr)
 }
 
+type objectIsPrimitiveValue struct {
+	Kind  string
+	Value string
+}
+
+func (g *Generator) genObjectIs(leftExpr, rightExpr ast.Expression) (string, error) {
+	if value, ok, err := g.genStaticObjectIs(leftExpr, rightExpr); ok || err != nil {
+		if err != nil {
+			return "", err
+		}
+		if value {
+			return "1", nil
+		}
+		return "0", nil
+	}
+	left, err := g.genObjectIsOperand(leftExpr)
+	if err != nil {
+		return "", err
+	}
+	right, err := g.genObjectIsOperand(rightExpr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("$(_bst_obj_is_lk=%s; _bst_obj_is_lv=%s; _bst_obj_is_rk=%s; _bst_obj_is_rv=%s; if [ \"$_bst_obj_is_lk\" = \"$_bst_obj_is_rk\" ] && [ \"$_bst_obj_is_lv\" = \"$_bst_obj_is_rv\" ]; then printf 1; else printf 0; fi)", shellQuote(left.Kind), left.Value, shellQuote(right.Kind), right.Value), nil
+}
+
+func (g *Generator) genObjectIsOperand(expr ast.Expression) (objectIsPrimitiveValue, error) {
+	if value, ok, err := g.staticObjectIsPrimitiveValue(expr); ok || err != nil {
+		return objectIsPrimitiveValue{Kind: value.Kind, Value: shellQuote(value.Value)}, err
+	}
+	kind := "unknown"
+	if typ := g.inferReceiverType(expr); typ != nil {
+		switch typ.Kind {
+		case ast.TypeString:
+			kind = "string"
+		case ast.TypeNumber, ast.TypeStatus:
+			kind = "number"
+		case ast.TypeBoolean:
+			kind = "boolean"
+		case ast.TypeList, ast.TypeObject, ast.TypeSet, ast.TypeCommand, ast.TypeFetchResponse, ast.TypeJSON:
+			return objectIsPrimitiveValue{}, fmt.Errorf("Object.is() currently supports scalar primitive values only")
+		}
+	}
+	value, err := g.genExprValue(expr)
+	if err != nil {
+		return objectIsPrimitiveValue{}, err
+	}
+	return objectIsPrimitiveValue{Kind: kind, Value: value}, nil
+}
+
+func (g *Generator) genStaticObjectIs(leftExpr, rightExpr ast.Expression) (bool, bool, error) {
+	left, leftOK, err := g.staticObjectIsPrimitiveValue(leftExpr)
+	if err != nil || !leftOK {
+		return false, leftOK, err
+	}
+	right, rightOK, err := g.staticObjectIsPrimitiveValue(rightExpr)
+	if err != nil || !rightOK {
+		return false, rightOK, err
+	}
+	return left.Kind == right.Kind && left.Value == right.Value, true, nil
+}
+
+func (g *Generator) staticObjectIsPrimitiveValue(expr ast.Expression) (objectIsPrimitiveValue, bool, error) {
+	switch e := expr.(type) {
+	case *ast.AsExpr:
+		return g.staticObjectIsPrimitiveValue(e.Expr)
+	case *ast.NullLit:
+		return objectIsPrimitiveValue{Kind: "null"}, true, nil
+	case *ast.UndefinedLit:
+		return objectIsPrimitiveValue{Kind: "undefined"}, true, nil
+	case *ast.IdentExpr:
+		if g.controlAssigned[e.Name] {
+			return objectIsPrimitiveValue{}, false, nil
+		}
+		varName := g.resolveVarName(e.Name)
+		if value, ok := g.stringConstMap[varName]; ok {
+			return objectIsPrimitiveValue{Kind: "string", Value: value}, true, nil
+		}
+		if value, ok := g.numConstMap[varName]; ok {
+			return objectIsPrimitiveValue{Kind: "number", Value: formatStaticNumber(value)}, true, nil
+		}
+		if value, ok := g.boolConstMap[varName]; ok {
+			return objectIsPrimitiveValue{Kind: "boolean", Value: staticBoolComparisonValue(value)}, true, nil
+		}
+	case *ast.BuiltinCallExpr:
+		if e.Name == "String" && len(e.Args) == 1 {
+			value, ok, err := g.staticStringConstructorValue(e.Args[0])
+			if err != nil || !ok {
+				return objectIsPrimitiveValue{}, ok, err
+			}
+			return objectIsPrimitiveValue{Kind: "string", Value: value}, true, nil
+		}
+	case *ast.MethodCallExpr:
+		if e.Method == "valueOf" && len(e.Args) == 0 {
+			return g.staticObjectIsPrimitiveValue(e.Receiver)
+		}
+	}
+
+	if typ := g.inferReceiverType(expr); typ != nil {
+		switch typ.Kind {
+		case ast.TypeString:
+			value, ok, err := g.staticStringFragment(expr)
+			if err != nil || !ok {
+				return objectIsPrimitiveValue{}, ok, err
+			}
+			return objectIsPrimitiveValue{Kind: "string", Value: value}, true, nil
+		case ast.TypeNumber, ast.TypeStatus:
+			if value, ok := g.staticArithmeticNumberValue(expr); ok {
+				return objectIsPrimitiveValue{Kind: "number", Value: formatStaticNumber(value)}, true, nil
+			}
+			value, ok, err := g.staticScalarComparisonValue(expr)
+			if err != nil || !ok {
+				return objectIsPrimitiveValue{}, ok, err
+			}
+			return objectIsPrimitiveValue{Kind: "number", Value: normalizeObjectIsNumberValue(value)}, true, nil
+		case ast.TypeBoolean:
+			value, ok := g.staticBooleanValue(expr)
+			if !ok {
+				return objectIsPrimitiveValue{}, false, nil
+			}
+			return objectIsPrimitiveValue{Kind: "boolean", Value: staticBoolComparisonValue(value)}, true, nil
+		case ast.TypeList, ast.TypeObject, ast.TypeSet, ast.TypeCommand, ast.TypeFetchResponse, ast.TypeJSON:
+			return objectIsPrimitiveValue{}, true, fmt.Errorf("Object.is() currently supports scalar primitive values only")
+		}
+	}
+
+	return objectIsPrimitiveValue{}, false, nil
+}
+
+func normalizeObjectIsNumberValue(value string) string {
+	if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+		return formatStaticNumber(parsed)
+	}
+	return value
+}
+
 func (g *Generator) requireJQFeature(feature string) error {
 	if !g.UseJQ {
 		return fmt.Errorf("%s requires --opt-use-jq", feature)
@@ -8003,6 +8139,15 @@ func (g *Generator) staticBooleanValue(expr ast.Expression) (bool, bool) {
 				return false, false
 			}
 			return value == "1", true
+		case "Object.is":
+			if len(e.Args) != 2 {
+				return false, false
+			}
+			value, ok, err := g.genStaticObjectIs(e.Args[0], e.Args[1])
+			if err != nil || !ok {
+				return false, false
+			}
+			return value, true
 		}
 	case *ast.MethodCallExpr:
 		if value, ok := g.staticSetHasValue(e); ok {
@@ -8702,6 +8847,9 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Object.hasOwn":
 		return g.genObjectHasOwn(e.Args[0], e.Args[1])
 
+	case "Object.is":
+		return g.genObjectIs(e.Args[0], e.Args[1])
+
 	case "Object.assign":
 		ref, err := g.genObjectAssignValue(e, "")
 		if err != nil {
@@ -9141,7 +9289,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		switch e.Name {
 		case "fetch":
 			return &ast.Type{Kind: ast.TypeFetchResponse}
-		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
+		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 			return typeBoolean
 		case "JSON.parse":
 			return typeJSON
@@ -9434,7 +9582,7 @@ func (g *Generator) isBooleanExpr(expr ast.Expression) bool {
 		return pt != nil && pt.Kind == ast.TypeBoolean
 	case *ast.BuiltinCallExpr:
 		switch e.Name {
-		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
+		case "Boolean", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 			return true
 		default:
 			if isBeshtPredicateBuiltin(e.Name) {
@@ -14037,7 +14185,7 @@ func (g *Generator) genBuiltinCondition(e *ast.BuiltinCallExpr) (string, error) 
 		return fmt.Sprintf("[ -n %s ]", arg0), nil
 	case "Number.isFinite":
 		return "true", nil
-	case "Boolean", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn":
+	case "Boolean", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN", "Array.isArray", "Object.hasOwn", "Object.is":
 		val, err := g.genBuiltinCapture(e)
 		if err != nil {
 			return "", err

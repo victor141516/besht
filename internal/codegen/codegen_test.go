@@ -3507,6 +3507,28 @@ for (key in Object.keys({ name: "Ada", active: true })) {
 	assertNotContains(t, out, `_objkeys__objlit_`)
 }
 
+func TestCodegen_ObjectIs(t *testing.T) {
+	out := compile(t, `let same = Object.is("Ada", "Ada")
+let different = Object.is("Ada", "Grace")
+let boolNumber = Object.is(true, 1)
+let nullUndefined = Object.is(null, undefined)
+let numeric = Object.is(1, 1.0)
+let dynamic = "Ada"
+while (true) {
+    dynamic = "Grace"
+    break
+}
+let runtime = Object.is(dynamic, "Grace")`)
+	assertContains(t, out, `same=1`)
+	assertContains(t, out, `different=0`)
+	assertContains(t, out, `boolNumber=0`)
+	assertContains(t, out, `nullUndefined=0`)
+	assertContains(t, out, `numeric=1`)
+	assertContains(t, out, `runtime=$(_bst_obj_is_lk='string'`)
+	assertContains(t, out, `_bst_obj_is_rk='string'`)
+	assertContains(t, out, `[ "$_bst_obj_is_lk" = "$_bst_obj_is_rk" ]`)
+}
+
 func TestCodegen_ListForEach(t *testing.T) {
 	out := compile(t, `let names: string[] = ["alice", "bob"]
 names.forEach((name, index) => console.log(index.toString() + ":" + name))`)

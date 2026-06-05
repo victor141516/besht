@@ -811,7 +811,7 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}}
 		case "Object.assign", "Object.fromEntries":
 			return &ast.Type{Kind: ast.TypeObject}
-		case "Object.hasOwn", "Boolean", "Array.isArray", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
+		case "Object.hasOwn", "Object.is", "Boolean", "Array.isArray", "Number.isFinite", "Number.isInteger", "Number.isSafeInteger", "Number.isNaN":
 			return &ast.Type{Kind: ast.TypeBoolean}
 		case "JSON.parse":
 			return &ast.Type{Kind: ast.TypeJSON}
