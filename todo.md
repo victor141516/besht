@@ -72,7 +72,7 @@ Current canonical surface:
 - `process.env.NAME ?? fallback` for environment variables.
 - `process.exit(code)` for process exit.
 - `value.toString()` and `Number.parseInt(value)` for common conversion.
-- Native array-style APIs: indexing, `.length`, `.slice()`, `.push()`, `.concat()`, `.includes()`, `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.reduce()`, and statement-position `.forEach()`.
+- Native array-style APIs: indexing, `.at()`, `.length`, `.slice()`, `.push()`, `.concat()`, `.includes()`, `.map()`, `.filter()`, `.some()`, `.every()`, `.find()`, `.findIndex()`, `.reduce()`, and statement-position `.forEach()`.
 - `Boolean(value)` for primitive boolean coercion.
 - `Object.keys(obj)`, scalar-only `Object.values(obj)`, scalar-only `Object.entries(obj)`, `Object.hasOwn(obj, key)`, scalar-safe `Object.assign(target, ...sources)`, and scalar-safe object spread over compiler-managed object key metadata.
 - Besht-only helpers under `Besht.fs.*`, `Besht.strings.*`, `Besht.args.*`, and `Besht.iter.*`.
@@ -196,7 +196,7 @@ Recommended phases:
 
 - **Number / Math:** consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
 - **String:** the old non-JS-compatible global `String(value)` alias has been removed. Besht should eventually have a JS-compatible global `String` object, but only after designing what native-like `String(...)`, static `String.*` APIs, and string wrapper behavior mean under Besht's no-runtime-metadata constraint. Consider regex-dependent APIs like `match()` or `search()` after lower-risk string methods.
-- **Array:** Consider related helpers when they map cleanly to current array representations without runtime shape metadata.
+- **Array:** `Array.prototype.at()` is implemented for positive and negative indexes. Next highest-value candidates are `Array.from(string)` for character arrays, default lexical `Array.prototype.sort()` without callback support, and later `flat()`/`flatMap()` only if the nested-array representation can preserve semantics cleanly.
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
 - **Object:** `Object.keys()`, narrow scalar-value `Object.values()`, scalar-value `Object.entries()`, `Object.hasOwn(obj, key)`, scalar-safe `Object.assign(target, ...sources)`, and scalar-safe object spread are implemented over compiler-managed object key metadata. Future richer known-shape APIs should keep the same no-runtime-metadata boundary unless a broader object model is designed.
 - **Object copying:** `Object.assign()` and object spread are implemented for scalar-safe compiler-managed objects. Future work should evaluate `Object.fromEntries()` and richer nested-value support.
@@ -208,3 +208,11 @@ Implementation notes:
 - Module qualification must continue to exempt standard namespaces so they are not rewritten as imported class/function names.
 - Callback-heavy APIs should build on the reusable arrow callback lowering and function-value callback paths already used by `map`, `filter`, `some`, `every`, `find`, `findIndex`, `reduce`, and statement-position `forEach`.
 - Every added API needs semantics, codegen, unit tests, node-eq comparison coverage where practical, and updates to README.md, AGENTS.md, and skills/besht-scripting/SKILL.md.
+
+Priority order from the June 2026 JS API coverage pass:
+
+1. `Array.prototype.at()` for positive and negative indexes. Implemented.
+2. `Array.from(string)` for character arrays.
+3. `Object.fromEntries()` over scalar-safe `[key, value]` entries.
+4. Default lexical `Array.prototype.sort()` without callback support.
+5. Revisit a JavaScript-compatible `String(value)` design.

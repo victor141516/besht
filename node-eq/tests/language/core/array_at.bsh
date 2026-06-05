@@ -1,0 +1,14 @@
+let items = ["alpha", "beta", "gamma"]
+
+console.log(items.at(0))
+console.log(items.at(1))
+console.log(items.at(-1))
+console.log(items.at(-2))
+console.log(items.at(99) ?? "missing")
+console.log(items.at(-99) ?? "missing")
+
+let index = Number.parseInt("2", 10)
+console.log(items.at(index))
+
+let empty: string[] = []
+console.log(empty.at(0) ?? "missing")

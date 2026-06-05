@@ -857,6 +857,8 @@ func inferExportValueType(expr ast.Expression) *ast.Type {
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
 		case "length", "indexOf", "lastIndexOf", "findIndex":
 			return &ast.Type{Kind: ast.TypeNumber}
+		case "at":
+			return &ast.Type{Kind: ast.TypeString}
 		default:
 			return &ast.Type{Kind: ast.TypeString}
 		}

@@ -117,9 +117,9 @@ Files use the `.bsh` extension.
 - Static scalar `Array.of(...)` calls and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
 - Static string literals, variables bound to static string literals, static scalar array expressions, and variables bound to static scalar arrays compile `.length` properties to numeric constants; dynamic lengths keep the POSIX `wc` path.
 - `for (... in [...])` and loops over static scalar array expressions or variables bound to them compile to compact shell `for` loops when values do not contain newlines; dynamic arrays keep the newline-safe read loop.
-- Static scalar array indexes with known in-range integer indexes and static nested-array indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row path.
+- Static scalar array indexes and `.at()` calls with known in-range integer indexes, including negative `.at()` indexes, and static nested-array indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/`awk`/packed-row path.
 - Static scalar array literals and variables bound to static scalar arrays fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static; dynamic joins keep the newline-safe `awk` path.
-- Static scalar array literals and variables bound to static scalar arrays fold `.includes()`, `.indexOf()`, and `.lastIndexOf()` calls with static scalar needles to constants; dynamic searches keep the POSIX `grep`/`awk` path.
+- Static scalar array literals and variables bound to static scalar arrays fold `.includes()`, `.indexOf()`, `.lastIndexOf()`, and `.at()` calls with static scalar needles or indexes to constants; dynamic searches and `.at()` calls keep the POSIX `grep`/`awk` path.
 - Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.entries()`, and `Object.hasOwn()` calls compile to constants; unmutated named object `Object.keys()`, static-scalar `Object.values()`/`Object.entries()`, static-key `Object.hasOwn()`, literal-only `Object.assign({}, ...)`, and literal-only object spread results also fold from compiler-managed metadata.
 - Direct reads of scalar properties from static object literal bindings compile to constants when the object is not assigned, computed-assigned, aliased, or passed to a function.
 - Object literals compile to per-property shell variables; object spread (`{ ...source, key: value }`) and `Object.assign(target, ...sources)` shallow-copy scalar-safe compiler-managed objects with the same left-to-right key order; `Object.keys(obj)` returns known compiler-managed object keys as `string[]`, `Object.values(obj)` returns values as `string[]`, `Object.entries(obj)` returns `[key, value]` rows as `string[][]`, and `Object.hasOwn(obj, key)` checks known key membership. `JSON.parse()` and `JSON.stringify(value)` are available when compiling with `--opt-use-jq`.
@@ -668,6 +668,8 @@ l.toString(); // "alpha,beta,gamma" for scalar arrays; same as l.join(",")
 l.includes("beta"); // boolean, uses `grep -qxF` membership and does not emit the string `_bst_includes` helper
 l.indexOf("gamma"); // int (0-based, -1 if not found)
 l.lastIndexOf("beta"); // int (last zero-based match, -1 if not found)
+l.at(-1); // "gamma", negative indexes count from the end
+l.at(99) ?? "missing"; // out-of-range at() is nullish
 l.reverse(); // ["gamma", "beta", "alpha"]
 l.map(x => x + "!"); // new array with callback expression applied to each item
 l.map((x, i) => i.toString() + ":" + x); // second callback arg is zero-based index
@@ -797,7 +799,7 @@ let cell: string = matrix[row][col]
 let width: number = matrix[0].length
 ```
 
-Static scalar array indexes with known in-range integer indexes and static nested-array indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes compile to `sed`/packed-row extraction (POSIX sh compatible). Index assignment uses `awk` to replace the Nth line.
+Static scalar array indexes and `.at()` calls with known in-range integer indexes, including negative `.at()` indexes, and static nested-array indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes compile to POSIX `sed`/`awk`/packed-row extraction. Index assignment uses `awk` to replace the Nth line.
 
 ### Error handling
 
@@ -932,6 +934,7 @@ Array operations should use native array syntax and methods:
 | ---------------------- | ----------------------------- |
 | `items.length`          | Number of elements             |
 | `items[0]`              | First element                  |
+| `items.at(-1)`          | Last element                   |
 | `items.slice(1)`        | All elements except the first  |
 | `items.push(value)`     | New array with value appended  |
 | `[...items, value]`     | New array with value appended  |

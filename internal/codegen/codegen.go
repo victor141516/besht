@@ -8880,7 +8880,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 				return typeString
 			case "includes", "some", "every":
 				return &ast.Type{Kind: ast.TypeBoolean}
-			case "find":
+			case "find", "at":
 				return recvType.Elem
 			case "indexOf", "lastIndexOf", "findIndex", "length":
 				return typeNumber
@@ -9665,6 +9665,18 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 		}
 		return fmt.Sprintf("$(printf '%%s\\n' %s | awk %s 'BEGIN{found=-1}{if ($0 == _needle) found=NR-1}END{printf \"%%s\", found}')", ensureArgSafe(recv), awkArg("_needle", a0)), nil
 
+	case "at":
+		a0, err := arg0()
+		if err != nil {
+			return "", err
+		}
+		g.requireRuntimeHelper("nullish")
+		expr := fmt.Sprintf("$(_bst_s=$%s; printf '%%s\\n' %s | awk -v null=\"$_bst_s\" %s 'BEGIN{out=null}{a[NR]=$0}END{n=NR; idx=int(_idx); if(idx<0)idx=n+idx; if(idx>=0 && idx<n) out=a[idx+1]; printf \"%%s\", out}')", nullishSentinelVar, ensureArgSafe(recv), awkArg("_idx", a0))
+		if recvType := g.inferReceiverType(e.Receiver); recvType != nil && recvType.Kind == ast.TypeList && recvType.Elem != nil && recvType.Elem.Kind == ast.TypeList {
+			return fmt.Sprintf("$(printf '%%s' %s | tr '\\037' '\\n')", ensureArgSafe(expr)), nil
+		}
+		return expr, nil
+
 	case "reverse":
 		return fmt.Sprintf("$(printf '%%s\\n' %s | tail -r 2>/dev/null || printf '%%s\\n' %s | awk 'BEGIN{OFMT=\"%%.17g\";i=0}{a[i++]=$0}END{while(i--)print a[i]}')", recv, recv), nil
 
@@ -9738,7 +9750,7 @@ func (g *Generator) genStaticListValueMethod(e *ast.MethodCallExpr) (string, boo
 
 func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bool, error) {
 	switch e.Method {
-	case "includes", "indexOf", "lastIndexOf":
+	case "includes", "indexOf", "lastIndexOf", "at":
 	default:
 		return "", false, nil
 	}
@@ -9751,6 +9763,19 @@ func (g *Generator) genStaticListSearchMethod(e *ast.MethodCallExpr) (string, bo
 	}
 	if len(e.Args) != 1 {
 		return "", true, fmt.Errorf("%s() requires an argument", e.Method)
+	}
+	if e.Method == "at" {
+		index, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return "", false, nil
+		}
+		if index < 0 {
+			index = len(values) + index
+		}
+		if index < 0 || index >= len(values) {
+			return nullishSentinelLiteral(), true, nil
+		}
+		return shellQuote(values[index]), true, nil
 	}
 	needle, ok := staticScalarValue(e.Args[0])
 	if !ok {

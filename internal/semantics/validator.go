@@ -805,7 +805,7 @@ func (c *Validator) checkCommandMethodArity(e *ast.MethodCallExpr) error {
 
 func (c *Validator) checkListMethodArity(e *ast.MethodCallExpr) error {
 	switch e.Method {
-	case "push", "unshift", "includes", "indexOf", "lastIndexOf", "join":
+	case "push", "unshift", "includes", "indexOf", "lastIndexOf", "join", "at":
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
 		}
@@ -1095,7 +1095,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 				return numType
 			case "some", "every":
 				return boolType
-			case "find":
+			case "find", "at":
 				return recvType.Elem
 			case "map":
 				if len(e.Args) == 1 {

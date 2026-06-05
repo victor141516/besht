@@ -603,6 +603,17 @@ func TestValidator_ListToStringRejectsArguments(t *testing.T) {
 let s: string = list.toString(",")`, "toString() takes no arguments")
 }
 
+func TestValidator_ListAt(t *testing.T) {
+	mustCheck(t, `let l: Array<string> = ["a", "b"]
+let first: string = l.at(0)
+let last: string = l.at(-1)`)
+}
+
+func TestValidator_ListAtRejectsWrongArity(t *testing.T) {
+	expectError(t, `let list: Array<string> = ["a", "b"]
+let item: string = list.at()`, "at() takes 1 argument")
+}
+
 func TestValidator_ListIncludes(t *testing.T) {
 	mustCheck(t, `let l: Array<string> = ["a", "b"]
 if (l.includes("a")) { $("echo", "yes") }`)
