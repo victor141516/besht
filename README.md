@@ -107,7 +107,7 @@ Files use the `.bsh` extension.
 - Static ASCII string literal `.split()` calls and variables bound to static ASCII strings calling `.split()` with static separators compile to quoted newline-backed arrays and compact `for` loops when elements contain no newlines; dynamic and non-ASCII splits keep the POSIX tool path.
 - Static string literal `Number.parseInt()` calls with parseable prefixes and static radix compile to numeric constants; dynamic calls use an AWK-backed parser, including non-decimal radix values.
 - Static numeric arithmetic over literal numbers and variables bound to static numeric expressions compiles to constants; dynamic and control-flow-assigned arithmetic keeps shell arithmetic or POSIX `awk`.
-- Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
+- Static numeric literal, static numeric expression, or static numeric variable `.toString()`/`.toFixed()` calls, static numeric API receivers of `.toString()`, `Math.*` constants, and literal-argument `Math.*` calls compile to constants; dynamic numeric calls keep the POSIX `awk` path.
 - Static primitive `.toString()` calls in direct bindings, string concatenation, and template interpolation compile to constants; dynamic receivers keep the normal runtime formatting path.
 - Static `String(value)` calls over primitives, null/undefined, scalar arrays, object literals, and Set literals compile to constants; dynamic booleans render `true`/`false`, dynamic scalar arrays reuse the comma-join path, and object-producing calls preserve side effects before returning `[object Object]`.
 - Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained static ASCII transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants; dynamic and non-ASCII transforms keep the POSIX tool path. Dynamic string `slice()`, `at()`, and indexing use AWK substring extraction.
@@ -527,6 +527,9 @@ pi.toFixed(2); // "3.14"
 ### Math methods
 
 ```ts
+Math.PI; // 3.141592653589793
+Math.E; // 2.718281828459045
+Math.SQRT2; // 1.4142135623730951
 Math.min(a, b); // smaller of two numbers (works with floats)
 Math.max(a, b); // larger of two numbers (works with floats)
 Math.round(3.7); // 4, rounds half-up
@@ -539,7 +542,7 @@ Math.pow(2, 8); // 256
 Math.sqrt(16); // 4
 ```
 
-Literal-argument `Math` calls compile to constants. Dynamic `Math` methods compile to `awk` arithmetic and support decimal numbers. POSIX `$((...))` is integer-only, so besht uses `awk` wherever a dynamic float operand is present.
+`Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, and `Math.SQRT2` compile to numeric constants. Literal-argument `Math` calls compile to constants. Dynamic `Math` methods compile to `awk` arithmetic and support decimal numbers. POSIX `$((...))` is integer-only, so besht uses `awk` wherever a dynamic float operand is present.
 
 When a variable is reassigned, besht updates its float-tracking metadata from the new right-hand side: float-producing expressions keep later arithmetic on `awk`, while integer/non-float reassignment clears the float marker so later integer arithmetic can use shell integer lowering again.
 

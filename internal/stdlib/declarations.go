@@ -57,6 +57,14 @@ declare namespace Number {
 }
 
 declare namespace Math {
+    const E: number
+    const LN2: number
+    const LN10: number
+    const LOG2E: number
+    const LOG10E: number
+    const PI: number
+    const SQRT1_2: number
+    const SQRT2: number
     function min(left: number, right: number): number
     function max(left: number, right: number): number
     function round(value: number): number

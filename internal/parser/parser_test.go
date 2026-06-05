@@ -521,6 +521,37 @@ func TestParser_NumberConstantsInTemplateInterpolation(t *testing.T) {
 	}
 }
 
+func TestParser_MathConstants(t *testing.T) {
+	prog := mustParse(t, `let e = Math.E
+let ln2 = Math.LN2
+let ln10 = Math.LN10
+let log2e = Math.LOG2E
+let log10e = Math.LOG10E
+let pi = Math.PI
+let sqrtHalf = Math.SQRT1_2
+let sqrt2 = Math.SQRT2`)
+	wants := []string{
+		"2.718281828459045",
+		"0.6931471805599453",
+		"2.302585092994046",
+		"1.4426950408889634",
+		"0.4342944819032518",
+		"3.141592653589793",
+		"0.7071067811865476",
+		"1.4142135623730951",
+	}
+	for i, want := range wants {
+		decl := prog.Statements[i].(*ast.LetDecl)
+		lit, ok := decl.Value.(*ast.FloatLit)
+		if !ok {
+			t.Fatalf("statement %d: expected *ast.FloatLit, got %T", i, decl.Value)
+		}
+		if lit.Value != want {
+			t.Fatalf("statement %d: got %q, want %q", i, lit.Value, want)
+		}
+	}
+}
+
 func TestParser_DeclareFunction(t *testing.T) {
 	prog := mustParse(t, `declare function external(name: string): string`)
 	if _, ok := prog.Statements[0].(*ast.DeclareFnStmt); !ok {

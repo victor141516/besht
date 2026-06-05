@@ -855,6 +855,9 @@ let json: string = JSON.stringify(user)`},
 		{"Number.MAX_SAFE_INTEGER", `let max: number = Number.MAX_SAFE_INTEGER`},
 		{"Number.MIN_SAFE_INTEGER", `let min: number = Number.MIN_SAFE_INTEGER`},
 		{"Number.EPSILON", `let eps: number = Number.EPSILON`},
+		{"Math constants", `let pi: number = Math.PI
+let e: number = Math.E
+let sqrt2: number = Math.SQRT2`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

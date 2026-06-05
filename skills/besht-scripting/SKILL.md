@@ -7,7 +7,7 @@ description: >
   variables, constants, string literals, template literals, $() command expressions,
   .pipe(), .stdout(), .stderr(), .readStdout(), .readStdoutLines(), .readStderr(),
   functions, if/while/for/switch, break/continue, try/catch, imports,
-  array/string/number methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.values(), Object.entries(), Object.hasOwn(), Object.assign(), Object.fromEntries(), JSON.parse(), JSON.stringify(), Set<T>, nested arrays, object literals, object spread, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
+  array/string/number methods, Math constants/methods, Array.from({ length }), Array.of(), Array.isArray(), Object.keys(), Object.values(), Object.entries(), Object.hasOwn(), Object.assign(), Object.fromEntries(), JSON.parse(), JSON.stringify(), Set<T>, nested arrays, object literals, object spread, classes, getters/setters, logical operators, nullish coalescing ??, Besht.args.argv()/positional()/option()/flag(), string
   concatenation, process.env.NAME, process.exit(), console.log(), value.toString(), String(value), Boolean(value), Number.parseInt(), Besht.fs.*, Besht.strings.*, Besht.iter.range(), or
   fetch(url).text().
 ---
@@ -905,7 +905,7 @@ Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Defau
 
 ## Float Literals and Math
 
-Float (decimal) literals are supported. `Math.*` methods support decimals. Literal-argument `Math.*` calls, including arguments from variables bound to static numeric expressions, compile to constants; dynamic calls use POSIX `awk`.
+Float (decimal) literals are supported. `Math.*` methods support decimals. `Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, and `Math.SQRT2` compile to numeric constants. Literal-argument `Math.*` calls, including arguments from variables bound to static numeric expressions, compile to constants; dynamic calls use POSIX `awk`.
 
 If you reassign a variable, besht updates its float-tracking metadata from the new right-hand side: float-producing expressions keep later arithmetic on `awk`, while integer or non-float reassignment clears the float marker so later integer arithmetic can use shell integer lowering again.
 
@@ -913,6 +913,8 @@ If you reassign a variable, besht updates its float-tracking metadata from the n
 let price: number = 3.14;
 let neg: number = -1.5;
 
+Math.PI; // 3.141592653589793
+Math.E; // 2.718281828459045
 Math.min(a, b); // minimum
 Math.max(a, b); // maximum
 Math.round(3.7); // 4

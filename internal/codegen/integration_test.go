@@ -355,6 +355,9 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "function assign(target: object, source: object): object") {
 		t.Fatalf("generated stdlib should declare Object.assign(target, source)")
 	}
+	if !strings.Contains(stdlib.Declarations, "const PI: number") {
+		t.Fatalf("generated stdlib should declare Math.PI")
+	}
 	mainPath := writeFile(t, dir, "main.bsh", `let path: string = process.env.HOME ?? "/tmp"
 let paths: string[] = [path]
 let argc: number = Besht.args.argv().length
@@ -4018,6 +4021,21 @@ console.log(Number.isSafeInteger(Number.MAX_SAFE_INTEGER))
 console.log(Number.isSafeInteger(Number.MIN_SAFE_INTEGER))
 console.log(Number.isSafeInteger(Number.MAX_SAFE_INTEGER + 1))`)
 	want := "9007199254740991\n-9007199254740991\n2.220446049250313e-16\ntrue\ntrue\nfalse\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_MathConstantsRuntime(t *testing.T) {
+	out := runCompiledShell(t, `console.log(Math.E)
+console.log(Math.LN2)
+console.log(Math.LN10)
+console.log(Math.LOG2E)
+console.log(Math.LOG10E)
+console.log(Math.PI)
+console.log(Math.SQRT1_2)
+console.log(Math.SQRT2)`)
+	want := "2.718281828459045\n0.6931471805599453\n2.302585092994046\n1.4426950408889634\n0.4342944819032518\n3.141592653589793\n0.7071067811865476\n1.4142135623730951\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

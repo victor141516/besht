@@ -3347,6 +3347,25 @@ let eps: number = Number.EPSILON`)
 	assertContains(t, out, `eps=2.220446049250313e-16`)
 }
 
+func TestCodegen_MathConstants(t *testing.T) {
+	out := compile(t, `let e: number = Math.E
+let ln2: number = Math.LN2
+let ln10: number = Math.LN10
+let log2e: number = Math.LOG2E
+let log10e: number = Math.LOG10E
+let pi: number = Math.PI
+let sqrtHalf: number = Math.SQRT1_2
+let sqrt2: number = Math.SQRT2`)
+	assertContains(t, out, `e=2.718281828459045`)
+	assertContains(t, out, `ln2=0.6931471805599453`)
+	assertContains(t, out, `ln10=2.302585092994046`)
+	assertContains(t, out, `log2e=1.4426950408889634`)
+	assertContains(t, out, `log10e=0.4342944819032518`)
+	assertContains(t, out, `pi=3.141592653589793`)
+	assertContains(t, out, `sqrtHalf=0.7071067811865476`)
+	assertContains(t, out, `sqrt2=1.4142135623730951`)
+}
+
 // ── Condition path codegen tests ───────────────────────────────────────────────
 
 func TestCodegen_CmdInCondition(t *testing.T) {

@@ -1981,6 +1981,36 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 			}
 			return &ast.PropertyExpr{Pos: pos, Receiver: &ast.IdentExpr{Pos: pos, Name: name}, Property: memberTok.Literal}, nil
 		}
+		if name == "Math" && p.peekType() == lexer.TokDot && isIdentifierName(p.peekN(1).Type) {
+			p.advance()
+			memberTok := p.advance()
+			if p.peekType() == lexer.TokLParen {
+				args, err := p.parseArgList()
+				if err != nil {
+					return nil, err
+				}
+				return &ast.MethodCallExpr{Pos: pos, Receiver: &ast.IdentExpr{Pos: pos, Name: name}, Method: memberTok.Literal, Args: args}, nil
+			}
+			switch memberTok.Literal {
+			case "E":
+				return &ast.FloatLit{Pos: pos, Value: "2.718281828459045"}, nil
+			case "LN2":
+				return &ast.FloatLit{Pos: pos, Value: "0.6931471805599453"}, nil
+			case "LN10":
+				return &ast.FloatLit{Pos: pos, Value: "2.302585092994046"}, nil
+			case "LOG2E":
+				return &ast.FloatLit{Pos: pos, Value: "1.4426950408889634"}, nil
+			case "LOG10E":
+				return &ast.FloatLit{Pos: pos, Value: "0.4342944819032518"}, nil
+			case "PI":
+				return &ast.FloatLit{Pos: pos, Value: "3.141592653589793"}, nil
+			case "SQRT1_2":
+				return &ast.FloatLit{Pos: pos, Value: "0.7071067811865476"}, nil
+			case "SQRT2":
+				return &ast.FloatLit{Pos: pos, Value: "1.4142135623730951"}, nil
+			}
+			return &ast.PropertyExpr{Pos: pos, Receiver: &ast.IdentExpr{Pos: pos, Name: name}, Property: memberTok.Literal}, nil
+		}
 
 		if (name == "Array" || tok.Type == lexer.TokTypeArray) && p.peekType() == lexer.TokDot && (p.peekN(1).Literal == "from" || p.peekN(1).Literal == "of" || p.peekN(1).Literal == "isArray") {
 			methodTok := p.peekN(1)

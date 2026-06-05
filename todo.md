@@ -194,7 +194,7 @@ Expand besht's JS-compatible standard API surface for basic values while preserv
 
 Recommended phases:
 
-- **Number / Math:** consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
+- **Number / Math:** `Math.E`, `Math.LN2`, `Math.LN10`, `Math.LOG2E`, `Math.LOG10E`, `Math.PI`, `Math.SQRT1_2`, and `Math.SQRT2` are implemented as numeric constants. Consider additional high-value methods only when they map cleanly to POSIX sh without broad runtime metadata.
 - **String:** JS-compatible primitive `String(value)` is implemented for current Besht scalar representations: primitives, null/undefined, scalar arrays, compiler-managed objects, and Sets. It deliberately does not add `new String(...)`, string wrapper objects, `String.raw`, other static `String.*` APIs, or direct `String(JSONValue)` conversion. Consider regex-dependent APIs like `match()` or `search()` only after a regex representation is designed.
 - **Array:** `Array.prototype.at()` is implemented for positive and negative indexes, `Array.from(string)` is implemented for character arrays, and default lexical `Array.prototype.sort()` is implemented without callback support. Next high-value array candidates are `flat()`/`flatMap()` only if the nested-array representation can preserve semantics cleanly.
 - **Boolean:** `Boolean(value)` is implemented as primitive boolean coercion, and boolean `.toString()` already renders `true`/`false`. Future Boolean object wrappers remain out of scope.
@@ -216,3 +216,4 @@ Priority order from the June 2026 JS API coverage pass:
 3. `Object.fromEntries()` over scalar-safe `[key, value]` entries. Implemented.
 4. Default lexical `Array.prototype.sort()` without callback support. Implemented.
 5. Revisit a JavaScript-compatible `String(value)` design. Implemented for primitive stringification without wrappers or static `String.*` APIs.
+6. Common `Math` constants (`Math.PI`, `Math.E`, logarithm constants, and square-root constants). Implemented.
