@@ -1,0 +1,10 @@
+const items = ["a", "b", "c"]
+const reversed = items.toReversed()
+
+console.log(reversed.join(","))
+console.log(items.join(","))
+console.log(["x", "y"].toReversed().join("|"))
+
+let mutable = ["left", "right"]
+mutable.toReversed()
+console.log(mutable.join(","))

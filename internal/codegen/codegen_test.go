@@ -1929,6 +1929,7 @@ func TestCodegen_StaticListMethodChains(t *testing.T) {
 	out := compile(t, `let inlineJoined = ["a", "b"].concat(["c"]).join(",")
 let slicedJoined = ["a", "b", "c"].slice(1).join(",")
 let reversedJoined = ["a", "b"].reverse().join(",")
+let toReversedJoined = ["a", "b"].toReversed().join(",")
 let sortedJoined = ["c", "a", "b"].sort().join(",")
 let pushedJoined = ["a", "b"].push("c").join(",")
 let factoryJoined = Array.of("a", "b").concat(Array.of("c")).join("|")
@@ -1936,6 +1937,7 @@ let xs = ["a", "b"]
 let varJoined = xs.concat(["c"]).join(",")
 let varSlice = xs.slice(1).join(",")
 let varReverse = xs.reverse().join(",")
+let varToReversed = xs.toReversed().join(",")
 let varSort = ["c", "a", "b"].sort().join(",")
 let varPush = xs.push("c").join(",")
 let count = xs.concat(["c"]).length
@@ -1949,12 +1951,14 @@ for (value in xs.concat(["d"])) {
 	assertContains(t, out, `inlineJoined='a,b,c'`)
 	assertContains(t, out, `slicedJoined='b,c'`)
 	assertContains(t, out, `reversedJoined='b,a'`)
+	assertContains(t, out, `toReversedJoined='b,a'`)
 	assertContains(t, out, `sortedJoined='a,b,c'`)
 	assertContains(t, out, `pushedJoined='a,b,c'`)
 	assertContains(t, out, `factoryJoined='a|b|c'`)
 	assertContains(t, out, `varJoined='a,b,c'`)
 	assertContains(t, out, `varSlice='b'`)
 	assertContains(t, out, `varReverse='b,a'`)
+	assertContains(t, out, `varToReversed='b,a'`)
 	assertContains(t, out, `varSort='a,b,c'`)
 	assertContains(t, out, `varPush='a,b,c'`)
 	assertContains(t, out, `count=3`)
@@ -2068,6 +2072,17 @@ func TestCodegen_ListReverse(t *testing.T) {
 let r: Array<string> = l.reverse()`)
 	assertContains(t, out, "r='a\nb\nc'")
 	assertNotContains(t, out, `tail -r`)
+}
+
+func TestCodegen_ListToReversed(t *testing.T) {
+	out := compile(t, `let l: Array<string> = ["c", "b", "a"]
+let r: Array<string> = l.toReversed()
+l.toReversed()
+let joined = l.join(",")`)
+	assertContains(t, out, "r='a\nb\nc'")
+	assertContains(t, out, `joined='c,b,a'`)
+	assertNotContains(t, out, `tail -r`)
+	assertNotContains(t, out, "l='a\nb\nc'")
 }
 
 func TestCodegen_ListSort(t *testing.T) {

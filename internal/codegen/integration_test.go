@@ -1799,6 +1799,7 @@ func TestIntegration_StaticListMethodChainsRuntime(t *testing.T) {
 	out := runCompiledShell(t, `console.log(["a", "b"].concat(["c"]).join(","))
 console.log(["a", "b", "c"].slice(1).join(","))
 console.log(["a", "b"].reverse().join(","))
+console.log(["a", "b"].toReversed().join(","))
 console.log(["a", "b"].push("c").join(","))
 console.log(Array.of("a", "b").concat(Array.of("c")).join("|"))
 console.log(["a", "b", "c"].at(1))
@@ -1808,15 +1809,35 @@ let xs = ["a", "b"]
 console.log(xs.concat(["c"]).join(","))
 console.log(xs.slice(1).join(","))
 console.log(xs.reverse().join(","))
+console.log(xs.toReversed().join(","))
 console.log(xs.push("c").join(","))
 let index = Number.parseInt("1", 10)
 console.log(xs.concat(["c"]).at(index))
 console.log(xs.concat(["c"]).at(-1))
 console.log(xs.concat(["c"]).at(10) ?? "missing")
+xs.toReversed()
+console.log(xs.join(","))
 for (value in xs.concat(["c"])) {
     console.log(value)
 }`)
-	want := "a,b,c\nb,c\nb,a\na,b,c\na|b|c\nb\nc\nmissing\na,b,c\nb\nb,a\na,b,c\nb\nc\nmissing\na\nb\nc\n"
+	want := "a,b,c\nb,c\nb,a\nb,a\na,b,c\na|b|c\nb\nc\nmissing\na,b,c\nb\nb,a\nb,a\na,b,c\nb\nc\nmissing\na,b\na\nb\nc\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ListToReversedDynamicRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let items = ["a", "b"]
+while (true) {
+    items = items.push("c")
+    break
+}
+let reversed = items.toReversed()
+items.toReversed()
+console.log(reversed.join(","))
+console.log(items.join(","))
+`)
+	want := "c,b,a\na,b,c\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

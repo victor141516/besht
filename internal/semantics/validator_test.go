@@ -1058,6 +1058,8 @@ let hit: string = items.findLast(x => { return true })`, "findLast() predicate c
 let hit: number = items.findLastIndex(x => { return true })`, "findLastIndex() predicate callback must be expression-bodied"},
 		{"fill wrong arity", `let items: string[] = ["a"]
 let filled: string[] = items.fill()`, "fill() takes 1 to 3 arguments"},
+		{"toReversed wrong arity", `let items: string[] = ["a"]
+let reversed: string[] = items.toReversed("bad")`, "toReversed() takes no arguments"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
