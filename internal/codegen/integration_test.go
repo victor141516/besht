@@ -1801,6 +1801,7 @@ console.log(["a", "b", "c"].slice(1).join(","))
 console.log(["a", "b"].reverse().join(","))
 console.log(["a", "b"].toReversed().join(","))
 console.log(["c", "a", "b"].toSorted().join(","))
+console.log(["a", "b", "c"].toSpliced(1, 1, "x", "y").join(","))
 console.log(["a", "b"].push("c").join(","))
 console.log(Array.of("a", "b").concat(Array.of("c")).join("|"))
 console.log(["a", "b", "c"].at(1))
@@ -1812,6 +1813,7 @@ console.log(xs.slice(1).join(","))
 console.log(xs.reverse().join(","))
 console.log(xs.toReversed().join(","))
 console.log(["c", "a", "b"].toSorted().join(","))
+console.log(xs.toSpliced(1, 0, "x").join(","))
 console.log(xs.push("c").join(","))
 let index = Number.parseInt("1", 10)
 console.log(xs.concat(["c"]).at(index))
@@ -1819,11 +1821,12 @@ console.log(xs.concat(["c"]).at(-1))
 console.log(xs.concat(["c"]).at(10) ?? "missing")
 xs.toReversed()
 xs.toSorted()
+xs.toSpliced(1, 1, "z")
 console.log(xs.join(","))
 for (value in xs.concat(["c"])) {
     console.log(value)
 }`)
-	want := "a,b,c\nb,c\nb,a\nb,a\na,b,c\na,b,c\na|b|c\nb\nc\nmissing\na,b,c\nb\nb,a\nb,a\na,b,c\na,b,c\nb\nc\nmissing\na,b\na\nb\nc\n"
+	want := "a,b,c\nb,c\nb,a\nb,a\na,b,c\na,x,y,c\na,b,c\na|b|c\nb\nc\nmissing\na,b,c\nb\nb,a\nb,a\na,b,c\na,x,b\na,b,c\nb\nc\nmissing\na,b\na\nb\nc\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -1858,6 +1861,27 @@ console.log(sorted.join(","))
 console.log(items.join(","))
 `)
 	want := "a,b,c\nc,a,b\n"
+	if out != want {
+		t.Fatalf("output: got %q, want %q", out, want)
+	}
+}
+
+func TestIntegration_ListToSplicedDynamicRuntime(t *testing.T) {
+	out := runCompiledShell(t, `let items = ["a", "b", "c"]
+while (true) {
+    items = items.push("d")
+    break
+}
+let inserted = items.toSpliced(2, 0, "x")
+let replaced = items.toSpliced(1, 2, "y", "z")
+let removedTail = items.toSpliced(-2)
+items.toSpliced(1, 1, "q")
+console.log(inserted.join(","))
+console.log(replaced.join(","))
+console.log(removedTail.join(","))
+console.log(items.join(","))
+`)
+	want := "a,b,x,c,d\na,y,z,d\na,b\na,b,c,d\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

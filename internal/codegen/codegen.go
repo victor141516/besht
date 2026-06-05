@@ -4442,6 +4442,40 @@ func (g *Generator) staticScalarListMethodValues(e *ast.MethodCallExpr) ([]strin
 		out := append([]string(nil), values...)
 		sort.Strings(out)
 		return out, true
+	case "toSpliced":
+		if len(e.Args) < 1 {
+			return nil, false
+		}
+		start, ok := staticIntValue(e.Args[0])
+		if !ok {
+			return nil, false
+		}
+		if start < 0 {
+			start = len(values) + start
+		}
+		start = clampInt(start, 0, len(values))
+		deleteCount := len(values) - start
+		insertStart := 1
+		if len(e.Args) >= 2 {
+			deleteCount, ok = staticIntValue(e.Args[1])
+			if !ok {
+				return nil, false
+			}
+			deleteCount = clampInt(deleteCount, 0, len(values)-start)
+			insertStart = 2
+		}
+		inserts := make([]string, 0, len(e.Args)-insertStart)
+		for _, arg := range e.Args[insertStart:] {
+			value, ok := staticScalarValue(arg)
+			if !ok || strings.Contains(value, "\n") {
+				return nil, false
+			}
+			inserts = append(inserts, value)
+		}
+		out := append([]string(nil), values[:start]...)
+		out = append(out, inserts...)
+		out = append(out, values[start+deleteCount:]...)
+		return out, true
 	case "fill":
 		if len(e.Args) < 1 || len(e.Args) > 3 {
 			return nil, false
@@ -5563,7 +5597,7 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 			switch e.Method {
 			case "forEach":
 				return g.genListForEachStmt(e)
-			case "toReversed", "toSorted":
+			case "toReversed", "toSorted", "toSpliced":
 				return g.genDiscardExprStmt(s.Expr)
 			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "sort", "fill":
 				if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
@@ -9272,7 +9306,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		}
 		if recvType != nil && recvType.Kind == ast.TypeList {
 			switch e.Method {
-			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "toReversed", "sort", "toSorted", "filter", "fill":
+			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "toReversed", "sort", "toSorted", "toSpliced", "filter", "fill":
 				return recvType
 			case "map":
 				if len(e.Args) == 1 {
@@ -9333,7 +9367,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return typeNumber
 		case "includes", "startsWith", "endsWith":
 			return &ast.Type{Kind: ast.TypeBoolean}
-		case "push", "pop", "shift", "unshift", "reverse", "toReversed", "sort", "toSorted", "fill":
+		case "push", "pop", "shift", "unshift", "reverse", "toReversed", "sort", "toSorted", "toSpliced", "fill":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
 		}
 	case *ast.TernaryExpr:
@@ -10041,6 +10075,8 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 
 	case "fill":
 		return g.genListFill(recv, e)
+	case "toSpliced":
+		return g.genListToSpliced(recv, e)
 
 	case "join":
 		a0, err := arg0()
@@ -10172,6 +10208,56 @@ END{n=hasLen?len:NR; if(s<0)s=n+s; if(hasEnd){if(e<0)e=n+e}else e=n; if(s<0)s=0;
 	return fmt.Sprintf("$(%s=%s; if [ -n \"$%s\" ]; then printf '%%s\\n' \"$%s\" | awk %s %s; fi)", dataVar, recv, dataVar, dataVar, strings.Join(args, " "), awkScript), nil
 }
 
+func (g *Generator) genListToSpliced(recv string, e *ast.MethodCallExpr) (string, error) {
+	if len(e.Args) < 1 {
+		return "", fmt.Errorf("toSpliced() takes at least 1 argument")
+	}
+	start, err := g.genExprValue(e.Args[0])
+	if err != nil {
+		return "", err
+	}
+	deleteCount := "0"
+	hasDeleteCount := "0"
+	insertStart := 1
+	if len(e.Args) >= 2 {
+		deleteCount, err = g.genExprValue(e.Args[1])
+		if err != nil {
+			return "", err
+		}
+		hasDeleteCount = "1"
+		insertStart = 2
+	}
+	args := []string{
+		awkArg("_start", start),
+		awkArg("_delete", deleteCount),
+		awkArg("_hasDelete", hasDeleteCount),
+	}
+	var insertScript strings.Builder
+	for i, arg := range e.Args[insertStart:] {
+		value, err := g.genExprValue(arg)
+		if err != nil {
+			return "", err
+		}
+		name := fmt.Sprintf("_ins%d", i)
+		args = append(args, awkArg(name, value))
+		insertScript.WriteString("emit(")
+		insertScript.WriteString(name)
+		insertScript.WriteString(");")
+	}
+	awkScript := `'BEGIN{hasDelete=int(_hasDelete);s=int(_start);d=int(_delete);hasLen=int(_hasLen);len=int(_len)}
+{a[NR]=$0}
+END{n=hasLen?len:NR;if(s<0)s=n+s;if(s<0)s=0;if(s>n)s=n;if(hasDelete){if(d<0)d=0;if(d>n-s)d=n-s}else d=n-s;end=s+d;for(i=1;i<=s;i++)emit(a[i]);` + insertScript.String() + `for(i=end+1;i<=n;i++)emit(a[i])}
+function emit(v){if(out)printf "\n";printf "%s",v;out=1}'`
+	if known := g.listLengthExpr(e.Receiver); known != "" {
+		args = append(args, awkArg("_hasLen", "1"), awkArg("_len", known))
+		return fmt.Sprintf("$(printf '%%s\\n' %s | awk %s %s)", ensureArgSafe(recv), strings.Join(args, " "), awkScript), nil
+	}
+	dataVar := fmt.Sprintf("_splice_%d_%d_data", e.Pos.Line, e.Pos.Column)
+	args = append(args, awkArg("_hasLen", "0"), awkArg("_len", "0"))
+	argString := strings.Join(args, " ")
+	return fmt.Sprintf("$(%s=%s; if [ -n \"$%s\" ]; then printf '%%s\\n' \"$%s\" | awk %s %s; else printf '%%s' '' | awk %s %s; fi)", dataVar, recv, dataVar, dataVar, argString, awkScript, argString, awkScript), nil
+}
+
 func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool, error) {
 	values, ok := g.staticScalarListValuesWithoutNewlines(e.Receiver)
 	if !ok {
@@ -10214,7 +10300,7 @@ func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool
 
 func (g *Generator) genStaticListValueMethod(e *ast.MethodCallExpr) (string, bool, error) {
 	switch e.Method {
-	case "concat", "slice", "reverse", "toReversed", "sort", "toSorted", "fill", "push", "unshift", "pop", "shift":
+	case "concat", "slice", "reverse", "toReversed", "sort", "toSorted", "toSpliced", "fill", "push", "unshift", "pop", "shift":
 	default:
 		return "", false, nil
 	}

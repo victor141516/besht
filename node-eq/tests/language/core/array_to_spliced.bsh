@@ -1,0 +1,20 @@
+const items = ["a", "b", "c", "d"]
+
+console.log(items.toSpliced(1, 2, "x", "y").join(","))
+console.log(items.toSpliced(2, 0, "x").join(","))
+console.log(items.toSpliced(-2).join(","))
+console.log(items.join(","))
+
+let mutable = ["left", "middle", "right"]
+mutable.toSpliced(1, 1, "new")
+console.log(mutable.join(","))
+
+let dynamic = ["a", "b", "c"]
+while (true) {
+    dynamic = ["a", "b", "c", "d"]
+    break
+}
+
+console.log(dynamic.toSpliced(1, 2, "x", "y").join("|"))
+console.log(dynamic.toSpliced(-1, 1).join("|"))
+console.log(dynamic.join("|"))

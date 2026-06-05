@@ -848,13 +848,14 @@ let hasConfig: boolean = files.includes("config.txt")
 let allFiles = files.concat(otherFiles)
 let sortedFiles = files.sort()
 let sortedCopy = files.toSorted()
+let replacedCopy = files.toSpliced(1, 1, "new-name")
 ```
 
 Scalar array `.toString()` is supported as comma-join output; general `Array.prototype.flat()` and nested-array `.toString()` flattening are not part of this slice. Use `.flatMap()` for one-level flattening of callback-returned scalar arrays. Static scalar array literals and variables bound to static scalar arrays fold `.join()` and `.toString()` calls to one quoted string when elements contain no newlines and the separator is static.
 
-Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `toReversed`, `sort`, `toSorted`, `fill`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the generated `printf` builder.
+Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `toReversed`, `sort`, `toSorted`, `toSpliced`, `fill`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the generated `printf` builder.
 
-`items.sort()` and `items.toSorted()` return default lexical sorted arrays. Static scalar receivers fold to constants; dynamic receivers use POSIX `LC_ALL=C sort`. Comparator callbacks such as `items.sort((a, b) => ...)` are not supported yet. `items.toReversed()` and `items.toSorted()` are copy-style APIs and never rebind the receiver; statement-position `items.reverse()` and `items.sort()` are the Besht rebind forms. Like other Besht array-returning methods, `let sorted = items.sort()` leaves `items` unchanged, while a statement-position `items.sort()` rebinds the named array to the sorted result.
+`items.sort()` and `items.toSorted()` return default lexical sorted arrays. Static scalar receivers fold to constants; dynamic receivers use POSIX `LC_ALL=C sort`. Comparator callbacks such as `items.sort((a, b) => ...)` are not supported yet. `items.toReversed()`, `items.toSorted()`, and `items.toSpliced(start, deleteCount?, ...items)` are copy-style APIs and never rebind the receiver; statement-position `items.reverse()` and `items.sort()` are the Besht rebind forms. `toSpliced()` follows JavaScript-style start/delete bounds and folds for static scalar receivers. Like other Besht array-returning methods, `let sorted = items.sort()` leaves `items` unchanged, while a statement-position `items.sort()` rebinds the named array to the sorted result.
 
 Static scalar `Array.of(...)` calls, static `Array.from("text")` calls, and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings when values contain no newlines; dynamic factories keep the generated builder. Besht `Array.from({ length })` creates a numeric range and does not support general iterable or mapper forms.
 
@@ -961,6 +962,7 @@ files.toString(); // "z,a,b,a" for scalar arrays
 files.sort(); // ["a", "a", "b", "z"]
 files.toReversed(); // reversed copy; files is unchanged
 files.toSorted(); // sorted copy; files is unchanged
+files.toSpliced(1, 2, "x"); // copied splice; files is unchanged
 Array.of("a", "b"); // ["a", "b"]
 Array.isArray(files); // true for compiler-known arrays
 ```

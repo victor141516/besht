@@ -1932,6 +1932,7 @@ let reversedJoined = ["a", "b"].reverse().join(",")
 let toReversedJoined = ["a", "b"].toReversed().join(",")
 let sortedJoined = ["c", "a", "b"].sort().join(",")
 let toSortedJoined = ["c", "a", "b"].toSorted().join(",")
+let toSplicedJoined = ["a", "b", "c"].toSpliced(1, 1, "x", "y").join(",")
 let pushedJoined = ["a", "b"].push("c").join(",")
 let factoryJoined = Array.of("a", "b").concat(Array.of("c")).join("|")
 let xs = ["a", "b"]
@@ -1941,6 +1942,7 @@ let varReverse = xs.reverse().join(",")
 let varToReversed = xs.toReversed().join(",")
 let varSort = ["c", "a", "b"].sort().join(",")
 let varToSorted = ["c", "a", "b"].toSorted().join(",")
+let varToSpliced = xs.toSpliced(1, 0, "x").join(",")
 let varPush = xs.push("c").join(",")
 let count = xs.concat(["c"]).length
 let item = xs.concat(["c"])[2]
@@ -1956,6 +1958,7 @@ for (value in xs.concat(["d"])) {
 	assertContains(t, out, `toReversedJoined='b,a'`)
 	assertContains(t, out, `sortedJoined='a,b,c'`)
 	assertContains(t, out, `toSortedJoined='a,b,c'`)
+	assertContains(t, out, `toSplicedJoined='a,x,y,c'`)
 	assertContains(t, out, `pushedJoined='a,b,c'`)
 	assertContains(t, out, `factoryJoined='a|b|c'`)
 	assertContains(t, out, `varJoined='a,b,c'`)
@@ -1964,6 +1967,7 @@ for (value in xs.concat(["d"])) {
 	assertContains(t, out, `varToReversed='b,a'`)
 	assertContains(t, out, `varSort='a,b,c'`)
 	assertContains(t, out, `varToSorted='a,b,c'`)
+	assertContains(t, out, `varToSpliced='a,x,b'`)
 	assertContains(t, out, `varPush='a,b,c'`)
 	assertContains(t, out, `count=3`)
 	assertContains(t, out, `item='c'`)
@@ -2135,6 +2139,37 @@ let joined = l.join(",")`)
 	assertContains(t, out, `: "$(printf '%s\n' "$l" | LC_ALL=C sort)"`)
 	assertContains(t, out, `awk -v s=','`)
 	assertNotContains(t, out, `l=$(printf '%s\n' "$l" | LC_ALL=C sort)`)
+}
+
+func TestCodegen_ListToSpliced(t *testing.T) {
+	out := compile(t, `let l: Array<string> = ["a", "b", "c", "d"]
+let replaced: Array<string> = l.toSpliced(1, 2, "x", "y")
+let removedTail: Array<string> = l.toSpliced(-2)
+l.toSpliced(1, 1, "z")
+let joined = l.join(",")`)
+	assertContains(t, out, "replaced='a\nx\ny\nd'")
+	assertContains(t, out, "removedTail='a\nb'")
+	assertContains(t, out, `joined='a,b,c,d'`)
+	assertNotContains(t, out, `_splice_`)
+	assertNotContains(t, out, "l='a\nz\nc\nd'")
+}
+
+func TestCodegen_ListToSplicedFallsBackForDynamicLists(t *testing.T) {
+	out := compile(t, `let l: Array<string> = ["a", "b", "c"]
+while (true) {
+    l = l.push("d")
+    break
+}
+let replaced: Array<string> = l.toSpliced(1, 2, "x", "y")
+l.toSpliced(1, 1, "z")
+let joined = l.join(",")`)
+	assertContains(t, out, `replaced=$(_splice_`)
+	assertContains(t, out, `-v _start=1`)
+	assertContains(t, out, `-v _delete=2`)
+	assertContains(t, out, `emit(_ins0);emit(_ins1);`)
+	assertContains(t, out, `: "$(_splice_`)
+	assertContains(t, out, `joined=$(printf '%s`)
+	assertNotContains(t, out, `l=$(_splice_`)
 }
 
 func TestCodegen_ListFill(t *testing.T) {
