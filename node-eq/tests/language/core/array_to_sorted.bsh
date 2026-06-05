@@ -1,0 +1,20 @@
+const words = ["c", "a", "b"]
+const sortedWords = words.toSorted()
+
+console.log(sortedWords.join(","))
+console.log(words.join(","))
+console.log(["b a", "b", "aa"].toSorted().join("/"))
+
+let mutable = ["right", "left"]
+mutable.toSorted()
+console.log(mutable.join(","))
+
+let dynamic = ["c", "a"]
+while (true) {
+    dynamic = ["c", "a", "b"]
+    break
+}
+let dynamicSorted = dynamic.toSorted()
+dynamic.toSorted()
+console.log(dynamicSorted.join(","))
+console.log(dynamic.join(","))

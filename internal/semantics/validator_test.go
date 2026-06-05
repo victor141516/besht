@@ -641,6 +641,11 @@ func TestValidator_ListSort(t *testing.T) {
 let r: Array<string> = l.sort()`)
 }
 
+func TestValidator_ListToSorted(t *testing.T) {
+	mustCheck(t, `let l: Array<string> = ["c", "a", "b"]
+let r: Array<string> = l.toSorted()`)
+}
+
 func TestValidator_ListFill(t *testing.T) {
 	mustCheck(t, `let l: Array<string> = ["a", "b", "c"]
 let all: Array<string> = l.fill("x")
@@ -895,6 +900,8 @@ let i: number = s.lastIndexOf()`, "lastIndexOf() takes 1 or 2 arguments"},
 let i: number = l.lastIndexOf()`, "lastIndexOf() takes 1 argument"},
 		{"list sort arity", `let l: string[] = ["a"]
 let next: string[] = l.sort((a, b) => 0)`, "sort() takes no arguments"},
+		{"list toSorted arity", `let l: string[] = ["a"]
+let next: string[] = l.toSorted((a, b) => 0)`, "toSorted() takes no arguments"},
 		{"string lastIndexOf arity", `let s: string = "abc"
 let i: number = s.lastIndexOf("a", 1, 2)`, "lastIndexOf() takes 1 or 2 arguments"},
 		{"safe integer arity", `let ok: boolean = Number.isSafeInteger()`, "Number.isSafeInteger() takes 1 argument"},

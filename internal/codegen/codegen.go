@@ -4435,7 +4435,7 @@ func (g *Generator) staticScalarListMethodValues(e *ast.MethodCallExpr) ([]strin
 			out[i], out[j] = out[j], out[i]
 		}
 		return out, true
-	case "sort":
+	case "sort", "toSorted":
 		if len(e.Args) != 0 {
 			return nil, false
 		}
@@ -5563,7 +5563,7 @@ func (g *Generator) genExprStmt(s *ast.ExprStmt) error {
 			switch e.Method {
 			case "forEach":
 				return g.genListForEachStmt(e)
-			case "toReversed":
+			case "toReversed", "toSorted":
 				return g.genDiscardExprStmt(s.Expr)
 			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "sort", "fill":
 				if ident, ok := e.Receiver.(*ast.IdentExpr); ok {
@@ -9272,7 +9272,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		}
 		if recvType != nil && recvType.Kind == ast.TypeList {
 			switch e.Method {
-			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "toReversed", "sort", "filter", "fill":
+			case "push", "pop", "shift", "unshift", "concat", "slice", "reverse", "toReversed", "sort", "toSorted", "filter", "fill":
 				return recvType
 			case "map":
 				if len(e.Args) == 1 {
@@ -9333,7 +9333,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 			return typeNumber
 		case "includes", "startsWith", "endsWith":
 			return &ast.Type{Kind: ast.TypeBoolean}
-		case "push", "pop", "shift", "unshift", "reverse", "toReversed", "sort", "fill":
+		case "push", "pop", "shift", "unshift", "reverse", "toReversed", "sort", "toSorted", "fill":
 			return &ast.Type{Kind: ast.TypeList, Elem: &ast.Type{Kind: ast.TypeString}}
 		}
 	case *ast.TernaryExpr:
@@ -10107,9 +10107,9 @@ func (g *Generator) genListMethod(recv string, e *ast.MethodCallExpr) (string, e
 	case "reverse", "toReversed":
 		return fmt.Sprintf("$(printf '%%s\\n' %s | tail -r 2>/dev/null || printf '%%s\\n' %s | awk 'BEGIN{OFMT=\"%%.17g\";i=0}{a[i++]=$0}END{while(i--)print a[i]}')", recv, recv), nil
 
-	case "sort":
+	case "sort", "toSorted":
 		if len(e.Args) != 0 {
-			return "", fmt.Errorf("sort() takes no arguments")
+			return "", fmt.Errorf("%s() takes no arguments", e.Method)
 		}
 		return fmt.Sprintf("$(printf '%%s\\n' %s | LC_ALL=C sort)", ensureArgSafe(recv)), nil
 
@@ -10214,7 +10214,7 @@ func (g *Generator) genStaticListJoinMethod(e *ast.MethodCallExpr) (string, bool
 
 func (g *Generator) genStaticListValueMethod(e *ast.MethodCallExpr) (string, bool, error) {
 	switch e.Method {
-	case "concat", "slice", "reverse", "toReversed", "sort", "fill", "push", "unshift", "pop", "shift":
+	case "concat", "slice", "reverse", "toReversed", "sort", "toSorted", "fill", "push", "unshift", "pop", "shift":
 	default:
 		return "", false, nil
 	}
