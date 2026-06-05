@@ -328,6 +328,9 @@ func TestIntegration_GeneratedStdlibDeclarationsAutoLoadUnderCheck(t *testing.T)
 	if !strings.Contains(stdlib.Declarations, "function isArray(value): boolean") {
 		t.Fatalf("generated stdlib should declare Array.isArray with an untyped value parameter")
 	}
+	if !strings.Contains(stdlib.Declarations, "function from(source: string): string[]") {
+		t.Fatalf("generated stdlib should declare Array.from(string)")
+	}
 	if !strings.Contains(stdlib.Declarations, "declare function Boolean(value): boolean") {
 		t.Fatalf("generated stdlib should declare Boolean(value)")
 	}
@@ -2975,13 +2978,19 @@ console.log(empty.join(",") === "")`)
 func TestIntegration_StaticArrayFactoriesRuntime(t *testing.T) {
 	out := runCompiledShell(t, `let indexes = Array.from({ length: 3 })
 console.log(indexes.length)
+console.log(Array.from("abc").join("|"))
+let text = "xy"
+console.log(Array.from(text).join(","))
+for (ch in Array.from("hi")) {
+    console.log(ch)
+}
 for (value in Array.of("x", "y")) {
     console.log(value)
 }
 for (i in indexes) {
     console.log(i)
 }`)
-	want := "3\nx\ny\n0\n1\n2\n"
+	want := "3\na|b|c\nx,y\nh\ni\nx\ny\n0\n1\n2\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -2994,9 +3003,9 @@ func TestIntegration_ArrayFromRejectsUnsupportedForms(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "iterable string",
-			src:     `let chars = Array.from("abc")`,
-			wantErr: "Array.from() currently supports only { length: expr }",
+			name:    "list source",
+			src:     `let chars = Array.from(["a", "b"])`,
+			wantErr: "Array.from() currently supports only { length: expr } or a string",
 		},
 		{
 			name:    "mapper callback",

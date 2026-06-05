@@ -70,6 +70,7 @@ declare namespace Math {
 
 declare namespace Array {
     function from(source: { length: number }): number[]
+    function from(source: string): string[]
     function of(first: string, second: string): string[]
     function isArray(value): boolean
 }

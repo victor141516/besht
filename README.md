@@ -114,7 +114,7 @@ Files use the `.bsh` extension.
 - `switch/case/default` compiles to shell `case/esac`.
 - `if`/`else if`/`else`, `for`, and `while` bodies can be either braced blocks or a single bracketless statement; multiple statements still require braces.
 - Static scalar array literals and array-returning method chains over static scalar arrays (`concat`, `slice`, `reverse`, `push`, `unshift`, `pop`, `shift`) compile to quoted newline-backed shell strings when values do not contain newlines; dynamic, spread, nested, and newline-sensitive arrays keep the `printf` builder.
-- Static scalar `Array.of(...)` calls and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
+- Static scalar `Array.of(...)` calls, static `Array.from("text")` calls, and Besht's narrow static `Array.from({ length: N })` calls compile to quoted newline-backed shell strings and compact loops when values contain no newlines; dynamic factories keep the existing builder path.
 - Static string literals, variables bound to static string literals, static scalar array expressions, and variables bound to static scalar arrays compile `.length` properties to numeric constants; dynamic lengths keep the POSIX `wc` path.
 - `for (... in [...])` and loops over static scalar array expressions or variables bound to them compile to compact shell `for` loops when values do not contain newlines; dynamic arrays keep the newline-safe read loop.
 - Static scalar array indexes and `.at()` calls with known in-range integer indexes, including negative `.at()` indexes, and static nested-array indexes with known row/column indexes compile to constants; dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/`awk`/packed-row path.
@@ -143,7 +143,7 @@ Files use the `.bsh` extension.
 - Generated shell includes `# besht:file:line:col` source comments at non-class statement boundaries and before explicit class constructor/accessor/method shell functions.
 - When the runtime preamble is empty, generated shell uses a single blank separator between the header and the first statement.
 - Semicolons are optional (only required inside `for` headers).
-- `Array.from({ length })` differs from JavaScript: it creates the numeric array `0` through `length - 1` and does not support general iterables or mapper callbacks. `Array.of(...)` creates an array from the given values. `Array.isArray(value)` is a static predicate for compiler-known arrays and adds no runtime shape metadata.
+- `Array.from("abc")` creates a string character array. `Array.from({ length })` differs from JavaScript: it creates the numeric array `0` through `length - 1` instead of `undefined` values and does not support mapper callbacks. `Array.of(...)` creates an array from the given values. `Array.isArray(value)` is a static predicate for compiler-known arrays and adds no runtime shape metadata.
 - `Object.keys(obj)`, `Object.values(obj)`, `Object.entries(obj)`, `Object.hasOwn(obj, key)`, `Object.assign(target, ...sources)`, and object spread differ from broad JavaScript object reflection/copying: they use compiler-managed object key metadata, require Besht-compatible keys, reject unsupported object surfaces, and do not emit runtime helpers.
 - JSON support is opt-in through `--opt-use-jq` and invokes `jq` in generated code. `JSON.parse()` returns a compact `JSONValue`; property/index access on that value returns another `JSONValue`; `: string`, `: number`, `: boolean`, or `as ...` extract scalars with runtime validation. `JSON.stringify()` supports `JSONValue`, strings, numbers, booleans, null/undefined, scalar arrays, and scalar-valued compiler-managed objects.
 - `fetch(url).text()` is a synchronous, curl-backed, text-only GET slice. It emits `curl -sS -- <url>` and intentionally does not support `await`, options, POST, headers, body, `.json()`, `.status`, `.ok`, or `.headers` yet.
@@ -158,7 +158,7 @@ Besht accepts TypeScript-flavored syntax, but it compiles to POSIX sh and does n
 | ---- | ------- | -------------------------------- | -------------- |
 | Type annotations | `let n: number = "x"` | TypeScript reports a type error. | Compiles; annotations are ignored except for compiler representation hints. |
 | `Array.from({ length })` | `Array.from({ length: 3 })` | Creates three `undefined` values. | Creates the numeric array `[0, 1, 2]`. |
-| Unsupported `Array.from()` forms | `Array.from("abc")` | Creates `["a", "b", "c"]`. | Fails at Besht compile time; only `{ length }` is supported. |
+| Unsupported `Array.from()` forms | `Array.from(["a"])` | Copies an iterable array. | Fails at Besht compile time; only strings and `{ length }` are supported. |
 | Object reflection boundary | `Object.keys(process.env)` | Returns enumerable environment keys in Node-like runtimes. | Fails at Besht compile time; `process.env` is not enumerable. |
 | Scalar-only object values | `Object.values({ xs: ["a"] })` | Returns the nested array value. | Fails at Besht compile time until nested values are supported. |
 | Static predicates | `Array.isArray(value)` inside `probe(value: unknown)` called with `["a"]` | Checks the runtime value and returns `true`. | Returns `false`; only compiler-known arrays are treated as arrays. |
@@ -652,6 +652,7 @@ Arrays have TypeScript-compatible methods:
 let l: string[] = ["alpha", "beta", "gamma"];
 let matrix: string[][] = ["ab", "cd"].map(row => row.split("") as string[]);
 let indexes: number[] = Array.from({ length: 3 }); // [0, 1, 2]
+let chars: string[] = Array.from("abc"); // ["a", "b", "c"]
 let chosen: string[] = Array.of("alpha", "omega"); // ["alpha", "omega"]
 let isArray: boolean = Array.isArray(chosen); // true for compiler-known arrays
 
@@ -687,7 +688,7 @@ const [row, col] = [1, 2]; // tuple/array destructuring, direct assignments for 
 let maybe = matrix?.[row]?.[col] ?? "missing"
 ```
 
-`Array.from({ length })` is a Besht-specific numeric range factory. Unlike JavaScript, it does not create an array of `undefined` values and does not accept arbitrary iterables or mapper callbacks.
+`Array.from("text")` creates a character array. `Array.from({ length })` is a Besht-specific numeric range factory. Unlike JavaScript, it does not create an array of `undefined` values and does not accept arbitrary iterables or mapper callbacks.
 
 Array `.toString()` is currently a scalar-array API slice. JavaScript nested-array flattening for `string[][]` and packed row arrays is not implemented.
 
@@ -946,10 +947,11 @@ Array helpers:
 | Function                   | Description                                 |
 | -------------------------- | ------------------------------------------- |
 | `Array.from({ length: n })` | Create the numeric array `0` through `n - 1` |
+| `Array.from(text)`          | Split a string into characters              |
 | `Array.of(a, b, ...)`        | Create an array from the given values         |
 | `Array.isArray(value)`       | Static predicate for compiler-known arrays    |
 
-`Array.from({ length })` is intentionally different from JavaScript: Besht creates a numeric array from `0` through `length - 1` and does not support general iterables or mapper callbacks.
+`Array.from("text")` follows JavaScript's string iterable behavior. `Array.from({ length })` is intentionally different from JavaScript: Besht creates a numeric array from `0` through `length - 1` and does not support general iterables or mapper callbacks.
 `Array.isArray()` is evaluated from Besht's inferred representations. It returns true for expressions the compiler knows are arrays and false otherwise; it does not add runtime shape metadata or dynamic JavaScript-style inspection.
 
 Object helpers:

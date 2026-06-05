@@ -1,0 +1,13 @@
+let chars = Array.from("abc")
+console.log(chars.join("|"))
+console.log(chars.length)
+console.log(chars[1])
+console.log(chars.at(-1))
+
+let text = "xy"
+console.log(Array.from(text).join(","))
+
+let hi = Array.from("hi")
+hi.forEach(ch => console.log(ch))
+
+console.log(Array.from("").length)

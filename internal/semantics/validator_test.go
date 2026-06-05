@@ -807,6 +807,7 @@ let last: number = s.lastIndexOf("lo")`},
 		{"list lastIndexOf", `let words: string[] = ["a", "b", "a"]
 let last: number = words.lastIndexOf("a")`},
 		{"Array.of", `let made: string[] = Array.of("x", "y", "z")`},
+		{"Array.from string", `let chars: string[] = Array.from("abc")`},
 		{"Array.isArray list", `let ok: boolean = Array.isArray(["x", "y"])`},
 		{"Array.isArray non-list", `let ok: boolean = Array.isArray("x")`},
 		{"Object.keys object", `let user = { id: 1, name: "Victor" }

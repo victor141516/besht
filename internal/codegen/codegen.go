@@ -4686,20 +4686,31 @@ func staticArrayFactoryValues(e *ast.BuiltinCallExpr) ([]string, bool) {
 		}
 		return values, true
 	case "Array.from":
+		if len(e.Args) != 1 {
+			return nil, false
+		}
 		lengthExpr, ok := arrayFromLengthArg(e)
+		if ok {
+			length, ok := staticIntLiteral(lengthExpr)
+			if !ok {
+				return nil, false
+			}
+			if length < 0 {
+				length = 0
+			}
+			values := make([]string, 0, length)
+			for i := 0; i < length; i++ {
+				values = append(values, strconv.Itoa(i))
+			}
+			return values, true
+		}
+		text, ok := staticASCIIStringValue(e.Args[0])
 		if !ok {
 			return nil, false
 		}
-		length, ok := staticIntLiteral(lengthExpr)
-		if !ok {
-			return nil, false
-		}
-		if length < 0 {
-			length = 0
-		}
-		values := make([]string, 0, length)
-		for i := 0; i < length; i++ {
-			values = append(values, strconv.Itoa(i))
+		values := make([]string, 0, len(text))
+		for i := 0; i < len(text); i++ {
+			values = append(values, text[i:i+1])
 		}
 		return values, true
 	default:
@@ -8208,7 +8219,20 @@ func (g *Generator) genBuiltinCapture(e *ast.BuiltinCallExpr) (string, error) {
 	case "Array.from":
 		lengthExpr, ok := arrayFromLengthArg(e)
 		if !ok {
-			return "", fmt.Errorf("Array.from() currently supports only { length: expr }")
+			if len(e.Args) == 1 {
+				if values, ok := staticArrayFactoryValues(e); ok {
+					return shellQuote(strings.Join(values, "\n")), nil
+				}
+				argType := g.inferReceiverType(e.Args[0])
+				if argType == nil || argType.Kind == ast.TypeString {
+					argStr, err := g.genExprValue(e.Args[0])
+					if err != nil {
+						return "", err
+					}
+					return fmt.Sprintf("$(printf '%%s' %s | awk 'BEGIN{ORS=\"\"}{if(NR>1)print \"__BESHT_NL__\\n\"; for(i=1;i<=length($0);i++) print substr($0,i,1) \"\\n\"}')", ensureArgSafe(argStr)), nil
+				}
+			}
+			return "", fmt.Errorf("Array.from() currently supports only { length: expr } or a string")
 		}
 		if values, ok := staticArrayFactoryValues(e); ok {
 			return shellQuote(strings.Join(values, "\n")), nil
