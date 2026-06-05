@@ -916,7 +916,7 @@ func (c *Validator) checkStringMethodArity(e *ast.MethodCallExpr) error {
 			}
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes no arguments"}
 		}
-	case "split", "repeat", "at", "charAt":
+	case "split", "repeat", "at", "charAt", "localeCompare":
 		if len(e.Args) != 1 {
 			return &SemanticError{Pos: e.Pos, Message: e.Method + "() takes 1 argument"}
 		}
@@ -1135,7 +1135,7 @@ func (c *Validator) semanticExprType(expr ast.Expression) *ast.Type {
 			switch e.Method {
 			case "includes", "startsWith", "endsWith":
 				return boolType
-			case "indexOf", "lastIndexOf":
+			case "indexOf", "lastIndexOf", "localeCompare":
 				return numType
 			case "split":
 				return listStrType

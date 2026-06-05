@@ -3000,9 +3000,12 @@ console.log("hello".startsWith("he"))
 console.log("hello".endsWith("lo"))
 console.log("hello".indexOf("l"))
 console.log("hello".lastIndexOf("l"))
+console.log("apple".localeCompare("banana"))
+console.log("apple".localeCompare("apple"))
+console.log("banana".localeCompare("apple"))
 console.log("hello".charAt(1))
 console.log("hello".charAt(99))`)
-	want := "true\ntrue\ntrue\n2\n3\ne\n\n"
+	want := "true\ntrue\ntrue\n2\n3\n-1\n0\n1\ne\n\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}
@@ -3049,11 +3052,12 @@ console.log(greeting.startsWith("he"))
 console.log(greeting.endsWith("lo"))
 console.log(greeting.indexOf("l"))
 console.log(greeting.lastIndexOf("l"))
+console.log(greeting.localeCompare("world"))
 console.log(greeting.replace("ell", "ipp"))
 console.log(greeting.replaceAll("l", "L"))
 console.log(greeting.concat("!", needle))
 if (greeting.includes(needle)) console.log("yes")`)
-	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\nhippo\nheLLo\nhello!ell\nyes\n"
+	want := "HELLO\nhi\ntrue\ntrue\ntrue\n2\n3\n-1\nhippo\nheLLo\nhello!ell\nyes\n"
 	if out != want {
 		t.Fatalf("output: got %q, want %q", out, want)
 	}

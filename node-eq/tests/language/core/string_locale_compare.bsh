@@ -1,0 +1,16 @@
+const apple = "apple"
+const banana = "banana"
+
+console.log(apple.localeCompare(banana))
+console.log(apple.localeCompare("apple"))
+console.log(banana.localeCompare(apple))
+
+let dynamic = "apple"
+while (true) {
+    dynamic = "banana"
+    break
+}
+
+console.log(dynamic.localeCompare(apple))
+console.log(dynamic.localeCompare("banana"))
+console.log("abc".localeCompare("abd"))

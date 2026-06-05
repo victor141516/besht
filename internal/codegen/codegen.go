@@ -9363,7 +9363,7 @@ func (g *Generator) inferReceiverType(expr ast.Expression) *ast.Type {
 		case "trim", "trimStart", "trimEnd", "toUpperCase", "toLowerCase",
 			"replace", "replaceAll", "slice", "substring", "at", "charAt", "concat", "padStart", "padEnd", "toString", "toFixed", "join":
 			return typeString
-		case "indexOf", "lastIndexOf", "length":
+		case "indexOf", "lastIndexOf", "localeCompare", "length":
 			return typeNumber
 		case "includes", "startsWith", "endsWith":
 			return &ast.Type{Kind: ast.TypeBoolean}
@@ -9685,7 +9685,7 @@ func (g *Generator) genMethodCall(e *ast.MethodCallExpr) (string, error) {
 		switch e.Method {
 		case "trim", "trimStart", "trimEnd", "toUpperCase", "toLowerCase",
 			"replace", "replaceAll", "split", "includes", "startsWith",
-			"endsWith", "indexOf", "lastIndexOf", "slice", "substring", "at", "charAt", "padStart", "padEnd",
+			"endsWith", "indexOf", "lastIndexOf", "localeCompare", "slice", "substring", "at", "charAt", "padStart", "padEnd",
 			"repeat", "concat":
 			isStringMethod = true
 		}
@@ -12439,6 +12439,13 @@ func (g *Generator) genStringMethod(recv string, e *ast.MethodCallExpr) (string,
 		}
 		return fmt.Sprintf("$(awk %s %s%s 'BEGIN{found=-1; _len=length(_s); n=length(_needle); _p=int(%s); if(_p<0)_p=0; if(_p>_len)_p=_len; if(n==0){printf \"%%d\", _p; exit} limit=_len-n; if(_p<limit) limit=_p; for(i=0;i<=limit;i++){if(substr(_s,i+1,n)==_needle) found=i} printf \"%%d\", found}')", awkArg("_s", recv), awkArg("_needle", a0), posArg, posExpr), nil
 
+	case "localeCompare":
+		a0, err := arg0()
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("$(LC_ALL=C awk %s %s 'BEGIN{printf \"%%d\", (_s < _other) ? -1 : ((_s > _other) ? 1 : 0)}')", awkArg("_s", recv), awkArg("_other", a0)), nil
+
 	case "at":
 		a0, err := arg0()
 		if err != nil {
@@ -12605,6 +12612,20 @@ func (g *Generator) genStaticStringMethod(e *ast.MethodCallExpr) (string, bool, 
 			}
 		}
 		return "-1", true, nil
+
+	case "localeCompare":
+		other, ok, err := stringArg()
+		if err != nil || !ok {
+			return "", ok, err
+		}
+		switch strings.Compare(recv, other) {
+		case -1:
+			return "-1", true, nil
+		case 1:
+			return "1", true, nil
+		default:
+			return "0", true, nil
+		}
 
 	case "charAt":
 		if len(e.Args) != 1 {

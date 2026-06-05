@@ -334,7 +334,7 @@ Inline static scalar object literal `Object.keys()`, `Object.values()`, `Object.
 
 ## String and Array Search
 
-Strings support `includes()`, `startsWith()`, and `endsWith()`, including optional search-position or length arguments. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold `[index]`, searches, and `charAt()` calls with static arguments to constants. Arrays also support `items.includes(x)` for exact item membership.
+Strings support `includes()`, `startsWith()`, `endsWith()`, and `localeCompare()`, including optional search-position or length arguments where JavaScript supports them. `localeCompare()` returns `-1`, `0`, or `1` using bytewise C-locale ordering, not full ICU locale collation. Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold `[index]`, searches, `localeCompare()`, and `charAt()` calls with static arguments to constants. Arrays also support `items.includes(x)` for exact item membership.
 
 Static ASCII string expressions built from literals, variables bound to static ASCII strings, concatenation, template interpolation, and chained transforms fold transforms such as `.trim()`, `.toUpperCase()`, `.slice()`, `.substring()`, `.repeat()`, `.replace()`/`.replaceAll()`, `.concat()`, and `.padStart()`/`.padEnd()` with static arguments to constants. Dynamic and non-ASCII transforms use POSIX tools; dynamic string `slice()`, `at()`, and indexing support normal substring extraction.
 
