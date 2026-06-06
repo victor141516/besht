@@ -1200,6 +1200,33 @@ let name: string = "world"`)
 	assertNotContains(t, string(mainOut), `types.d.sh`)
 }
 
+func TestIntegration_ImportedDeclarationDescribesExternalRuntimeFunction(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "tools.d.bsh", `declare function externalUpper(word: string): string`)
+	path := writeFile(t, dir, "main.bsh", `import { externalUpper } from "./tools.d"
+
+for (const word of ["ada", "grace"]) {
+    console.log(externalUpper(word))
+}`)
+	out := compileFile(t, path)
+	assertContains(t, out, `externalUpper "$word"`)
+	assertNotContains(t, out, `main__externalUpper`)
+	assertNotContains(t, out, `tools.d`)
+
+	shPath := filepath.Join(dir, "main.sh")
+	if err := os.WriteFile(shPath, []byte(out), 0755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+	cmd := exec.Command("sh", "-c", `externalUpper() { printf '%s\n' "$1" | tr '[:lower:]' '[:upper:]'; }; . "$1"`, "sh", shPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run shell: %v\n%s\n--- script ---\n%s", err, output, out)
+	}
+	if got, want := string(output), "ADA\nGRACE\n"; got != want {
+		t.Fatalf("output mismatch:\ngot  %q\nwant %q\n--- script ---\n%s", got, want, out)
+	}
+}
+
 func TestIntegration_ImportMultipleFunctions(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "lib/log.bsh", `export function info(msg: string) {

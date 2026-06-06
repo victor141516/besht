@@ -419,6 +419,8 @@ console.log(JSON.stringify(Number.parseInt("2a", 10)))
 
 Classes support constructors, instance properties/methods, `new`, `this`, static properties/methods, and getters/setters. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored. Inheritance, decorators, and abstract classes are not supported. Generated shell keeps `# besht:file:line:col` comments before explicit class constructor, accessor, and method functions unless `--opt-no-source-map` is used.
 
+When translating shell helper families that create a record, read/write its fields, and perform repeated operations on it, use either object literals plus functions or a class. Prefer a class when the behavior naturally belongs to a reusable stateful entity with constructor-style setup, methods, getters/setters, or static constants. For simple delimiter-separated records with only a few transformations, object literals are often enough.
+
 ```ts
 class User {
     name: string
@@ -638,6 +640,13 @@ if (probe.exitCode() == 0) {
   console.log("ok")
 }
 
+// Literal grep/test data usually becomes native data; real external status stays a command.
+let valid = ["alpha", "beta", "gamma"]
+console.log(valid.includes(word) ? "ok" : "missing")
+let realProbe = $("false").stdout("null").stderr("null")
+realProbe.run()
+console.log(realProbe.exitCode().toString())
+
 // Shell ${1:-.}: default on missing OR empty positional arg
 let root = Besht.args.positional(1) ?? "."
 if (Besht.strings.isEmpty(root)) {
@@ -766,12 +775,24 @@ for (line in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
 
 **Break and continue:**
 
-````ts
+```ts
 for (f in files) {
     if (Besht.strings.isEmpty(f)) { continue }
     if (f == "STOP") { break }
     $("echo", f).run()
 }
+```
+
+Shell `case "$item" in *"$query"*) ... ;; *) continue ;; esac` filters inside loops usually translate to ordinary string conditions:
+
+```ts
+for (item in items) {
+    if (!item.includes(query)) continue
+    console.log(item)
+}
+```
+
+Use `switch` for fixed alternatives such as modes or subcommands; use `if`, string methods, `continue`, and `break` for loop filters and limits.
 
 ## Array Indexing
 
@@ -785,7 +806,7 @@ args[1] = "BETA"              // index assignment
 let empty: string[] = []      // empty array
 let cell: string = matrix[row][col]
 let width: number = matrix[0].length
-````
+```
 
 Static scalar array indexes with known in-range integer indexes and static nested-array indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row extraction path.
 
@@ -907,6 +928,10 @@ legacy_log("from besht");
 ```
 
 Shell imports require a literal `.sh` path and `assert { type: "shell" }`. Default shell imports are rejected. Imported shell functions are unchecked varargs and return `string` in value position. `--check` validates imports and unsupported fetch response APIs. By default shell imports must stay inside the compiler root; pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root.
+
+When translating a shell project that sources helper files, make script-owned helpers `.bsh` modules with `export`/`import`. Preserve a `.sh` helper with an asserted shell import when it is genuinely existing shell code or depends on shell behavior you do not want to rewrite. If the helper is just simple text or data manipulation, rewriting it as Besht with string/array methods is usually cleaner.
+
+Declaration files (`.d.bsh` or entry-directory `stdlib.d.bsh`) provide editor/compiler signatures only. They do not source shell code or emit wrappers. If you call a declared external function, make sure that function exists at runtime through a real shell import, the execution environment, or another deliberate integration.
 
 ## Comments
 

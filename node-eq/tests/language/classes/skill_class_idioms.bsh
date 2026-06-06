@@ -1,0 +1,43 @@
+class Account {
+  static defaultRole: string = "guest"
+
+  name: string
+  role: string
+  status: string
+
+  constructor(name: string, status: string) {
+    this.name = name
+    this.role = Account.defaultRole
+    this.status = status
+  }
+
+  get label(): string {
+    return `${this.name}:${this.role}`
+  }
+
+  set label(role: string) {
+    this.role = role
+  }
+
+  isActive(): boolean {
+    return this.status == "active"
+  }
+
+  show() {
+    if (this.isActive()) {
+      console.log(`${this.label} active`)
+    } else {
+      console.log(`${this.label} inactive`)
+    }
+  }
+
+  static decorate(label: string): string {
+    return `[${label}]`
+  }
+}
+
+let acct = new Account("ada", "active")
+acct.show()
+acct.label = "admin"
+acct.show()
+console.log(Account.decorate(acct.label))

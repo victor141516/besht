@@ -1,0 +1,33 @@
+function scan(label: string, limit: number, query: string) {
+  console.log(label)
+  if (Besht.strings.isEmpty(query)) {
+    console.log("usage: scan QUERY")
+    return
+  }
+
+  let count = 0
+  const items = ["alpha", "beta", "gamma", "delta", "alphabet", "betamax"]
+
+  for (const item of items) {
+    if (!item.includes(query)) {
+      continue
+    }
+
+    count = count + 1
+    if (count > limit) {
+      console.log("too many matches")
+      break
+    }
+
+    console.log(`${count}:${item}`)
+  }
+
+  if (count == 0) {
+    console.log("no matches")
+  }
+}
+
+scan("--- match a limit 5 ---", 5, "a")
+scan("--- limit one ---", 1, "a")
+scan("--- none ---", 5, "z")
+scan("--- empty ---", 5, "")

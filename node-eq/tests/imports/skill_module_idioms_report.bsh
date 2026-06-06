@@ -1,0 +1,13 @@
+export default ["ada", "grace", "linus"]
+
+export function formatLabel(role: string, value: string): string {
+  return `${role}:${value}`
+}
+
+export function printInfo(label: string) {
+  console.log(`[INFO] ${label}`)
+}
+
+export function runDone() {
+  console.log("done")
+}

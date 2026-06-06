@@ -424,6 +424,17 @@ for (f in files) {
 }
 ```
 
+Shell `case "$item" in *"$query"*) ... ;; *) continue ;; esac` filters inside loops usually translate to string methods and normal flow control:
+
+```ts
+for (item in items) {
+  if (!item.includes(query)) continue
+  console.log(item)
+}
+```
+
+Use `switch` for fixed alternatives such as modes or subcommands; use `if`, string methods, `continue`, and `break` for loop filters and limits.
+
 **Switch / case / default** — compiles to shell `case/esac`:
 
 ```ts
@@ -614,6 +625,8 @@ Static and computed object keys must contain only letters, numbers, and `_`.
 ### Classes
 
 Classes compile to POSIX sh functions plus compiler-managed object property slots. Supported features are constructors, instance properties, instance methods, `new`, `this`, static properties/methods, and getters/setters. TypeScript-only modifiers (`private`, `public`, `protected`, `readonly`) are accepted and ignored. Inheritance, decorators, and abstract classes are not supported.
+
+When translating shell helper families that create a record, read/write its fields, and perform repeated operations on it, use either object literals plus functions or a class. Prefer a class when the behavior naturally belongs to a reusable stateful entity with constructor-style setup, methods, getters/setters, or static constants. For simple delimiter-separated records with only a few transformations, object literals are often enough.
 
 ```ts
 class User {
@@ -928,6 +941,8 @@ if (probe.exitCode() == 0) {
 }
 ```
 
+Literal `grep -q`, `case`, or `[ ]` checks over script-owned static data usually become native arrays, objects, sets, or predicates. Keep `.exitCode()` for genuinely external commands whose status is the result you need.
+
 For shell defaults like `${1:-.}`, remember that the `:-` form treats both missing and empty arguments as absent:
 
 ```ts
@@ -1114,7 +1129,7 @@ $(...defaultCmd).run();
 
 Imports are resolved at compile time. Named imports can reference exported functions, classes, and top-level `export const`/`export let` values. `export default <expr>` is imported with `import name from "./module"`. All Besht modules are concatenated into a single `.sh` file in bundled mode. Extensionless imports use `.bsh` only unless `--opt-resolve-ts-imports` is passed; with that opt-in, `.bsh` still wins and `.ts` is used only if `.bsh` is absent.
 
-Declaration files with the `.d.bsh` suffix provide editor-compatible declarations and compiler ABI hints without emitting shell. Declared functions are called by their declared names; besht does not generate wrappers for them. You can import declaration files explicitly, or place `stdlib.d.bsh` next to the entry file to make its declarations available automatically to bundled compile, split compile, and `--check`. Run `besht init` from a project directory to write the standard declarations to `./stdlib.d.bsh`; it will not overwrite different existing content unless you pass `besht init --force`. Only the entry directory is searched for this automatic stdlib file.
+Declaration files with the `.d.bsh` suffix provide editor-compatible declarations and compiler ABI hints without emitting shell. Declared functions are called by their declared names; besht does not generate wrappers for them. You can import declaration files explicitly, or place `stdlib.d.bsh` next to the entry file to make its declarations available automatically to bundled compile, split compile, and `--check`. Run `besht init` from a project directory to write the standard declarations to `./stdlib.d.bsh`; it will not overwrite different existing content unless you pass `besht init --force`. Only the entry directory is searched for this automatic stdlib file. If you call a declared external function, make sure that function exists at runtime through a real shell import, the execution environment, or another deliberate integration.
 
 Existing POSIX shell files can be imported explicitly with named imports and an assertion:
 
@@ -1126,6 +1141,8 @@ legacy_log("from besht");
 ```
 
 `--check` validates imports using the same module resolver as compilation and rejects unsupported fetch response APIs such as `.status` and `.json()`. Shell imports require a `.sh` path and `assert { type: "shell" }`. They are named-only; default shell imports are rejected. Besht does not parse the shell file or infer exports, so imported shell functions are unchecked varargs and return `string` when used in value position. By default, shell imports must stay inside the compiler root. Pass `--opt-allow-external-shell-imports` to permit explicit `.sh` imports outside that root. Bundled output sources the resolved `.sh` file with a guard. Split output copies in-root `.sh` dependencies into the output tree and sources them through `_BESHT_ROOT`; external opt-in shell imports are sourced from their original absolute path. Shell import guards use unique relative shell paths so names like `a-b.sh` and `a_b.sh` cannot collide.
+
+When translating a shell project that sources helper files, turn helpers owned by the script into `.bsh` modules with `export`/`import`. Keep a helper as `.sh` with an asserted shell import when it is genuinely existing shell code or relies on shell behavior you do not want to rewrite. If a helper only performs simple text or data manipulation, rewriting it as Besht with string/array methods is usually clearer.
 
 ### Comments
 

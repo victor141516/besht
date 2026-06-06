@@ -44,6 +44,13 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 - `node-eq/tests/language/callbacks/skill_native_data_idioms.*`: translating static text/number pipelines into native arrays, callbacks, string transforms, joins, reductions, and indexed `forEach`.
 - `node-eq/tests/commands/skill_args_env_predicates.*`: translating shell argument parsers, environment defaults, file predicates, and string predicates into `Besht.args`, `process.env`, `Besht.fs`, and `Besht.strings`.
 - `node-eq/tests/language/objects/skill_object_data_idioms.*`: translating static delimiter-separated records into objects, callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`.
+- `node-eq/tests/language/core/skill_control_flow_idioms.*`: translating shell `for`/`case` loop filters, counters, `continue`, `break`, and empty-input branches into native arrays, string methods, and ordinary Besht flow control.
+- `node-eq/tests/imports/skill_module_idioms.*`: translating sourced shell helper files into `.bsh` modules with named/default exports for script-owned helpers and asserted `.sh` imports for preserved shell helpers.
+- `node-eq/tests/language/classes/skill_class_idioms.*`: translating stateful shell helper families over pipe-delimited records into classes with constructors, fields, methods, accessors, and static members when a reusable entity is the natural model.
+- `node-eq/tests/commands/skill_status_idioms.*`: translating literal `grep -q`/membership checks over static data into native arrays while preserving `.exitCode()` for real external command status.
+- `internal/codegen/integration_test.go::TestIntegration_ImportedDeclarationDescribesExternalRuntimeFunction`: checking that imported `.d.bsh` declarations describe external runtime functions without emitting wrappers or sourcing implementations.
+
+Suggested next slice after the declaration/status/class guardrails: fetch and HTTP-facing scripts, especially the current synchronous text-only `fetch(url).text()` surface and avoiding unsupported promise/response APIs until they are designed.
 
 ### Feature families to keep probing
 

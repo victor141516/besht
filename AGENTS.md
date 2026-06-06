@@ -657,6 +657,14 @@ for (f in files) {
     $("echo", f).run()
 }
 
+// Shell case/glob filters inside loops usually become string conditions
+for (item in items) {
+    if (!item.includes(query)) continue
+    count += 1
+    if (count > limit) { break }
+    console.log(item)
+}
+
 // Array indexing (0-based)
 let first: string = files[0] // static scalar array indexes fold to constants when known
 let item: string = files[i]
@@ -1064,6 +1072,18 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 **Skill validation should cover script interface idioms.** `node-eq/tests/commands/skill_args_env_predicates.bsh` is paired with a shell source that reads options, flags, positionals, environment defaults, file predicates, and string predicates. The Besht fixture intentionally uses `Besht.args.option()`/`.flag()`/`.positional()`, `process.env.NAME ?? fallback`, `Besht.fs.*`, and `Besht.strings.*`; keep it as a guardrail against agents transliterating ordinary shell option parser loops or `[ -f ]`/`[ -z ]` checks.
 
 **Skill validation should cover static record idioms.** `node-eq/tests/language/objects/skill_object_data_idioms.bsh` is paired with a shell source that uses `awk -F:`, `cut`, `paste`, and membership probes over a literal colon-delimited table. The Besht fixture intentionally uses object literals, array callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`; keep it as a guardrail against agents preserving text-processing pipelines for static in-memory records.
+
+**Skill validation should cover control-flow idioms.** `node-eq/tests/language/core/skill_control_flow_idioms.bsh` is paired with a shell source that uses a `for` loop, `case "*$query*"` filtering, `continue`, `break`, counters, and an early empty-query branch. The Besht fixture intentionally uses native arrays, string `.includes()`, ordinary `if`, `continue`, `break`, and direct counters; keep it as a guardrail against agents embedding shell `case` snippets or external `grep` for in-memory loop filters.
+
+**Skill validation should cover module boundary idioms.** `node-eq/tests/imports/skill_module_idioms.bsh` is paired with a sourced multi-file shell project. The Besht fixture intentionally uses a `.bsh` module with named and default exports for script-owned helpers/data, plus an asserted `.sh` import for a preserved shell helper; keep it as a guardrail against agents collapsing sourced projects into one file or wrapping reusable helper boundaries in `$("sh", "-c", ...)`.
+
+**Skill validation should cover class-worthy stateful helper families.** `node-eq/tests/language/classes/skill_class_idioms.bsh` is paired with shell functions that create, read, mutate, and display a pipe-delimited account record. The Besht fixture intentionally uses a class with constructor setup, instance fields, methods, getter/setter, and a static member; keep it as a guardrail for teaching classes when behavior belongs to a reusable stateful entity. Simple record-only translations may still be better as object literals plus functions.
+
+**Skill validation should distinguish static checks from real command status.** `node-eq/tests/commands/skill_status_idioms.bsh` is paired with a shell source that mixes a literal `grep -qx` membership probe and real `true`/`false` command statuses. The Besht fixture intentionally uses native array membership for script-owned static data and `.run().exitCode()` only for real external command status.
+
+**Declaration-file skill validation is compiler-test-backed.** `TestIntegration_ImportedDeclarationDescribesExternalRuntimeFunction` covers imported `.d.bsh` signatures for external runtime functions. Declaration files provide editor/compiler signatures only: they do not emit wrappers, source shell files, or make runtime implementations appear. Keep node-eq fixtures away from `.d.bsh` imports unless the parity runner grows declaration-aware module handling.
+
+**node-eq fixtures run through TypeScript semantics too.** The Besht compiler treats `for (x in array)` as value iteration, but the Bun-side node-eq runner executes JavaScript/TypeScript where `for...in` over arrays yields indexes. Use `for...of` in node-eq fixtures when the fixture must pass both runners while exercising value iteration.
 
 **JSON object values must preserve expression types.** `JSON.stringify({ count: items.length })` must pass `items.length` to jq as JSON number data, not as a string. Keep `inferReceiverType()` aware that `.length` on strings and arrays is numeric so object-literal JSON codegen chooses `--argjson`.
 

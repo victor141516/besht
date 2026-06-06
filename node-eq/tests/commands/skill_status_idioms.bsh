@@ -1,0 +1,23 @@
+const validWords: string[] = ["alpha", "beta", "gamma"]
+
+for (const word of ["alpha", "omega", "beta"]) {
+  if (validWords.includes(word)) {
+    console.log(`ok:${word}`)
+  } else {
+    console.log(`missing:${word}:1`)
+  }
+}
+
+for (const cmd of ["true", "false", "true"]) {
+  let probe = $(cmd).stdout("null").stderr("null")
+  probe.run()
+  let code = probe.exitCode()
+
+  if (code == 0) {
+    console.log(`run:${cmd}:ok`)
+  } else {
+    console.log(`run:${cmd}:${code}`)
+  }
+}
+
+console.log("done")
