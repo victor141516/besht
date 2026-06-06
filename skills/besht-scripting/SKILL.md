@@ -79,7 +79,7 @@ let tmpl: string = `Hello ${name}!`  // template literal — interpolates ${name
 let sum = `sum=${a + b}`             // expressions inside ${...}
 let pattern: string = '^foo-[0-9]+'  // single-quoted literal text
 let path = "C:\\temp\\new\\file.txt" // escape backslashes in double-quoted strings
-let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // escape sequences
+let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$ hex:\x41"  // escape sequences
 let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 ```
 
@@ -93,7 +93,7 @@ let msg: string = `Hello, ${name}!`; // preferred when interpolation is needed
 let bigger = a > b ? a : b;
 ```
 
-Escape sequences in double-quoted strings: `\n` (newline), `\t` (tab), `\r` (carriage return), `\\` (backslash), `\"` (double quote), `\'` (single quote), `\uXXXX` (unicode). Single-quoted strings do NOT process escapes.
+Both quote styles use JavaScript-style escapes: `\b`, `\f`, `\n`, `\r`, `\t`, `\v`, `\\`, `\"`, `\'`, `\xHH`, and `\uXXXX` are decoded. Unknown identity escapes such as `\q` produce `q`. Use doubled backslashes when backslashes must stay literal.
 
 ## Environment Variables
 
@@ -223,11 +223,13 @@ Simple aliases such as `type Factory = string[]` can be used in later annotation
 let active = true && !false     // AND, NOT
 let either = active || false    // OR
 let fallback = maybe ?? "default" // nullish fallback only
-let same = x === y              // strict equality (same as ==)
-let diff = x !== y              // strict inequality (same as !=)
+let same = x === y              // supported equality
+let diff = x !== y              // supported inequality
 let sameBlock = output === `a
 b`                                // multiline-safe string equality
 ```
+
+Use `===` and `!==` for equality. `==` and `!=` are unsupported spellings: the compiler prints a warning and treats them as `===` and `!==` so runtime behavior stays strict-like.
 
 `||` and `&&` in value position return actual values (JS semantics): `a || b` returns `a` if truthy, else `b`. `a && b` returns `b` if `a` is truthy, else `a`. Static known-left `||`/`&&` expressions compile directly to the selected value. In condition position (`if`/`while`), they return 1/0 as booleans. `a ?? b` returns `b` only when `a` is `null`/`undefined`; it preserves empty string, `0`, and `false`. Static `??` expressions compile to the selected side when the left side is known.
 
@@ -261,7 +263,7 @@ For literal delimiter-separated records or shell snippets that use `awk -F:`, `c
 let names = ["alice", "bob", "anna"]
 let upper = names.map(name => name.toUpperCase())
 let aNames = upper.filter(name => name.startsWith("A"))
-let hasAnna = names.some(name => name == "anna")
+let hasAnna = names.some(name => name === "anna")
 let allShort = names.every((name, i) => name.length < 10 && i >= 0)
 let firstB = names.find(name => name.startsWith("b")) ?? "none"
 let lastA = names.findLast(name => name.startsWith("a")) ?? "none"
@@ -277,7 +279,7 @@ names.forEach((name, i) => {
     initials = initials + name.charAt(0)
 })
 let labeled = names.map((name, i) => {
-    if (i == 0) return "first:" + name
+    if (i === 0) return "first:" + name
     return i.toString() + ":" + name
 })
 
@@ -398,7 +400,7 @@ function withRole(obj: object, role: string): object {
 
 `Object.keys(obj)`, `Object.values(obj)`, and `Object.entries(obj)` return keys, scalar values, or `[key, value]` rows in insertion order, including aliases, object parameters, and later dot or computed-key assignments. `Object.assign(target, ...sources)` mutates the first argument and returns that same object; an inline object-literal target such as `{}` creates a fresh object. `Object.fromEntries(entries)` always creates a fresh object from scalar `[key, value]` rows. Object spread always creates a fresh object and copies spread sources and explicit properties left to right. Existing keys keep their first position, new keys append when first introduced, and later assigns, spreads, properties, or entries overwrite values. This differs from JavaScript runtime reflection over arbitrary enumerable properties: Besht uses compiler-managed object metadata, object keys must contain only letters, numbers, and `_`, and `process.env` is not enumerable. Unmutated named object key arrays, static-scalar value and entry arrays, static-key `Object.hasOwn()` calls, literal-only `Object.assign({}, ...)` calls, literal-only `Object.fromEntries(...)` calls, literal-only object spread calls, and safe direct reads of scalar properties from static object literal bindings compile to constants. Statically known boolean values are rendered as `true`/`false` in `Object.values()` and `Object.entries()` output. Static boolean object properties used directly in conditions can fold to the selected branch; dynamic boolean object properties compile to direct shell tests. Non-boolean property conditions keep JavaScript-style truthiness. `Object.is(a, b)` compares Besht scalar primitives with SameValue-style type tags for representable strings, numbers, booleans, `null`, and `undefined`; JavaScript-only `NaN` and `-0` distinctions and object identity are outside the current shell representation. `Object.values()`, `Object.entries()`, `Object.assign()`, `Object.fromEntries()`, and object spread reject statically known array/object/set/command/fetch values because the current array representations cannot preserve deeper nested object values. `Object.hasOwn(obj, key)` checks exact key membership against the same compiler-managed metadata and returns `false` for invalid dynamic key strings. `Object.fromEntries()` validates dynamic entry keys before writing object slots and exits with an invalid object key error for unsafe keys. `Object.assign()` also rejects class instances, `this`, `process.env`, and `const` targets; object spread rejects class instances, `this`, and `process.env` as spread sources. These helpers and object spread do not add a runtime helper library.
 
-JSON support requires `--opt-use-jq` and invokes `jq` in generated code. `JSON.parse(text)` validates and compacts JSON as a `JSONValue`; invalid JSON prints `[besht] JSON.parse() failed` and exits nonzero. Property/index access on a `JSONValue` returns another `JSONValue`. Missing final properties, out-of-range array indexes, and JSON `null` are nullish for `??`; accessing through a missing/null intermediate fails unless you use optional chaining. Add `: string`, `: number`, `: boolean`, or `as ...` to extract a JSON scalar into a normal Besht value. The compiler emits shared jq helpers for JSON reads, so write normal Besht paths instead of hand-written jq pipelines.
+JSON support requires `--opt-use-jq` and invokes `jq` in generated code. `JSON.parse(text)` validates and compacts JSON as a `JSONValue`; invalid JSON prints `[besht] JSON.parse() failed` and exits nonzero. Property/index access on a `JSONValue` returns another `JSONValue`. Missing final properties, out-of-range array indexes, and JSON `null` are nullish for `??`; accessing through a missing/null intermediate fails unless you use optional chaining. Add `: string`, `: number`, `: boolean`, or `as ...` to extract a JSON scalar into a normal Besht value. `JSON.stringify(value)` encodes `JSONValue`, strings, numbers, booleans, nullish values, scalar arrays, and scalar-valued compiler-managed objects; commands, fetch responses, sets, and nested Besht object/array/set values are rejected until Besht has a broader JSON representation. The compiler emits shared jq helpers for JSON reads, so write normal Besht paths instead of hand-written jq pipelines.
 
 ```ts
 let data = JSON.parse("{\"user\":{\"name\":\"Ada\"},\"scores\":[7]}")
@@ -778,7 +780,7 @@ for (line in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
 ```ts
 for (f in files) {
     if (Besht.strings.isEmpty(f)) { continue }
-    if (f == "STOP") { break }
+    if (f === "STOP") { break }
     $("echo", f).run()
 }
 ```
@@ -1022,8 +1024,8 @@ Note: booleans print as `true`/`false` in string contexts and can be used direct
 | Category            | Operators                   |
 | ------------------- | --------------------------- |
 | Arithmetic          | `+` `-` `*` `/` `%`         |
-| Comparison (number) | `>` `<` `>=` `<=` `==` `!=` |
-| Comparison (string) | `==` `!=`                   |
+| Comparison (number) | `>` `<` `>=` `<=` `===` `!==` |
+| Comparison (string) | `===` `!==`                   |
 | Logical             | `&&` `\|\|` `!`             |
 | Pipe                | `\|`                        |
 | Propagate           | `?`                         |
@@ -1096,7 +1098,7 @@ let lines: number = parseInt(raw); // string -> number
 - String, number, boolean, and status values can be converted with `.toString()` or compact `.toLocaleString()`; primitives, null/undefined, scalar arrays, objects, and Sets can be converted with `String(value)`; strings can be parsed with `Number.parseInt()` or global `parseInt()`; global `isFinite()` and `isNaN()` coerce scalar values like JavaScript
 - `if`/`else if`/`else`, `for`, and `while` bodies can be braced blocks or one bracketless statement; multiple statements still need braces
 - Semicolons are optional — only required inside `for (init; cond; update)` headers
-- `===`/`!==` are aliases for `==`/`!=`
+- `===`/`!==` are supported; `==`/`!=` warn and are treated the same as the strict spellings
 - Objects and classes support the operations described above; unsupported TypeScript features are listed in their sections
 - `items.join(sep)` supports multi-character separators
 - Scalar array `.toString()` and `.toLocaleString()` are supported as `items.join(",")`; nested-array JS flattening is not implemented

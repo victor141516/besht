@@ -574,7 +574,7 @@ func (n *ThisExpr) exprNode()    {}
 type BinaryExpr struct {
 	baseExpr
 	Pos   Pos
-	Op    string // "==", "!=", ">", "<", ">=", "<=", "+", "-", "*", "/", "%", "&&", "||", "??"
+	Op    string // "==", "!=", "===", "!==", ">", "<", ">=", "<=", "+", "-", "*", "/", "%", "&&", "||", "??"
 	Left  Expression
 	Right Expression
 }

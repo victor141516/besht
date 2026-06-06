@@ -1775,11 +1775,6 @@ func (p *Parser) parseComparison() (ast.Expression, error) {
 			return nil, err
 		}
 		op := tok.Literal
-		if op == "===" {
-			op = "=="
-		} else if op == "!==" {
-			op = "!="
-		}
 		return &ast.BinaryExpr{Pos: pos, Op: op, Left: left, Right: right}, nil
 	}
 	return left, nil

@@ -1,0 +1,11 @@
+// besht-compile-flags: --opt-use-jq
+
+console.log(JSON.stringify("double backspace:\b"))
+console.log(JSON.stringify('single backspace:\b'))
+console.log(JSON.stringify("double form feed:\f"))
+console.log(JSON.stringify('single vertical tab:\v'))
+console.log(JSON.stringify("double hex:\x41"))
+console.log(JSON.stringify('single hex:\x42'))
+console.log(JSON.stringify("identity escape:\q"))
+console.log(JSON.stringify('escaped dollar:\$HOME'))
+console.log(JSON.stringify('single newline:\nnext'))

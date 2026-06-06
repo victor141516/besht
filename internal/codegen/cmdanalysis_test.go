@@ -76,3 +76,26 @@ names.forEach(name => $("echo", name).run())
 		t.Fatalf("expected one command identity, got %d", len(analysis.Identities))
 	}
 }
+
+func TestCmdAnalysis_WarnsForUnsupportedLooseEquality(t *testing.T) {
+	prog, err := parser.Parse(`let a = "1"
+let b = 1
+console.log(a == b)
+console.log(a != b)
+console.log(a === b)
+console.log(a !== b)
+`, "test.bsh")
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	analysis := codegen.AnalyzeProgram(prog.Statements)
+	if len(analysis.Warnings) != 2 {
+		t.Fatalf("expected two warnings, got %#v", analysis.Warnings)
+	}
+	if !strings.Contains(analysis.Warnings[0].Message, "operator == is not supported") {
+		t.Fatalf("first warning did not mention ==: %#v", analysis.Warnings[0])
+	}
+	if !strings.Contains(analysis.Warnings[1].Message, "operator != is not supported") {
+		t.Fatalf("second warning did not mention !=: %#v", analysis.Warnings[1])
+	}
+}

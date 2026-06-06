@@ -86,6 +86,8 @@ This is not optional and does not require a prompt. Any time you add, change, re
 
 **Do not wait until the end of a session.** Update the docs in the same commit as the code change. A stale AGENTS.md, SKILL.md, or README.md is a bug.
 
+When behavior or a new API is not exactly TypeScript-compatible at runtime, document that runtime difference in both README.md and `skills/besht-scripting/SKILL.md`. Type annotations remain compile-erased unless a feature explicitly documents a runtime use of annotations.
+
 ### What to update and where
 
 | Changed                                        | Update                                                                                    |
@@ -453,7 +455,7 @@ let also: string = 'Alice'          // same — both quote styles are plain lite
 let tmpl: string = `Hello ${name}!` // template literal — ${var} interpolation
 let pattern: string = '^foo-[0-9]+$'  // single-quoted literal text
 let path: string = "C:\\temp\\new\\file.txt" // escape backslashes in double-quoted strings
-let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$"  // escape sequences
+let escape: string = "newline:\n tab:\t backslash:\\ quote:\" dollar:\$ hex:\x41"  // escape sequences
 let unicode: string = "A \u0041 ñ \u00F1"  // unicode escapes
 let count: number = 42
 let price: number = 3.14          // float literal — compiled to awk arithmetic
@@ -515,7 +517,7 @@ let either: boolean = active || false
 let negated: boolean = !active
 let fallback: string = maybeValue ?? "default" // nullish only; preserves "", 0, false
 
-// Strict equality (same as == / != — no type distinction in shell)
+// Equality
 let same: boolean = x === y
 let diff: boolean = x !== y
 let sameBlock: boolean = output === `a
@@ -590,7 +592,7 @@ export function info(msg: string) {
 // If/else — parens required around condition; bodies can be braced or a single statement
 if (count > 0) {
     $("echo", "pos").run()
-} else if (count == 0) {
+} else if (count === 0) {
     $("echo", "zero").run()
 } else {
     $("echo", "neg").run()
@@ -653,7 +655,7 @@ for (const f of files) {
 // Break and continue
 for (f in files) {
     if (Besht.strings.isEmpty(f)) { continue }
-    if (f == "stop") { break }
+    if (f === "stop") { break }
     $("echo", f).run()
 }
 
@@ -928,7 +930,7 @@ let mapped: string[] = files.map(f => f + ".bak")
 let chars: string[] = files.flatMap(f => f.split(""))
 let labeled: string[] = files.map((f, i) => i.toString() + ":" + f)
 let classified: string[] = files.map((f, i) => {
-    if (i == 0) return "first:" + f
+    if (i === 0) return "first:" + f
     return "next:" + f
 })
 files.forEach((f, i) => console.log(i.toString() + ":" + f))
@@ -936,7 +938,7 @@ let filtered: string[] = files.filter(f => f.endsWith(".txt"))
 let hasTxt: boolean = files.some((f, i) => f.endsWith(".txt") && i >= 0)
 let allNamed: boolean = files.every(f => f.length > 0)
 let firstTxt: string = files.find(f => f.endsWith(".txt")) ?? "missing"
-let foundIndex: number = files.findIndex(f => f == "b.txt")
+let foundIndex: number = files.findIndex(f => f === "b.txt")
 let lastTxt: string = files.findLast(f => f.endsWith(".txt")) ?? "missing"
 let lastTxtIndex: number = files.findLastIndex(f => f.endsWith(".txt"))
 let reduced: number = nums.reduce((acc, n) => acc + n, 0)
@@ -1039,7 +1041,7 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 
 **`genCmdChain()` is recursive.** It walks `.pipe().pipe().stdout()` chains by recursing on the receiver. The base case is `*ast.CmdExpr`. Terminal methods must handle any redirect string accumulated from inner calls.
 
-**`\$` in regular strings produces a literal dollar sign.** `"price \$5"` → `"price \$5"` in sh (POSIX: `\$` in double-quotes is literal). Do NOT rely on `$` alone being literal — use `\$` explicitly.
+**Literal `$` in regular strings must stay literal in shell.** Both `"price $5"` and `"price \$5"` are JavaScript string values containing `$`; the lexer decodes `\$` to `$`, and codegen must escape shell-active dollars whenever a regular string is emitted in double quotes.
 
 **Compile-time warning for `-`-prefixed string literals in `$()` args.** If a string literal starting with `-` containing special characters (`$`, `^`, `[`, `]`, etc.) is passed as a `$()` argument, the compiler warns and suggests adding `-e`/`--` before it. Suppressed when the preceding argument is `-e` or `--`.
 
@@ -1057,7 +1059,7 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 
 **Command literal words prefer natural bare output only when safe.** `genCmdArgs()` uses `cmdArgWordForExpr()` so ordinary string literals such as `"git"` and `"--short"` can emit as `git --short`, while globs, spaces, embedded quotes, variables, command substitutions, shell reserved command names, and command-position assignments remain quoted or protected. Do not route general string/assignment/array emission through this command-word path.
 
-**`escapeForDoubleQuote()` handles shell-active characters in string literals.** When emitting a double-quoted sh string, backtick `` ` `` and every literal dollar form must be escaped, including `$(`, `$WORD`, `$1`, `${text}`, `$*`, `$?`, and `$$`. Besht template interpolation is inserted separately from parsed `${expr}` nodes by `genTemplateLiteral()`/`strInner()`; do not treat literal template text as shell syntax. `\$` (already escaped by the lexer for literal dollars) must also be left as-is. Any new string emission path must call `escapeForDoubleQuote()` before wrapping in `"..."`.
+**`escapeForDoubleQuote()` handles shell-active characters in string literals.** When emitting a double-quoted sh string, backtick `` ` `` and every literal dollar form must be escaped, including `$(`, `$WORD`, `$1`, `${text}`, `$*`, `$?`, and `$$`. Besht template interpolation is inserted separately from parsed `${expr}` nodes by `genTemplateLiteral()`/`strInner()`; do not treat literal template text as shell syntax. Any new string emission path must call `escapeForDoubleQuote()` before wrapping in `"..."`.
 
 **`cmdArgQuote()` must not double-quote already-quoted values.** Plain string literals emit single-quoted strings from `genExprRHS` (e.g. `'s/foo/bar/'`). If `cmdArgQuote` then calls `shellQuote()` on that value again, it produces malformed shell like `'''s/foo/bar/'''`. The fix: `cmdArgQuote` short-circuits on values that already start and end with `'`. Values starting with `$` are passed raw as variable references. Complex expressions that happen to start with `$` skip quoting — be aware.
 
@@ -1117,7 +1119,9 @@ README.md contains the user-facing TypeScript/Besht divergence table. Keep it sy
 
 **Optional string search positions are normalized in awk.** `indexOf`/`includes`/`startsWith` position, `lastIndexOf` position, and `endsWith` length must use `awkArg()` plus awk-side `int()` truncation and clamping. Do not strip quotes into shell arithmetic for these arguments.
 
-**Escape sequences in double-quoted strings.** `\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `\uXXXX` are processed by the lexer into their actual characters. Single-quoted strings do NOT process escapes — they are always literal.
+**Escape sequences in regular strings match JavaScript for the supported slice.** Both single-quoted and double-quoted strings process `\b`, `\f`, `\n`, `\r`, `\t`, `\v`, `\\`, `\"`, `\'`, `\xHH`, and `\uXXXX`; unknown identity escapes such as `\q` drop the backslash. Use doubled backslashes when backslashes must remain literal.
+
+**`==` and `!=` are unsupported spellings.** The parser preserves `===`/`!==` and loose-looking `==`/`!=`; command analysis emits a warning for `==` and `!=`, and codegen treats them the same as `===` and `!==`. User-facing examples should use `===` and `!==`.
 
 **Postfix `++` and `--` are statement-only; prefix updates are expressions.** `count++` and `count--` compile to assignment statements. Prefix `++count` and `--count` are supported in expression position and return the updated numeric value. They must resolve through `paramMap` like other variable reads/writes.
 

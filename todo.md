@@ -114,6 +114,9 @@ Remaining future work:
 - Broader JS stdlib migration for APIs that map cleanly to POSIX sh without broad runtime metadata.
 - Expand object APIs only after preserving the current no-runtime-metadata boundary. The next near candidate is nested `Object.values()` / `Object.entries()` support, which requires a broader object/array representation design.
 - `JSON.parse()` and `JSON.stringify()` are implemented as opt-in jq-backed slices (`--opt-use-jq`). `JSON.parse()` returns compact `JSONValue` data with jq-backed path access and scalar extraction; `JSON.stringify()` handles `JSONValue`, strings, numbers, booleans, null/undefined, scalar arrays, and scalar-valued compiler-managed objects.
+- General callback values and closures remain future work. Current callback lowering is method-specific and compiler-known, including statement-position `forEach()`.
+- Implement JavaScript-compatible nested array `toString()` flattening. Scalar arrays already use `join(",")`; nested arrays such as `string[][]` and packed row arrays should eventually match JavaScript's recursive comma-flattening behavior instead of staying unsupported.
+
 Implementation notes:
 
 - Parser/semantics/codegen recognize `Besht.*`, `process.*`, `Array.*`, `Object.*`, `Boolean`, `Number`, `Math`, and other standard namespaces enough for the implemented slices. Future namespaces such as `JSON` must continue to be exempt from module qualification.

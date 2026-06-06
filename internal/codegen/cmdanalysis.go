@@ -292,6 +292,7 @@ func (ca *CmdAnalysis) phase1Expr(expr ast.Expression, scope *cmdScope, bindName
 			}
 		}
 	case *ast.BinaryExpr:
+		ca.warnIfLooseEquality(e)
 		ca.phase1Expr(e.Left, scope, "")
 		ca.phase1Expr(e.Right, scope, "")
 	case *ast.ArrowExpr:
@@ -342,6 +343,21 @@ func (ca *CmdAnalysis) phase1Expr(expr ast.Expression, scope *cmdScope, bindName
 	case *ast.IndexExpr:
 		ca.phase1Expr(e.Expr, scope, "")
 		ca.phase1Expr(e.Index, scope, "")
+	}
+}
+
+func (ca *CmdAnalysis) warnIfLooseEquality(e *ast.BinaryExpr) {
+	switch e.Op {
+	case "==":
+		ca.Warnings = append(ca.Warnings, CmdWarning{
+			Pos:     e.Pos,
+			Message: "operator == is not supported; it will be treated the same as ===. Use === instead.",
+		})
+	case "!=":
+		ca.Warnings = append(ca.Warnings, CmdWarning{
+			Pos:     e.Pos,
+			Message: "operator != is not supported; it will be treated the same as !==. Use !== instead.",
+		})
 	}
 }
 

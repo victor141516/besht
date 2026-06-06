@@ -3689,7 +3689,7 @@ func TestCodegen_ListIncludesInCondition(t *testing.T) {
 
 func TestCodegen_EscapedDollarInString(t *testing.T) {
 	out := compile(t, `let p: string = "total is \$42"`)
-	assertContains(t, out, `\$42`)
+	assertContains(t, out, `p='total is $42'`)
 }
 
 func TestCodegen_EscapedDollarNotTreatedAsVar(t *testing.T) {
