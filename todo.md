@@ -48,9 +48,10 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 - `node-eq/tests/imports/skill_module_idioms.*`: translating sourced shell helper files into `.bsh` modules with named/default exports for script-owned helpers and asserted `.sh` imports for preserved shell helpers.
 - `node-eq/tests/language/classes/skill_class_idioms.*`: translating stateful shell helper families over pipe-delimited records into classes with constructors, fields, methods, accessors, and static members when a reusable entity is the natural model.
 - `node-eq/tests/commands/skill_status_idioms.*`: translating literal `grep -q`/membership checks over static data into native arrays while preserving `.exitCode()` for real external command status.
+- `node-eq/tests/commands/skill_control_flow_status.*`: translating `case`, loops, `break`/`continue`, expected command failures, `$?` status checks, and final `exit` into Besht control flow, named command objects, `.exitCode()`, `status`, and `process.exit()`.
 - `internal/codegen/integration_test.go::TestIntegration_ImportedDeclarationDescribesExternalRuntimeFunction`: checking that imported `.d.bsh` declarations describe external runtime functions without emitting wrappers or sourcing implementations.
 
-Suggested next slice after the declaration/status/class guardrails: fetch and HTTP-facing scripts, especially the current synchronous text-only `fetch(url).text()` surface and avoiding unsupported promise/response APIs until they are designed.
+Suggested next slice after the declaration/status/class/control-flow-status guardrails: fetch and HTTP-facing scripts, especially the current synchronous text-only `fetch(url).text()` surface and avoiding unsupported promise/response APIs until they are designed.
 
 ### Feature families to keep probing
 
@@ -67,6 +68,8 @@ Suggested next slice after the declaration/status/class guardrails: fetch and HT
 Good generated Besht should compile, match the source script behavior, and look like natural Besht rather than transliterated shell. It should prefer compiler-supported language constructs over shell-shaped workarounds, but it should still use external commands when the task genuinely depends on external tools or external data.
 
 This process intentionally has no final checkbox. The practical stopping point for a work session is a documented, tested, committed improvement plus a note about what feature family should be probed next.
+
+Suggested next validation slice after the control-flow/status pass: modules and declarations, especially imports, `.d.bsh` declarations, exported values, default exports, split output, shell imports with assertions, and TypeScript import fallback flags.
 
 ---
 

@@ -826,6 +826,21 @@ try {
 }
 ```
 
+Use `.exitCode()` instead of `try/catch` when a non-zero command status is expected data for a branch, retry, skip, or report. Name the command object, run it once, then inspect the captured status. Convert status values with `.toString()` when printing or interpolating them.
+
+```ts
+let probe = $("grep", "-qx", mode, file).stdout("null").stderr("null")
+probe.run()
+let code: status = probe.exitCode()
+if (code == 0) {
+  console.log("match")
+} else {
+  console.log(`miss:${code.toString()}`)
+}
+```
+
+Use `try/catch` when a command failure should abort the rest of a block and enter recovery code.
+
 **`?` propagation** — fail fast inside a function:
 
 ```ts
