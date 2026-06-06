@@ -44,6 +44,7 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 - `node-eq/tests/language/callbacks/skill_native_data_idioms.*`: translating static text/number pipelines into native arrays, callbacks, string transforms, joins, reductions, and indexed `forEach`.
 - `node-eq/tests/commands/skill_args_env_predicates.*`: translating shell argument parsers, environment defaults, file predicates, and string predicates into `Besht.args`, `process.env`, `Besht.fs`, and `Besht.strings`.
 - `node-eq/tests/language/objects/skill_object_data_idioms.*`: translating static delimiter-separated records into objects, callbacks, dynamic object property reads, `Object.hasOwn()`, and `JSON.stringify()`.
+- `node-eq/tests/commands/skill_control_flow_status.*`: translating `case`, loops, `break`/`continue`, expected command failures, `$?` status checks, and final `exit` into Besht control flow, named command objects, `.exitCode()`, `status`, and `process.exit()`.
 
 ### Feature families to keep probing
 
@@ -60,6 +61,8 @@ Do not add hints like "use `$()`", "use `.pipe()`", "use `.workdir()`", "use `Be
 Good generated Besht should compile, match the source script behavior, and look like natural Besht rather than transliterated shell. It should prefer compiler-supported language constructs over shell-shaped workarounds, but it should still use external commands when the task genuinely depends on external tools or external data.
 
 This process intentionally has no final checkbox. The practical stopping point for a work session is a documented, tested, committed improvement plus a note about what feature family should be probed next.
+
+Suggested next validation slice after the control-flow/status pass: modules and declarations, especially imports, `.d.bsh` declarations, exported values, default exports, split output, shell imports with assertions, and TypeScript import fallback flags.
 
 ---
 

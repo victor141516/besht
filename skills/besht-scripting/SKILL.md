@@ -766,12 +766,13 @@ for (line in $("find", "/var/log", "-name", "*.log").run().readStdoutLines()) {
 
 **Break and continue:**
 
-````ts
+```ts
 for (f in files) {
     if (Besht.strings.isEmpty(f)) { continue }
     if (f == "STOP") { break }
     $("echo", f).run()
 }
+```
 
 ## Array Indexing
 
@@ -785,7 +786,7 @@ args[1] = "BETA"              // index assignment
 let empty: string[] = []      // empty array
 let cell: string = matrix[row][col]
 let width: number = matrix[0].length
-````
+```
 
 Static scalar array indexes with known in-range integer indexes and static nested-array indexes with known row/column indexes compile to constants. Dynamic, unknown, and out-of-range indexes keep the POSIX `sed`/packed-row extraction path.
 
@@ -804,6 +805,21 @@ try {
   process.exit(1);
 }
 ```
+
+Use `.exitCode()` instead of `try/catch` when a non-zero command status is expected data for a branch, retry, skip, or report. Name the command object, run it once, then inspect the captured status. Convert status values with `.toString()` when printing or interpolating them.
+
+```ts
+let probe = $("grep", "-qx", mode, file).stdout("null").stderr("null")
+probe.run()
+let code: status = probe.exitCode()
+if (code == 0) {
+  console.log("match")
+} else {
+  console.log(`miss:${code.toString()}`)
+}
+```
+
+Use `try/catch` when a command failure should abort the rest of a block and enter recovery code.
 
 **`?` propagation** — fail fast inside a function:
 

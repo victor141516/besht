@@ -1,0 +1,65 @@
+let mode: string = Besht.args.positional(1) ?? "scan"
+if (Besht.strings.isEmpty(mode)) mode = "scan"
+
+let limitText: string = Besht.args.positional(2) ?? "4"
+if (Besht.strings.isEmpty(limitText)) limitText = "4"
+let limit: number = Number.parseInt(limitText, 10)
+
+switch (mode) {
+  case "scan":
+    console.log(`mode:${mode}`)
+    break
+  case "dry-run":
+    console.log(`mode:${mode}`)
+    break
+  default:
+    console.log(`unknown mode:${mode}`)
+    process.exit(2)
+}
+
+let count: number = 0
+let tasks: string[] = ["alpha", "", "skip", "fail", "omega", "extra"]
+
+for (let task of tasks) {
+  if (Besht.strings.isEmpty(task)) {
+    console.log("skip:empty")
+    continue
+  }
+
+  switch (task) {
+    case "skip":
+      console.log(`skip:${task}`)
+      continue
+    case "fail":
+      let fail = $("false")
+      fail.run()
+      let failCode: status = fail.exitCode()
+      if (failCode != 0) {
+        console.log(`failed:${failCode.toString()}`)
+        continue
+      }
+      break
+  }
+
+  console.log(`task:${task}`)
+  count = count + 1
+  if (count >= limit) {
+    console.log("limit reached")
+    break
+  }
+}
+
+let probeInput: string = process.env.PROBE_INPUT ?? "scan"
+let probe = $("printf", "%s\n", probeInput)
+  .pipe($("grep", "-qx", mode))
+  .stdout("null")
+  .stderr("null")
+probe.run()
+let probeCode: status = probe.exitCode()
+if (probeCode == 0) {
+  console.log("probe:match")
+} else {
+  console.log(`probe:miss:${probeCode.toString()}`)
+}
+
+process.exit(0)
